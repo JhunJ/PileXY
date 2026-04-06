@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+.pytest_cache/
+
+# VS Code
+.vscode/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+*.lnk
+
+# Cursor (로컬)
+.cursor/
+
+# 로컬 테스트 자격 증명 샘플
+tools/meissa-login-test.json
+
+# 중앙 저장 데이터 (선택적: 저장소에 포함하려면 이 줄 제거)
+/data/

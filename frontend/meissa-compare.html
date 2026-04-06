@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>드론(3D) · PDAM 비교</title>
+    <link rel="stylesheet" href="/frontend/styles.css?v=202603698" />
+  </head>
+  <body class="meissa-page">
+    <header class="meissa-page-header">
+      <div>
+        <h1>Meissa 3D · PDAM 비교</h1>
+        <p>
+          스냅샷을 고르면 Meissa 공식 3D가 아래에 뜨고, 비교는 도면 원 좌표로 합니다. PDAM 기준일은 촬영일과 연동됩니다.
+          근사합니다(DSM 없을 때 한계).
+        </p>
+      </div>
+    </header>
+    <main class="meissa-page-main">
+      <section class="meissa-card">
+        <h2>Meissa 로그인 · 프로젝트</h2>
+        <p class="meissa-note">
+          이메일·비밀번호는 이 PC의 백엔드로만 전달되어 Meissa API에 로그인할 때 사용되며, 서버에 저장되지 않습니다. cloud.meissa.ai 와 동일한 계정이어야 하며, 2단계 인증이 켜져 있으면 인증코드 입력 후 같은 버튼을 다시 누르세요.
+        </p>
+        <div class="meissa-grid">
+          <label>
+            Meissa 이메일
+            <input type="email" id="meissa-email" class="meissa-input" autocomplete="username" placeholder="user@company.com" />
+          </label>
+          <label>
+            Meissa 비밀번호
+            <input type="password" id="meissa-password" class="meissa-input" autocomplete="current-password" placeholder="비밀번호" />
+          </label>
+        </div>
+        <div id="meissa-otp-row" class="meissa-grid" style="display: none">
+          <label>
+            인증코드 (2단계)
+            <input type="text" id="meissa-otp" class="meissa-input" inputmode="numeric" autocomplete="one-time-code" placeholder="이메일로 받은 코드" />
+          </label>
+        </div>
+        <div class="meissa-actions">
+          <button type="button" id="meissa-login-btn" class="meissa-btn">Meissa 로그인 · 목록·3D 한 번에</button>
+        </div>
+        <iframe
+          id="meissa-cloud-session-prime"
+          class="meissa-cloud-session-prime"
+          title="Meissa 클라우드 세션(숨김)"
+          aria-hidden="true"
+          tabindex="-1"
+          src="about:blank"
+        ></iframe>
+        <p id="meissa-api-status" class="meissa-status" aria-live="polite"></p>
+        <div class="meissa-grid meissa-grid--tight-top">
+          <label>
+            프로젝트
+            <select id="meissa-project-select" class="meissa-select">
+              <option value="">로그인 후 선택</option>
+            </select>
+          </label>
+          <label>
+            존(Zone)
+            <select id="meissa-zone-select" class="meissa-select">
+              <option value="">프로젝트 선택</option>
+            </select>
+          </label>
+          <div class="meissa-snapshot-cascade">
+            <div class="meissa-grid meissa-grid--snapshot-ymd">
+              <label>
+                년도
+                <select id="meissa-snapshot-year" class="meissa-select" disabled>
+                  <option value="">존 선택</option>
+                </select>
+              </label>
+              <label>
+                월
+                <select id="meissa-snapshot-month" class="meissa-select" disabled>
+                  <option value="">—</option>
+                </select>
+              </label>
+              <label>
+                일
+                <select id="meissa-snapshot-select" class="meissa-select" disabled>
+                  <option value="">년·월 선택</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div id="meissa-snapshot-preview" class="meissa-snapshot-preview" hidden>
+          <p id="meissa-snapshot-preview-date" class="meissa-snapshot-preview__date"></p>
+          <p id="meissa-snapshot-preview-title" class="meissa-snapshot-preview__title"></p>
+          <p id="meissa-snapshot-preview-sub" class="meissa-snapshot-preview__sub"></p>
+        </div>
+      </section>
+
+      <section class="meissa-card">
+        <h2>PDAM 데이터셋 · 기준일</h2>
+        <div class="meissa-grid">
+          <label>
+            시공 데이터셋
+            <select id="meissa-dataset" class="meissa-select"></select>
+          </label>
+          <label>
+            스냅샷 기준일 (PDAM dateTo)
+            <select id="meissa-date-preset" class="meissa-select">
+              <option value="">날짜 목록 먼저 불러오기</option>
+            </select>
+          </label>
+          <label>
+            또는 날짜 직접 입력
+            <input type="date" id="meissa-date-input" class="meissa-input" />
+          </label>
+        </div>
+        <div class="meissa-actions">
+          <button type="button" id="meissa-load-options" class="meissa-btn meissa-btn--secondary">PDAM 날짜 목록 불러오기</button>
+          <button type="button" id="meissa-load-pdam" class="meissa-btn">기준일 PDAM 스냅샷 로드</button>
+        </div>
+        <p id="meissa-pdam-status" class="meissa-status" aria-live="polite"></p>
+      </section>
+
+      <input type="hidden" id="meissa-work-id" value="" />
+      <input type="hidden" id="meissa-project-id" value="" />
+      <input type="hidden" id="meissa-zone-id" value="" />
+      <input type="hidden" id="meissa-snapshot-id" value="" />
+
+      <section class="meissa-card" id="meissa-3d-section" aria-label="Meissa 3D 및 비교 점">
+        <h2>Meissa 드론 3D · 비교 점</h2>
+        <p class="meissa-note">
+          아래는 Meissa 웹 로그인 화면입니다. 위 「로그인·목록·3D 한 번에」를 누르면 자동 전환(매크로 시도 + 토큰 로그인)되며, 프로젝트·존·촬영일을 고르면 3D로 바뀝니다. URL에 토큰이 붙으니 공유하지 마세요.
+        </p>
+        <div class="meissa-cloud-3d-wrap">
+          <div id="meissa-cloud-3d-placeholder" class="meissa-cloud-3d-placeholder">
+            임베드가 막힌 경우에만 표시됩니다.
+          </div>
+          <iframe
+            id="meissa-cloud-3d-frame"
+            class="meissa-cloud-3d-frame"
+            title="Meissa 클라우드"
+            src="https://cloud.meissa.ai/login"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allow="fullscreen; xr-spatial-tracking"
+          ></iframe>
+        </div>
+        <p class="meissa-link-row" style="margin-top: 0.5rem">
+          <a id="meissa-open-3d-tab" href="https://cloud.meissa.ai/login" target="_blank" rel="noopener noreferrer">새 탭에서 로그인 열기</a>
+        </p>
+
+        <h3 class="meissa-3d-subhead">2D 정사 · 도면 원 (비교 색상)</h3>
+        <div
+          id="meissa-zone-z-summary"
+          class="meissa-note meissa-zone-z-summary"
+          hidden
+          role="status"
+          aria-live="polite"
+        ></div>
+        <div class="meissa-3d-toolbar">
+          <label>
+            점 색 기준
+            <select id="meissa-3d-color-mode" class="meissa-select">
+              <option value="remaining" selected>PDAM 잔량</option>
+              <option value="mz_zone">Meissa Z vs 구역 기준</option>
+              <option value="ortho_pdam">정사·시공 적합도(평면·RGB·형태)</option>
+            </select>
+          </label>
+          <label id="meissa-remaining-filter-label" class="meissa-3d-filter-label">
+            잔량 ≥
+            <select id="meissa-remaining-min-filter" class="meissa-select meissa-select--narrow" title="PDAM 잔량이 기준 이상인 좌표만 표시">
+              <option value="" selected>전체</option>
+              <option value="0.5">0.5 m</option>
+              <option value="1">1 m</option>
+              <option value="1.5">1.5 m</option>
+              <option value="2">2 m</option>
+            </select>
+          </label>
+          <div id="meissa-3d-legend-text" class="meissa-note meissa-3d-legend-inline"></div>
+          <button type="button" id="meissa-3d-debug-btn" class="meissa-btn meissa-btn--secondary">Meissa 점군 디버그</button>
+        </div>
+        <div id="meissa-3d-legend-row-gradient" class="meissa-3d-legend-row" aria-hidden="true">
+          <span class="meissa-note">낮음</span>
+          <div class="meissa-3d-legend-bar"></div>
+          <span class="meissa-note">높음</span>
+        </div>
+        <div id="meissa-3d-legend-row-bands" class="meissa-3d-legend-row meissa-3d-legend-bands" aria-hidden="true">
+          <span class="meissa-note meissa-3d-legend-bands-title">잔량(m)</span>
+          <div class="meissa-3d-legend-band-list">
+            <span class="meissa-3d-legend-band" title="0 ~ 0.5 미만"><i style="background:#2e7d4a"></i>&lt;0.5</span>
+            <span class="meissa-3d-legend-band" title="0.5 이상 1 미만"><i style="background:#6b8e23"></i>0.5~1</span>
+            <span class="meissa-3d-legend-band" title="1 이상 2 미만"><i style="background:#d97706"></i>1~2</span>
+            <span class="meissa-3d-legend-band" title="2 이상"><i style="background:#dc2626"></i>≥2</span>
+          </div>
+        </div>
+        <div class="meissa-2d-overlay-wrap">
+          <img id="meissa-cloud-2d-image-local" class="meissa-cloud-2d-image-local" alt="Meissa 2D 배경" />
+        </div>
+        <details id="meissa-3d-debug-panel" class="meissa-debug-details">
+          <summary>점군 디버그 로그</summary>
+          <pre id="meissa-3d-debug-text" class="meissa-debug-pre">아직 디버그 실행 전입니다.</pre>
+          <details class="meissa-debug-details meissa-ortho-analyze-debug-wrap">
+            <summary>정사 말뚝 이미지 분석 로그 (도면 원 vs RGB·원형)</summary>
+            <pre
+              id="meissa-ortho-analyze-debug-text"
+              class="meissa-debug-pre meissa-ortho-analyze-debug-pre"
+            ></pre>
+          </details>
+        </details>
+        <p
+          id="meissa-2d-load-status"
+          class="meissa-note meissa-2d-load-status"
+          aria-live="polite"
+        ></p>
+        <details id="meissa-dataset-details" class="meissa-dataset-details meissa-note">
+          <summary class="meissa-dataset-details-summary">말뚝 데이터셋 (펼치기 · 비밀번호)</summary>
+          <div id="meissa-dataset-toolbar" class="meissa-dataset-toolbar" style="margin-top: 0.4rem">
+          <span class="meissa-dataset-toolbar-hint">Ctrl+클릭 다중 선택 · 크롭은 도면 말뚝 반경(px환산)+여유% · 캡 잘됨/중간/못함은 덮개 말뚝 전용 라벨</span>
+          <label style="margin-left: 0.5rem"
+            >도면원 여유(%)
+            <input type="number" id="meissa-dataset-crop-margin-pct" class="meissa-input meissa-input--narrow" value="22" min="0" max="120" step="2" title="도면 반경(정사 px) 바깥으로 몇 % 더 잘라낼지"
+          /></label>
+          <button type="button" id="meissa-dataset-clear" class="meissa-btn meissa-btn--secondary" style="margin-left: 0.35rem">선택 해제</button>
+          <button type="button" id="meissa-dataset-save-ok" class="meissa-btn" style="margin-left: 0.25rem; background: #15803d; color: #fff">잘됨</button>
+          <button type="button" id="meissa-dataset-save-mid" class="meissa-btn" style="margin-left: 0.2rem; background: #a16207; color: #fff">중간</button>
+          <button type="button" id="meissa-dataset-save-bad" class="meissa-btn" style="margin-left: 0.2rem; background: #b91c1c; color: #fff">못함</button>
+          <span class="meissa-dataset-cap-label" style="margin-left: 0.45rem; opacity: 0.92">캡</span>
+          <button type="button" id="meissa-dataset-save-cap-ok" class="meissa-btn" style="margin-left: 0.15rem; background: #6d28d9; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.65)" title="덮개(캡) 말뚝 — 품질 잘됨">잘됨</button>
+          <button type="button" id="meissa-dataset-save-cap-mid" class="meissa-btn" style="margin-left: 0.15rem; background: #5b21b6; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.5)" title="덮개(캡) 말뚝 — 품질 중간">중간</button>
+          <button type="button" id="meissa-dataset-save-cap-bad" class="meissa-btn" style="margin-left: 0.15rem; background: #4c1d95; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.4)" title="덮개(캡) 말뚝 — 품질 못함">못함</button>
+          <button type="button" id="meissa-dataset-reset-server" class="meissa-btn meissa-btn--secondary" style="margin-left: 0.45rem" title="서버 data/pile_dataset 크롭·목록 전부 삭제">
+            서버 데이터셋 초기화
+          </button>
+          <span id="meissa-dataset-status" class="meissa-note" style="margin-left: 0.5rem; display: inline-block; max-width: 36rem; vertical-align: top" aria-live="polite"></span>
+          </div>
+        </details>
+        <p class="meissa-note">
+          2D 정사: 드래그로 이동 · 휠로 확대 · 번호는 전부 표시되며, 줌에 맞춰 화면에서 글자 크기가 비슷하게 보이도록(캐드 주석 느낌) 맞춥니다.
+        </p>
+      </section>
+
+      <section class="meissa-card">
+        <h2>비교 결과</h2>
+        <div
+          id="meissa-compare-tier-summary"
+          class="meissa-note meissa-tier-summary"
+          hidden
+          role="status"
+          aria-live="polite"
+        ></div>
+        <div id="meissa-tier-filters" class="meissa-tier-filters" hidden aria-label="비교 표 심각도 필터">
+          <span class="meissa-tier-filters-label">표에 표시</span>
+          <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-tier-filter-severe" data-meissa-tier="severe" checked /> 심각</label>
+          <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-tier-filter-medium" data-meissa-tier="medium" checked /> 중간</label>
+          <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-tier-filter-similar" data-meissa-tier="similar" checked /> 유사</label>
+          <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-tier-filter-other" data-meissa-tier="other" checked /> 그 외</label>
+        </div>
+        <div class="meissa-table-wrap">
+          <table class="meissa-table" id="meissa-result-table">
+            <thead>
+              <tr>
+                <th>동·구역</th>
+                <th>파일번호</th>
+                <th>점 X</th>
+                <th>점 Y</th>
+                <th>점 Z</th>
+                <th>도면 X</th>
+                <th>도면 Y</th>
+                <th>평면 편차(m)</th>
+                <th>Meissa Z<br /><span class="meissa-th-sub">점군·DSM 근사</span></th>
+                <th>Meissa 평면거리(m)<br /><span class="meissa-th-sub">XY→샘플 수평</span></th>
+                <th>구역 기준 Z(m)<br /><span class="meissa-th-sub">잔량0 중앙값 등</span></th>
+                <th>|ΔZ|(m)<br /><span class="meissa-th-sub">구역 대비</span></th>
+                <th>PDAM 잔량</th>
+                <th>검토</th>
+                <th>PDAM 시공일</th>
+                <th>circle id</th>
+              </tr>
+            </thead>
+            <tbody id="meissa-result-body">
+              <tr>
+                <td colspan="16" class="meissa-note">PDAM 스냅샷을 로드하면 비교 결과가 여기에 채워집니다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="meissa-plan-compare-panel" class="meissa-plan-compare-panel">
+          <h3 class="meissa-plan-compare-heading">평면비교 (정사·도면)</h3>
+          <p class="meissa-note" style="margin-top: 0.35rem; margin-bottom: 0.55rem">
+            표의 「평면 편차(m)」는 정사에서 본 말뚝 위치와 도면 원 중심의 수평 거리입니다. 점 색 기준에서 「정사·시공 적합도(평면·RGB·형태)」를 고르면,
+            PDAM 시공 말뚝에 대해 정사 패치(RGB·형태)로 중심을 추정해 도면과의 거리로 색을 나누고, 추정이 어려운 경우에는 아래 OK/큰 이탈 임계값으로 평면 편차만 색을 나눕니다.
+            신뢰도 부족·미시공 등은 회색(미판정)입니다. 아래 표는 심각 순·행 클릭 시 확대입니다.
+          </p>
+          <div class="meissa-grid meissa-grid--tight-top">
+            <label>
+              OK 이하 (m, 녹)
+              <input type="number" id="meissa-plan-dev-ok-m" class="meissa-input" value="0.15" min="0" step="0.01" />
+            </label>
+            <label>
+              큰 이탈 (m 이상 적)
+              <input type="number" id="meissa-plan-dev-bad-m" class="meissa-input" value="0.35" min="0" step="0.01" />
+            </label>
+            <label>
+              정사 코어·링 최소 명암차 (0~255)
+              <input type="number" id="meissa-ortho-delta-min" class="meissa-input" value="22" min="0" max="90" step="1" />
+            </label>
+            <label>
+              정사 오프셋 ≤ 녹 (m)
+              <input type="number" id="meissa-ortho-off-green-m" class="meissa-input" value="0.07" min="0" step="0.01" />
+            </label>
+            <label>
+              정사 오프셋 ≤ 노 (m)
+              <input type="number" id="meissa-ortho-off-yellow-m" class="meissa-input" value="0.15" min="0" step="0.01" />
+            </label>
+            <label>
+              정사 오프셋 ≤ 주황 (m)
+              <input type="number" id="meissa-ortho-off-orange-m" class="meissa-input" value="0.3" min="0" step="0.01" />
+            </label>
+          </div>
+          <p class="meissa-note" style="margin: 0.4rem 0 0.2rem">
+            <label style="display: inline-flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; max-width: 42rem">
+              <input type="checkbox" id="meissa-ortho-fast-mode" checked style="margin-top: 0.2rem" />
+              <span>정사 말뚝 분석 «빠르게»: 패치·조닝 격자를 줄여 속도를 올립니다. 말뚝이 매우 많을 때 권장(정밀도는 다소 낮아질 수 있음).</span>
+            </label>
+          </p>
+          <p class="meissa-note" style="margin: 0.25rem 0 0.2rem">
+            <label style="display: inline-flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; max-width: 42rem">
+              <input type="checkbox" id="meissa-ortho-pdam-debug-line" style="margin-top: 0.2rem" />
+              <span>디버그: <strong>도면 중심</strong>(원·중앙 표식)과 <strong>정사 RGB 추정 중심</strong>을 보라색 점선으로 잇고, 추정 중심 끝에 청록 점을 표시합니다. 정사+georef 매핑이 켜진 뷰에서만 보입니다.</span>
+            </label>
+          </p>
+          <div id="meissa-ortho-offset-wrap" class="meissa-ortho-offset-wrap" hidden>
+            <h4 class="meissa-ortho-offset-subhead">정사·도면 오프셋 (원 내 RGB·형태 판단, 심각~양호)</h4>
+            <p
+              id="meissa-ortho-offset-mapmode-hint"
+              class="meissa-note meissa-ortho-offset-mapmode-hint"
+              hidden
+              style="margin: 0 0 0.5rem; font-size: 0.78rem; line-height: 1.45; padding: 0.45rem 0.55rem; background: #fef9c3; border-radius: 6px; color: #713f12"
+            >
+              <strong>맵 점 색</strong>은 지금 다른 기준(예: 잔량·구역)일 수 있습니다. 위 「점 색 기준」에서
+              <strong>정사·시공 적합도(평면·RGB·형태)</strong>를 고르면 맵 점과 아래 표 행 색이 같아집니다.
+            </p>
+            <div
+              class="meissa-ortho-tier-legend meissa-3d-legend-row meissa-3d-legend-bands"
+              aria-label="정사·시공 점·표 행 색 범례"
+            >
+              <span class="meissa-note meissa-3d-legend-bands-title">점·표 행 색</span>
+              <div class="meissa-3d-legend-band-list">
+                <span class="meissa-3d-legend-band" title="오프셋 임계 이내"
+                  ><i style="background: rgba(45, 170, 108, 0.9)"></i>양호</span
+                >
+                <span class="meissa-3d-legend-band" title="노랑 임계"
+                  ><i style="background: rgba(202, 138, 4, 0.95)"></i>주의</span
+                >
+                <span class="meissa-3d-legend-band" title="주황 임계"
+                  ><i style="background: rgba(234, 88, 12, 0.95)"></i>경고</span
+                >
+                <span class="meissa-3d-legend-band" title="임계 초과"
+                  ><i style="background: rgba(220, 38, 38, 0.95)"></i>심각</span
+                >
+                <span class="meissa-3d-legend-band" title="캡·저대비 말뚝"
+                  ><i style="background: rgba(167, 139, 250, 0.95)"></i>캡/덮개</span
+                >
+                <span class="meissa-3d-legend-band" title="정사 RGB 분석 대기"
+                  ><i style="background: rgba(148, 186, 222, 0.95)"></i>분석 대기</span
+                >
+                <span class="meissa-3d-legend-band" title="표 등급 미판정"
+                  ><i style="background: rgba(148, 163, 184, 0.95)"></i>미판정</span
+                >
+              </div>
+            </div>
+            <p class="meissa-note" style="margin: 0 0 0.4rem; font-size: 0.76rem; line-height: 1.45">
+              맵 점: 정사 RGB로 등급이 나오면 위 색이 우선입니다. RGB가 미판정이면 비교 표의 평면 편차와 OK/큰 이탈(m)로 점만 색을 잡습니다(행은 미판정으로 남을 수 있음).
+            </p>
+            <div class="meissa-ortho-offset-filters" aria-label="등급 필터">
+              <span class="meissa-tier-filters-label">표시</span>
+              <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-ortho-filter-red" checked /> 심각</label>
+              <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-ortho-filter-orange" checked /> 경고</label>
+              <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-ortho-filter-yellow" checked /> 주의</label>
+              <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-ortho-filter-ok" checked /> 양호</label>
+              <label class="meissa-tier-filter-item"><input type="checkbox" id="meissa-ortho-filter-na" checked /> 미판정</label>
+            </div>
+            <div class="meissa-table-wrap meissa-table-wrap--scroll">
+              <table class="meissa-table meissa-table--compact" id="meissa-ortho-offset-table">
+                <thead>
+                  <tr>
+                    <th>등급</th>
+                    <th>파일번호</th>
+                    <th>정사·도면 오프셋(m)</th>
+                    <th>표 평면편차(m)</th>
+                    <th>비고</th>
+                  </tr>
+                </thead>
+                <tbody id="meissa-ortho-offset-body"></tbody>
+              </table>
+            </div>
+            <p class="meissa-note" style="margin-top: 0.4rem; font-size: 0.78rem">행 클릭: 2D 정사 확대 · 점 호버 시 오프셋(m)</p>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+    <script src="/frontend/meissa-compare.js?v=202603698" defer></script>
+  </body>
+</html>
