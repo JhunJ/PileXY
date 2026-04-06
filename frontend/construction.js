@@ -317,6 +317,45 @@
   const numberFormatter = typeof formatNumber === "function" ? formatNumber : (value) => (value === null || value === undefined || Number.isNaN(Number(value)) ? "-" : Number(value).toFixed(3).replace(/\.?0+$/, ""));
   const errorMessage = (error) => (typeof parseErrorMessage === "function" ? parseErrorMessage(error) : (error instanceof Error ? error.message : String(error || "알 수 없는 오류")));
 
+  function detailPartToMessage(part) {
+    if (part == null) return "";
+    if (typeof part === "string") return part.trim();
+    if (typeof part === "number" || typeof part === "boolean") return String(part);
+    if (Array.isArray(part)) {
+      const lines = part.map((item) => detailPartToMessage(item)).filter(Boolean);
+      return lines.join("; ");
+    }
+    if (typeof part === "object") {
+      const preferred = [part.msg, part.message, part.detail, part.error, part.reason];
+      for (const candidate of preferred) {
+        const text = detailPartToMessage(candidate);
+        if (text) return text;
+      }
+      try {
+        const json = JSON.stringify(part);
+        return json && json !== "{}" ? json : "";
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(part);
+  }
+
+  function detailToMessage(detail, fallback) {
+    const msg = detailPartToMessage(detail);
+    return msg || fallback;
+  }
+
+  async function parseResponsePayload(response) {
+    const raw = await response.text().catch(() => "");
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return { detail: raw };
+    }
+  }
+
   const constructionDrawerTitle = q("#construction-drawer-title");
   const constructionDrawerSubtitle = q(".construction-drawer-subtitle");
   const constructionDrawerClose = q("#construction-drawer-close");
@@ -4256,8 +4295,8 @@ function inferOpenRectangleVertices(vertices) {
   async function refreshDatasets(preferredId) {
     const pc = encodeURIComponent(getConstructionProjectContext());
     const response = await fetch(`${API_BASE_URL}/api/construction/datasets?project_context=${pc}`);
-    if (!response.ok) throw new Error(await response.text() || "시공 데이터셋 목록을 불러오지 못했습니다.");
-    const payload = await response.json();
+    const payload = await parseResponsePayload(response);
+    if (!response.ok) throw new Error(detailToMessage(payload?.detail ?? payload, "시공 데이터셋 목록을 불러오지 못했습니다."));
     constructionState.datasets = Array.isArray(payload) ? payload : [];
     constructionDatasetSelect.innerHTML = "";
     const placeholder = document.createElement("option");
@@ -4296,8 +4335,8 @@ function inferOpenRectangleVertices(vertices) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.detail || "시공 대시보드를 불러오지 못했습니다.");
+    const data = await parseResponsePayload(response);
+    if (!response.ok) throw new Error(detailToMessage(data?.detail ?? data, "시공 대시보드를 불러오지 못했습니다."));
     renderDashboard(data);
     setSyncStatus("시공 데이터가 갱신되었습니다.");
   }
@@ -4320,8 +4359,8 @@ function inferOpenRectangleVertices(vertices) {
       const response = await fetch(`${API_BASE_URL}/api/construction/datasets/${encodeURIComponent(datasetId)}`, {
         method: "DELETE",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || "시공 데이터셋 삭제에 실패했습니다.");
+      const data = await parseResponsePayload(response);
+      if (!response.ok) throw new Error(detailToMessage(data?.detail ?? data, "시공 데이터셋 삭제에 실패했습니다."));
 
       const nextDataset = constructionState.datasets.find((item) => item.id !== datasetId);
       constructionState.activeDatasetId = nextDataset?.id || "";
@@ -4368,8 +4407,8 @@ function inferOpenRectangleVertices(vertices) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || "PDAM 동기화에 실패했습니다.");
+      const data = await parseResponsePayload(response);
+      if (!response.ok) throw new Error(detailToMessage(data?.detail ?? data, "PDAM 동기화에 실패했습니다."));
       await refreshDatasets(data?.dataset?.id);
       if (data?.dataset?.id) constructionDatasetSelect.value = data.dataset.id;
       await refreshDashboard();
@@ -4389,8 +4428,8 @@ function inferOpenRectangleVertices(vertices) {
     setSyncStatus("엑셀 업로드와 시공기록 추출을 진행하는 중입니다.");
     try {
       const response = await fetch(`${API_BASE_URL}/api/construction/import-workbook`, { method: "POST", body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || "시공 엑셀 업로드에 실패했습니다.");
+      const data = await parseResponsePayload(response);
+      if (!response.ok) throw new Error(detailToMessage(data?.detail ?? data, "시공 엑셀 업로드에 실패했습니다."));
       await refreshDatasets(data?.dataset?.id);
       if (data?.dataset?.id) constructionDatasetSelect.value = data.dataset.id;
       await refreshDashboard();
