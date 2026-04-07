@@ -1387,6 +1387,34 @@ let pinchStartScale = 1;
 let pinchWorldAnchor = null;
 const VIEW_SCALE_MIN = 0.1;
 const VIEW_SCALE_MAX = 500;
+
+/** 휠 deltaY를 픽셀 단위로 근사(deltaMode 보정). CAD 뷰어류와 비슷한 커서 기준 줌에 사용. */
+function wheelDeltaYPixels(event, referenceHeightPx) {
+  let dy = Number(event.deltaY) || 0;
+  if (event.deltaMode === 1) dy *= 16;
+  else if (event.deltaMode === 2) dy *= Math.max(320, referenceHeightPx || 400);
+  return dy;
+}
+
+/** Y축 반전 월드(도면) 좌표계: 포인터 아래 월드점을 고정한 채 scale만 변경 */
+function zoomViewAtCanvasPoint(viewRef, width, height, canvasX, canvasY, nextScale, scaleMin, scaleMax) {
+  const lo = scaleMin ?? VIEW_SCALE_MIN;
+  const hi = scaleMax ?? VIEW_SCALE_MAX;
+  const clamped = Math.max(lo, Math.min(hi, nextScale));
+  if (Math.abs(clamped - viewRef.scale) < 1e-12) return;
+  const worldBefore = {
+    x: (canvasX - width / 2) / viewRef.scale + viewRef.offsetX,
+    y: (height / 2 - canvasY) / viewRef.scale + viewRef.offsetY,
+  };
+  viewRef.scale = clamped;
+  const worldAfter = {
+    x: (canvasX - width / 2) / viewRef.scale + viewRef.offsetX,
+    y: (height / 2 - canvasY) / viewRef.scale + viewRef.offsetY,
+  };
+  viewRef.offsetX += worldBefore.x - worldAfter.x;
+  viewRef.offsetY += worldBefore.y - worldAfter.y;
+}
+
 let hoveredCircleId = null;
 let tooltipMouseClientX = 0;
 let tooltipMouseClientY = 0;
@@ -2285,12 +2313,9 @@ async function handleUpload(event) {
     setTimeout(() => setPhase("idle"), 600);
     state.lastUploadedFileName = file ? file.name : "";
     if (state.circles?.length > 0) {
-      const exported = await triggerDownload("xlsx");
-      if (exported) {
-        setUploadStatus("처리 완료. 좌표·매칭·중복이 반영된 XLSX가 저장되었습니다.");
-      }
+      setUploadStatus("처리 완료. CSV/XLSX 다운로드 버튼을 눌러 저장할 수 있습니다.");
     } else {
-      setUploadStatus("DXF 처리 완료. 현재 필터에 맞는 원이 없어 XLSX 다운로드는 생략되었습니다.");
+      setUploadStatus("DXF 처리 완료. 현재 필터에 맞는 원이 없습니다.");
     }
     fileInput.value = "";
     updateUploadButtonState();
@@ -5553,13 +5578,11 @@ function handleCanvasTouchEnd(e) {
 
 function handleCanvasWheel(event) {
   event.preventDefault();
-  const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
+  const { width, height } = getCanvasSize();
+  const dy = wheelDeltaYPixels(event, height);
   const { x: mouseX, y: mouseY } = getCanvasCoordsFromEvent(event);
-  const before = canvasToWorld(mouseX, mouseY);
-  view.scale *= zoomFactor;
-  const after = canvasToWorld(mouseX, mouseY);
-  view.offsetX += before.x - after.x;
-  view.offsetY += before.y - after.y;
+  const nextScale = view.scale * Math.exp(-dy * 0.0012);
+  zoomViewAtCanvasPoint(view, width, height, mouseX, mouseY, nextScale, VIEW_SCALE_MIN, VIEW_SCALE_MAX);
   requestRedraw();
 }
 
@@ -8897,23 +8920,13 @@ function handleVersionCompareCanvasMouseLeave() {
 function handleVersionCompareCanvasWheel(event) {
   if (!versionCompareState || !versionCompareState.diff) return;
   event.preventDefault();
-  const zoomFactor = event.deltaY < 0 ? 1.15 : 0.87;
   const rect = versionCompareCanvas.getBoundingClientRect();
-  const canvasX = event.clientX - rect.left;
-  const canvasY = event.clientY - rect.top;
   const { width, height } = getVersionCompareCanvasSize();
-  const worldBefore = {
-    x: (canvasX - width / 2) / compareView.scale + compareView.offsetX,
-    y: (height / 2 - canvasY) / compareView.scale + compareView.offsetY,
-  };
-  compareView.scale *= zoomFactor;
-  compareView.scale = Math.max(0.1, Math.min(500, compareView.scale));
-  const worldAfter = {
-    x: (canvasX - width / 2) / compareView.scale + compareView.offsetX,
-    y: (height / 2 - canvasY) / compareView.scale + compareView.offsetY,
-  };
-  compareView.offsetX += worldBefore.x - worldAfter.x;
-  compareView.offsetY += worldBefore.y - worldAfter.y;
+  const canvasX = ((event.clientX - rect.left) / (rect.width || 1)) * width;
+  const canvasY = ((event.clientY - rect.top) / (rect.height || 1)) * height;
+  const dy = wheelDeltaYPixels(event, height);
+  const nextScale = compareView.scale * Math.exp(-dy * 0.0012);
+  zoomViewAtCanvasPoint(compareView, width, height, canvasX, canvasY, nextScale, 0.1, 500);
   drawVersionCompareCanvas(versionCompareState.diff);
 }
 

@@ -303,6 +303,8 @@
   const MEISSA_2D_PRIORITY_MODE = false;
   /** false: 상단 iframe을 Meissa /3d 뷰어로 연다(기본). true면 스냅샷(2D) URL만 사용. */
   const MEISSA_3D_EXCLUDED = false;
+  /** false: 공식 Meissa 화면을 페이지 안 iframe에 띄우지 않고 새 탭 링크만 맞춤(임베드 3D·로그인 뷰 제거). */
+  const MEISSA_CLOUD_3D_FRAME_VISIBLE = false;
   /** true: Carta 타일·모자이크·휠 타일 z/recenter 제거. 정사(orthophoto/raw/dataUrl)+georef만 매칭, 확대는 CSS matrix만. */
   const MEISSA_2D_SIMPLE_ORTHO = true;
   /** true: orthophoto-preview 를 max_edge=저해상(3072) 단일만 쓰고 뷰포트 패치 고해상도 끔(검증·저대역용).
@@ -10823,11 +10825,12 @@
     if (t.startsWith("선택 ")) st.textContent = "";
   }
 
-  async function meissaDatasetSaveSelectedWithQuality(quality) {
+  async function meissaDatasetSaveSelectedWithQuality(quality, extra) {
     const allowed =
       quality === "ok" ||
       quality === "mid" ||
       quality === "bad" ||
+      quality === "other" ||
       quality === "cap_ok" ||
       quality === "cap_mid" ||
       quality === "cap_bad";
@@ -10837,6 +10840,21 @@
     if (!ids.length) {
       if (st) st.textContent = "먼저 Ctrl+클릭으로 말뚝을 선택하세요.";
       return;
+    }
+    const otherInput = document.getElementById("meissa-dataset-other-label");
+    let inferenceTargetLabel = "";
+    if (quality === "other") {
+      const raw =
+        extra && typeof extra.inferenceTargetLabel === "string"
+          ? extra.inferenceTargetLabel
+          : otherInput
+            ? String(otherInput.value || "")
+            : "";
+      inferenceTargetLabel = raw.trim().slice(0, 200);
+      if (!inferenceTargetLabel) {
+        if (st) st.textContent = "기타 저장: 분류 이름을 입력하세요.";
+        return;
+      }
     }
     const base = meissaDatasetApiBase();
     const url = `${base || ""}/api/pile-dataset/crops`.replace(/^\/\//, "/");
@@ -10881,9 +10899,14 @@
         orthoPdamDetectMode: fit?.detectMode ?? null,
         orthoPileCapped: fit?.pileCapped === true,
         pileDatasetFamily:
-          quality === "cap_ok" || quality === "cap_mid" || quality === "cap_bad" ? "cap" : "general",
+          quality === "cap_ok" || quality === "cap_mid" || quality === "cap_bad"
+            ? "cap"
+            : quality === "other"
+              ? "other"
+              : "general",
         crop: cap.cropMeta,
       };
+      if (quality === "other") meta.inferenceTargetLabel = inferenceTargetLabel;
       const form = new FormData();
       form.append("metadata", meissaDatasetJsonForFormMetadata(meta));
       form.append("image", cap.blob, `pile_${id}.png`);
@@ -11009,14 +11032,10 @@
     document.getElementById("meissa-dataset-save-bad")?.addEventListener("click", () => {
       meissaDatasetSaveSelectedWithQuality("bad");
     });
-    document.getElementById("meissa-dataset-save-cap-ok")?.addEventListener("click", () => {
-      meissaDatasetSaveSelectedWithQuality("cap_ok");
-    });
-    document.getElementById("meissa-dataset-save-cap-mid")?.addEventListener("click", () => {
-      meissaDatasetSaveSelectedWithQuality("cap_mid");
-    });
-    document.getElementById("meissa-dataset-save-cap-bad")?.addEventListener("click", () => {
-      meissaDatasetSaveSelectedWithQuality("cap_bad");
+    document.getElementById("meissa-dataset-save-other")?.addEventListener("click", () => {
+      const el = document.getElementById("meissa-dataset-other-label");
+      const inferenceTargetLabel = el ? String(el.value || "").trim() : "";
+      meissaDatasetSaveSelectedWithQuality("other", { inferenceTargetLabel });
     });
     document.getElementById("meissa-dataset-reset-server")?.addEventListener("click", () => {
       meissaDatasetResetServer();
@@ -12470,19 +12489,34 @@
     }
 
     if (iframe) {
-      const prev = iframe.getAttribute("data-meissa-embed-url");
-      if (prev !== targetUrl) {
-        iframe.setAttribute("data-meissa-embed-url", targetUrl);
-        iframe.src = targetUrl;
+      const wrap = iframe.closest(".meissa-cloud-3d-wrap");
+      if (!MEISSA_CLOUD_3D_FRAME_VISIBLE) {
+        iframe.setAttribute("data-meissa-embed-url", "");
+        if ((iframe.getAttribute("src") || "").trim() !== "about:blank") iframe.src = "about:blank";
+        iframe.style.display = "none";
+        if (wrap) {
+          wrap.hidden = true;
+          wrap.setAttribute("aria-hidden", "true");
+        }
+      } else {
+        const prev = iframe.getAttribute("data-meissa-embed-url");
+        if (prev !== targetUrl) {
+          iframe.setAttribute("data-meissa-embed-url", targetUrl);
+          iframe.src = targetUrl;
+        }
+        if (mode !== "login" || hasToken) {
+          rememberMeissaCloudEmbedPath(targetUrl);
+        }
+        iframe.style.display = "block";
+        if (wrap) {
+          wrap.hidden = false;
+          wrap.setAttribute("aria-hidden", "false");
+        }
+        if (mode === "login") iframe.title = "Meissa 클라우드 로그인";
+        else if (mode === "3d") iframe.title = "Meissa 3D 뷰어";
+        else if (p && z && s && MEISSA_3D_EXCLUDED) iframe.title = "Meissa 스냅샷(3D 뷰어 제외)";
+        else iframe.title = "Meissa 클라우드";
       }
-      if (mode !== "login" || hasToken) {
-        rememberMeissaCloudEmbedPath(targetUrl);
-      }
-      iframe.style.display = "block";
-      if (mode === "login") iframe.title = "Meissa 클라우드 로그인";
-      else if (mode === "3d") iframe.title = "Meissa 3D 뷰어";
-      else if (p && z && s && MEISSA_3D_EXCLUDED) iframe.title = "Meissa 스냅샷(3D 뷰어 제외)";
-      else iframe.title = "Meissa 클라우드";
     }
     if (s && !opts.skip2dLoad) loadMeissa2dOverlayImage(s);
     if (ph) ph.style.display = "none";

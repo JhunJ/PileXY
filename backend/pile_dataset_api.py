@@ -36,12 +36,22 @@ async def pile_dataset_save_crop(
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"metadata JSON 오류: {e}") from e
     q = meta.get("quality")
-    _QUALITY = ("ok", "mid", "bad", "cap_ok", "cap_mid", "cap_bad")
-    if q not in _QUALITY:
+    _QUALITY = ("ok", "mid", "bad", "other")
+    _LEGACY = ("cap_ok", "cap_mid", "cap_bad")
+    if q not in _QUALITY and q not in _LEGACY:
         raise HTTPException(
             status_code=400,
-            detail="quality는 ok, mid, bad, cap_ok, cap_mid, cap_bad 중 하나여야 합니다.",
+            detail="quality는 ok, mid, bad, other(또는 레거시 cap_ok, cap_mid, cap_bad) 중 하나여야 합니다.",
         )
+    if q == "other":
+        raw_label = (meta.get("inferenceTargetLabel") or meta.get("qualityCustomLabel") or "").strip()
+        if not raw_label:
+            raise HTTPException(
+                status_code=400,
+                detail='quality가 other일 때 metadata에 inferenceTargetLabel(또는 qualityCustomLabel) 문자열이 필요합니다.',
+            )
+        if len(raw_label) > 200:
+            raise HTTPException(status_code=400, detail="inferenceTargetLabel은 200자 이내여야 합니다.")
     body = await image.read()
     if not body:
         raise HTTPException(status_code=400, detail="이미지가 비었습니다.")

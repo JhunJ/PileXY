@@ -126,9 +126,9 @@
       <section class="meissa-card" id="meissa-3d-section" aria-label="Meissa 3D 및 비교 점">
         <h2>Meissa 드론 3D · 비교 점</h2>
         <p class="meissa-note">
-          아래는 Meissa 웹 로그인 화면입니다. 위 「로그인·목록·3D 한 번에」를 누르면 자동 전환(매크로 시도 + 토큰 로그인)되며, 프로젝트·존·촬영일을 고르면 3D로 바뀝니다. URL에 토큰이 붙으니 공유하지 마세요.
+          위 「로그인·목록·3D 한 번에」로 API 로그인 후 프로젝트·존·촬영일을 고르세요. 공식 Meissa 화면은 아래 링크로 새 탭에서 열 수 있습니다. URL에 토큰이 붙을 수 있으니 공유하지 마세요.
         </p>
-        <div class="meissa-cloud-3d-wrap">
+        <div class="meissa-cloud-3d-wrap meissa-cloud-3d-wrap--embed-off" hidden aria-hidden="true">
           <div id="meissa-cloud-3d-placeholder" class="meissa-cloud-3d-placeholder">
             임베드가 막힌 경우에만 표시됩니다.
           </div>
@@ -136,7 +136,7 @@
             id="meissa-cloud-3d-frame"
             class="meissa-cloud-3d-frame"
             title="Meissa 클라우드"
-            src="https://cloud.meissa.ai/login"
+            src="about:blank"
             referrerpolicy="strict-origin-when-cross-origin"
             allow="fullscreen; xr-spatial-tracking"
           ></iframe>
@@ -211,19 +211,28 @@
         <details id="meissa-dataset-details" class="meissa-dataset-details meissa-note">
           <summary class="meissa-dataset-details-summary">말뚝 데이터셋 (펼치기 · 비밀번호)</summary>
           <div id="meissa-dataset-toolbar" class="meissa-dataset-toolbar" style="margin-top: 0.4rem">
-          <span class="meissa-dataset-toolbar-hint">Ctrl+클릭 다중 선택 · 크롭은 도면 말뚝 반경(px환산)+여유% · 캡 잘됨/중간/못함은 덮개 말뚝 전용 라벨</span>
+          <span class="meissa-dataset-toolbar-hint">Ctrl+클릭 다중 선택 · 추론대상 분류(양호·보통·불량 또는 기타 직접 입력) · 크롭은 도면 말뚝 반경(px환산)+여유%</span>
           <label style="margin-left: 0.5rem"
             >도면원 여유(%)
             <input type="number" id="meissa-dataset-crop-margin-pct" class="meissa-input meissa-input--narrow" value="22" min="0" max="120" step="2" title="도면 반경(정사 px) 바깥으로 몇 % 더 잘라낼지"
           /></label>
           <button type="button" id="meissa-dataset-clear" class="meissa-btn meissa-btn--secondary" style="margin-left: 0.35rem">선택 해제</button>
-          <button type="button" id="meissa-dataset-save-ok" class="meissa-btn" style="margin-left: 0.25rem; background: #15803d; color: #fff">잘됨</button>
-          <button type="button" id="meissa-dataset-save-mid" class="meissa-btn" style="margin-left: 0.2rem; background: #a16207; color: #fff">중간</button>
-          <button type="button" id="meissa-dataset-save-bad" class="meissa-btn" style="margin-left: 0.2rem; background: #b91c1c; color: #fff">못함</button>
-          <span class="meissa-dataset-cap-label" style="margin-left: 0.45rem; opacity: 0.92">캡</span>
-          <button type="button" id="meissa-dataset-save-cap-ok" class="meissa-btn" style="margin-left: 0.15rem; background: #6d28d9; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.65)" title="덮개(캡) 말뚝 — 품질 잘됨">잘됨</button>
-          <button type="button" id="meissa-dataset-save-cap-mid" class="meissa-btn" style="margin-left: 0.15rem; background: #5b21b6; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.5)" title="덮개(캡) 말뚝 — 품질 중간">중간</button>
-          <button type="button" id="meissa-dataset-save-cap-bad" class="meissa-btn" style="margin-left: 0.15rem; background: #4c1d95; color: #fff; box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.4)" title="덮개(캡) 말뚝 — 품질 못함">못함</button>
+          <button type="button" id="meissa-dataset-save-ok" class="meissa-btn" style="margin-left: 0.25rem; background: #15803d; color: #fff" title="추론·학습용 라벨: 양호">양호</button>
+          <button type="button" id="meissa-dataset-save-mid" class="meissa-btn" style="margin-left: 0.2rem; background: #a16207; color: #fff" title="추론·학습용 라벨: 보통">보통</button>
+          <button type="button" id="meissa-dataset-save-bad" class="meissa-btn" style="margin-left: 0.2rem; background: #b91c1c; color: #fff" title="추론·학습용 라벨: 불량">불량</button>
+          <span class="meissa-dataset-other-row" style="margin-left: 0.45rem; display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap">
+            <span style="opacity: 0.92">기타</span>
+            <input
+              type="text"
+              id="meissa-dataset-other-label"
+              class="meissa-input"
+              style="min-width: 8rem; max-width: 14rem"
+              maxlength="120"
+              placeholder="분류 이름 입력"
+              title="기타 분류 저장 시 메타데이터에 기록됩니다"
+            />
+            <button type="button" id="meissa-dataset-save-other" class="meissa-btn meissa-btn--secondary" title="입력한 이름으로 기타 분류 저장">기타 저장</button>
+          </span>
           <button type="button" id="meissa-dataset-reset-server" class="meissa-btn meissa-btn--secondary" style="margin-left: 0.45rem" title="서버 data/pile_dataset 크롭·목록 전부 삭제">
             서버 데이터셋 초기화
           </button>
