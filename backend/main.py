@@ -1595,6 +1595,90 @@ def build_duplicate_groups(circles: List[Dict]) -> List[DuplicateGroup]:
     return duplicate_groups
 
 
+def _matched_number_from_display_text(text_val: Optional[str]) -> Optional[int]:
+    """매칭된 TEXT 표시 문자열에서 말뚝 번호 정수 추출 (프론트 getMatchedTextNumber 와 동일: 비숫자 제거)."""
+    if text_val is None:
+        return None
+    digits = re.sub(r"\D", "", str(text_val).strip())
+    if not digits:
+        return None
+    try:
+        n = int(digits)
+    except ValueError:
+        return None
+    return n if n >= 1 else None
+
+
+def extend_same_building_number_duplicates(
+    circles: List[Dict],
+    errors: List[MatchError],
+    duplicate_groups: List[DuplicateGroup],
+) -> None:
+    """
+    같은 동(또는 미할당) 안에서 동일 번호가 2개 이상 매칭된 좌표를
+    매칭 에러·중복 좌표 목록에 추가하고 해당 circle에 error_codes를 붙인다.
+    classify_entities 이후에 호출해야 building_name이 채워져 있다.
+    """
+    groups: Dict[Tuple[str, int], List[Dict]] = defaultdict(list)
+    for c in circles:
+        if not c.get("matched_text_id"):
+            continue
+        mt = c.get("matched_text")
+        raw_text = None
+        if isinstance(mt, dict):
+            raw_text = mt.get("text")
+        num = _matched_number_from_display_text(raw_text)
+        if num is None:
+            continue
+        bname = (c.get("building_name") or "").strip() or "미할당"
+        groups[(bname, num)].append(c)
+
+    for (bname, num), items in groups.items():
+        if len(items) < 2:
+            continue
+        circle_ids = [str(item["id"]) for item in items]
+        for item in items:
+            codes = list(item.get("error_codes") or [])
+            if "SAME_BUILDING_NUMBER_DUPLICATE" not in codes:
+                codes.append("SAME_BUILDING_NUMBER_DUPLICATE")
+            item["error_codes"] = codes
+            item["has_error"] = True
+
+        errors.append(
+            MatchError(
+                error_type="SAME_BUILDING_NUMBER_DUPLICATE",
+                text_id=None,
+                text_value=str(num),
+                circle_ids=circle_ids,
+                message=f'"{bname}"(동)에서 번호 {num}이(가) {len(items)}개 좌표에 중복되었습니다.',
+            )
+        )
+
+        xs = [float(item.get("center_x", 0)) for item in items]
+        ys = [float(item.get("center_y", 0)) for item in items]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        duplicate_groups.append(
+            DuplicateGroup(
+                coord_key={"x": cx, "y": cy},
+                count=len(items),
+                circle_ids=circle_ids,
+                details=[
+                    DuplicateDetail(
+                        id=item["id"],
+                        layer=item.get("layer", "0"),
+                        block_name=item.get("block_name"),
+                        matched_text=MatchedText(**item["matched_text"])
+                        if isinstance(item.get("matched_text"), dict)
+                        else None,
+                        has_error=bool(item.get("has_error", False)),
+                    )
+                    for item in items
+                ],
+            )
+        )
+
+
 def to_circle_model(circle: Dict) -> CircleRecord:
     matched = None
     if circle.get("matched_text") and isinstance(circle.get("matched_text"), dict):
@@ -1760,6 +1844,7 @@ def build_response(
         building_definitions,
         cluster_polylines if cluster_polylines else None,
     )
+    extend_same_building_number_duplicates(filtered_circles, errors, duplicate_groups)
 
     # 로그: building_name 설정 확인
     assigned_count = sum(1 for c in filtered_circles if c.get("building_name"))
@@ -1900,6 +1985,8 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
         old = old_text_by_id.get(t["id"])
         if old and old.building_name is not None and not is_placeholder_building_name(old.building_name):
             t["building_name"] = old.building_name
+
+    extend_same_building_number_duplicates(filtered_circles, errors, duplicate_groups)
 
     building_summary = compute_building_summary(
         filtered_circles, filtered_texts, building_definitions
@@ -2996,6 +3083,7 @@ def _build_filtered_circle_response(
         resolved_buildings,
         cluster_polylines if cluster_polylines else None,
     )
+    extend_same_building_number_duplicates(filtered_circles, errors, duplicate_groups)
     building_summary = compute_building_summary(
         filtered_circles, filtered_texts, resolved_buildings
     )

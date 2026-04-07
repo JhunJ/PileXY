@@ -2666,7 +2666,18 @@ function handlePayload(payload) {
   syncAreaCountInputs();
   syncPendingNamesWithBuildings();
   syncAreaCountInputs();
-  
+
+  if (state.circles.length) {
+    state.errors = buildErrorsFromCirclesAndTexts(state.circles, state.texts);
+    state.duplicates = [
+      ...buildDuplicatesFromCircles(state.circles),
+      ...buildSameBuildingNumberDuplicateGroups(state.circles),
+    ];
+    if (state.summary && typeof state.summary === "object") {
+      state.summary.duplicate_groups = state.duplicates.length;
+    }
+  }
+
   // 디버깅: 데이터 상태 확인
   console.debug("[handlePayload] 데이터 상태:", {
     circles: state.circles.length,
@@ -2939,6 +2950,7 @@ const ERROR_TYPE_LABELS = {
   TEXT_MULTI_MATCH: "텍스트 중복매칭",
   CIRCLE_NO_MATCH: "좌표 미매칭",
   MATCH_DISTANCE_EXCEEDED: "거리초과",
+  SAME_BUILDING_NUMBER_DUPLICATE: "동·미지정 내 번호중복",
 };
 
 const COORD_PRECISION = 6;
@@ -3016,7 +3028,79 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     circle.has_error = codes.length > 0;
     circle.error_codes = codes;
   });
+  appendSameBuildingNumberErrors(circles, errors);
   return errors;
+}
+
+/** 같은 동(미할당 포함)에서 매칭 번호가 동일한 좌표가 2개 이상이면 에러·has_error 반영 */
+function appendSameBuildingNumberErrors(circles, errors) {
+  const groups = new Map();
+  (circles || []).forEach((c) => {
+    let tid = c.matched_text_id;
+    if ((tid == null || tid === "") && c.matched_text && c.matched_text.id != null && c.matched_text.id !== "") {
+      tid = c.matched_text.id;
+    }
+    if (tid == null || tid === "") return;
+    const num = getMatchedTextNumber(c.matched_text?.text);
+    if (!Number.isInteger(num) || num < 1) return;
+    const bname = (c.building_name || "").trim() || "미할당";
+    const key = `${bname}\0${num}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  });
+  groups.forEach((items) => {
+    if (items.length < 2) return;
+    const num = getMatchedTextNumber(items[0].matched_text?.text);
+    const bname = (items[0].building_name || "").trim() || "미할당";
+    items.forEach((c) => {
+      const codes = c.error_codes ? [...c.error_codes] : [];
+      if (!codes.includes("SAME_BUILDING_NUMBER_DUPLICATE")) codes.push("SAME_BUILDING_NUMBER_DUPLICATE");
+      c.error_codes = codes;
+      c.has_error = true;
+    });
+    errors.push({
+      error_type: "SAME_BUILDING_NUMBER_DUPLICATE",
+      text_id: null,
+      text_value: String(num),
+      circle_ids: items.map((c) => c.id),
+      message: `"${bname}"(동)에서 번호 ${num}이(가) ${items.length}개 좌표에 중복되었습니다.`,
+    });
+  });
+}
+
+/** 동·미지정 내 동일 말뚝 번호 중복 그룹(좌표는 그룹 중심) — 겹침 중복과 별도 */
+function buildSameBuildingNumberDuplicateGroups(circles) {
+  const groups = new Map();
+  (circles || []).forEach((c) => {
+    if (c.matched_text_id == null || c.matched_text_id === "") return;
+    const num = getMatchedTextNumber(c.matched_text?.text);
+    if (!Number.isInteger(num) || num < 1) return;
+    const bname = (c.building_name || "").trim() || "미할당";
+    const key = `${bname}\0${num}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  });
+  const cx = (c) => c.center_x ?? c.centerX;
+  const cy = (c) => c.center_y ?? c.centerY;
+  const out = [];
+  groups.forEach((items) => {
+    if (items.length < 2) return;
+    const ax = items.reduce((s, c) => s + cx(c), 0) / items.length;
+    const ay = items.reduce((s, c) => s + cy(c), 0) / items.length;
+    out.push({
+      coord_key: { x: ax, y: ay },
+      count: items.length,
+      circle_ids: items.map((i) => i.id ?? i._id),
+      details: items.map((item) => ({
+        id: item.id,
+        layer: item.layer,
+        block_name: item.block_name,
+        matched_text: item.matched_text || null,
+        has_error: item.has_error || false,
+      })),
+    });
+  });
+  return out;
 }
 
 /**
@@ -3026,7 +3110,9 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
 function refreshMatchDerivedUIState() {
   if (!state.circles?.length) return;
   state.errors = buildErrorsFromCirclesAndTexts(state.circles, state.texts);
-  state.duplicates = buildDuplicatesFromCircles(state.circles);
+  const geoDup = buildDuplicatesFromCircles(state.circles);
+  const numDup = buildSameBuildingNumberDuplicateGroups(state.circles);
+  state.duplicates = [...geoDup, ...numDup];
   if (state.summary && typeof state.summary === "object") {
     state.summary.matched_pairs = state.circles.filter((c) => c.matched_text_id).length;
     state.summary.duplicate_groups = state.duplicates.length;

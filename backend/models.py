@@ -199,6 +199,7 @@ class MatchError(BaseModel):
         "CIRCLE_MULTI_MATCH",
         "CIRCLE_NO_MATCH",
         "MATCH_DISTANCE_EXCEEDED",
+        "SAME_BUILDING_NUMBER_DUPLICATE",
     ]
     text_id: Optional[str] = None
     text_value: Optional[str] = None
