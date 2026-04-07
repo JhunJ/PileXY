@@ -2662,6 +2662,8 @@ function handlePayload(payload) {
       : [],
   );
   ensureBuildingsInitialized();
+  // spinbox 값을 먼저 맞춰 두어 syncPendingNamesForKind가 오래된 입력값으로 이름 행을 늘리지 않게 함
+  syncAreaCountInputs();
   syncPendingNamesWithBuildings();
   syncAreaCountInputs();
   
@@ -3518,10 +3520,13 @@ function syncPendingNamesForKind(kind) {
   if (!names.length && normalizedKind === AREA_KIND_BUILDING) {
     names = [getDefaultAreaName(normalizedKind, 0)];
   }
+  // 동: 폴리곤은 아직 1개인데 입력/이름 목록만 늘린 경우(동 개수 적용 전) 이름을 유지해야 함.
   const requiredLength =
     normalizedKind === AREA_KIND_PARKING && areas.length
       ? getParkingAreaListSpan(areas)
-      : areas.length;
+      : normalizedKind === AREA_KIND_BUILDING
+        ? Math.max(areas.length, getConfiguredAreaCount(AREA_KIND_BUILDING))
+        : areas.length;
   while (requiredLength && names.length < requiredLength) {
     const matchedEntry =
       normalizedKind === AREA_KIND_PARKING
@@ -3529,8 +3534,8 @@ function syncPendingNamesForKind(kind) {
         : areas[names.length];
     names.push(matchedEntry?.building?.name || getDefaultAreaName(normalizedKind, names.length));
   }
-  if (normalizedKind === AREA_KIND_BUILDING && areas.length && names.length > areas.length) {
-    names = names.slice(0, areas.length);
+  if (normalizedKind === AREA_KIND_BUILDING && requiredLength && names.length > requiredLength) {
+    names = names.slice(0, requiredLength);
   }
   setAreaNames(normalizedKind, names);
 }
@@ -3646,7 +3651,17 @@ function populateBuildingSelect() {
 }
 
 function handleAddBuildingName() {
-  handleAddAreaName(AREA_KIND_BUILDING);
+  // 동 개수 입력을 1 올린 뒤 change와 동일한 경로로만 처리(이름만 push하면 spinbox·동기화와 어긋날 수 있음)
+  const next = getConfiguredAreaCount(AREA_KIND_BUILDING) + 1;
+  if (buildingCountInput) {
+    buildingCountInput.value = String(next);
+    handleBuildingCountChange();
+  } else {
+    ensurePendingNameCount(AREA_KIND_BUILDING, next);
+    ensurePendingDrillingElevationsLength(AREA_KIND_BUILDING);
+    syncAreaCountInputs();
+    renderPendingNameEditor();
+  }
 }
 
 function handleAddParkingName() {
@@ -3655,6 +3670,10 @@ function handleAddParkingName() {
 
 function handleAddAreaName(kind) {
   const normalizedKind = normalizeAreaKind(kind);
+  if (normalizedKind === AREA_KIND_BUILDING) {
+    handleAddBuildingName();
+    return;
+  }
   const nextNames = [...getAreaNames(normalizedKind)];
   nextNames.push(getDefaultAreaName(normalizedKind, nextNames.length));
   setAreaNames(normalizedKind, nextNames);
@@ -3899,6 +3918,7 @@ function renderAreaNameEditor(kind) {
           state.highlightedBuildingNameIndex = -1;
         }
       }
+      syncAreaCountInputs();
       syncPendingNamesWithBuildings();
       renderPendingNameEditor();
       renderBuildingTabs();
@@ -4409,6 +4429,15 @@ function ensurePendingNameCount(kind, desired) {
       .map((entry) => entry.building);
     setAreasByKind(normalizedKind, nextAreas);
   }
+  if (normalizedKind === AREA_KIND_BUILDING) {
+    const entries = getAreasByKind(AREA_KIND_BUILDING);
+    if (entries.length > target) {
+      const nextAreas = entries.slice(0, target).map((entry) => entry.building);
+      setAreasByKind(AREA_KIND_BUILDING, nextAreas);
+      state.highlightedBuildingNameIndex = -1;
+      state.selectedBuildingIndex = -1;
+    }
+  }
   ensurePendingDrillingElevationsLength(normalizedKind);
   syncAreaCountInputs();
 }
@@ -4503,7 +4532,7 @@ async function applyBuildingCountFromClusters(count, showStatus = true) {
         : createDefaultBuildingPolygon(index, desired);
     return {
       kind: AREA_KIND_BUILDING,
-      name: name || `Building ${index + 1}`,
+      name: name || getDefaultAreaName(AREA_KIND_BUILDING, index),
       vertices,
     };
   });
