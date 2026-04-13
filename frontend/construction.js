@@ -5002,7 +5002,8 @@ function inferOpenRectangleVertices(vertices) {
     const lineHeight = fontPx + 4;
     const textPadX = 6;
     const textPadY = 5;
-    const topGap = state.showTextLabels !== false ? 22 : 10;
+    const textLayerGap = state.showTextLabels !== false ? 22 : 10;
+    const anchorLift = Math.min(34, Math.max(12, radiusPx + textLayerGap));
     ctx.save();
     ctx.font = `600 ${fontPx}px "Segoe UI", sans-serif`;
     const widths = parts.map((part) => ctx.measureText(part.text).width);
@@ -5011,14 +5012,12 @@ function inferOpenRectangleVertices(vertices) {
     const canvasSize = typeof getCanvasSize === "function"
       ? getCanvasSize()
       : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
-    let boxX = canvasX + radiusPx + 8;
-    let boxY = canvasY - radiusPx - topGap - boxHeight;
+    let boxX = canvasX - boxWidth / 2;
+    let boxY = canvasY - anchorLift - boxHeight;
     const maxBoxX = Math.max(4, canvasSize.width - boxWidth - 4);
-    if (boxX > maxBoxX) {
-      boxX = Math.max(4, canvasX - radiusPx - 8 - boxWidth);
-    }
+    boxX = Math.max(4, Math.min(boxX, maxBoxX));
     if (boxY < 4) {
-      boxY = Math.min(canvasSize.height - boxHeight - 4, canvasY + radiusPx + 10);
+      boxY = Math.min(canvasSize.height - boxHeight - 4, canvasY + Math.min(24, radiusPx + 8));
     }
     boxY = Math.max(4, Math.min(boxY, canvasSize.height - boxHeight - 4));
     ctx.fillStyle = "rgba(15, 23, 42, 0.78)";
