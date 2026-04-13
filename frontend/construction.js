@@ -3393,9 +3393,28 @@ function inferOpenRectangleVertices(vertices) {
     return filteredCircles;
   }
 
+  function getFoundationThicknessMmRaw(circleId) {
+    const map = constructionState.foundationThicknessByPileId;
+    if (!map || circleId == null) return null;
+    const direct = map[circleId] ?? map[String(circleId)];
+    return Number.isFinite(Number(direct)) ? Number(direct) : null;
+  }
+
   function getFoundationThicknessMm(circleId) {
-    const value = constructionState.foundationThicknessByPileId?.[circleId];
-    return Number.isFinite(Number(value)) ? Number(value) : null;
+    const direct = getFoundationThicknessMmRaw(circleId);
+    if (Number.isFinite(direct)) return direct;
+    const circle = getCircleFromMapById(circleId);
+    const worldKey = foundationOverlayWorldPosKey(circle);
+    if (!worldKey) return null;
+    const twins = Array.isArray(state.circles) ? state.circles : [];
+    for (let i = 0; i < twins.length; i += 1) {
+      const twin = twins[i];
+      if (!twin || twin.id === circleId) continue;
+      if (foundationOverlayWorldPosKey(twin) !== worldKey) continue;
+      const twinThickness = getFoundationThicknessMmRaw(twin.id);
+      if (Number.isFinite(twinThickness)) return twinThickness;
+    }
+    return null;
   }
 
   /** 구역(정규화 위치명)별로 이미 지정된 두께 중 건수가 가장 많은 mm (기초골조 탭 불러오기용). */
