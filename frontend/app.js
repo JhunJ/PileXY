@@ -960,12 +960,8 @@ function normalizeAreaDefinitions(buildings = []) {
       foundation_top_elevation: _ignoredFound,
       ...buildingRest
     } = building || {};
-    const rawDrill = building?.drilling_start_elevation;
-    const numDrill =
-      rawDrill != null && rawDrill !== "" && Number.isFinite(Number(rawDrill)) ? Number(rawDrill) : undefined;
-    const rawFound = building?.foundation_top_elevation;
-    const numFound =
-      rawFound != null && rawFound !== "" && Number.isFinite(Number(rawFound)) ? Number(rawFound) : undefined;
+    const numDrill = parsePastedLevelToken(building?.drilling_start_elevation);
+    const numFound = parsePastedLevelToken(building?.foundation_top_elevation);
     return {
       ...buildingRest,
       kind,
@@ -1002,12 +998,8 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
       counters[kind] += 1;
       const slot = Number(building?.slot);
       const fallbackIndex = isSlotAreaKind(kind) && Number.isFinite(slot) ? Math.round(slot) : order;
-      const rawDrill = building?.drilling_start_elevation;
-      const numDrill =
-        rawDrill != null && rawDrill !== "" && Number.isFinite(Number(rawDrill)) ? Number(rawDrill) : undefined;
-      const rawFound = building?.foundation_top_elevation;
-      const numFound =
-        rawFound != null && rawFound !== "" && Number.isFinite(Number(rawFound)) ? Number(rawFound) : undefined;
+      const numDrill = parsePastedLevelToken(building?.drilling_start_elevation);
+      const numFound = parsePastedLevelToken(building?.foundation_top_elevation);
       return {
         name:
           kind === AREA_KIND_PARKING
@@ -5630,14 +5622,18 @@ function handleApplyAreaNames(kind) {
       const fromBuilding = entry.building?.drilling_start_elevation;
       const fromPending = pendingDrilling[slot];
       let drilling;
-      if (Number.isFinite(Number(fromBuilding))) drilling = Number(fromBuilding);
-      else if (Number.isFinite(Number(fromPending))) drilling = Number(fromPending);
+      const fromBuildingDrill = parsePastedLevelToken(fromBuilding);
+      const fromPendingDrill = parsePastedLevelToken(fromPending);
+      if (fromBuildingDrill != null) drilling = fromBuildingDrill;
+      else if (fromPendingDrill != null) drilling = fromPendingDrill;
       else drilling = undefined;
       const fromBuildingFound = entry.building?.foundation_top_elevation;
       const fromPendingFound = pendingFound[slot];
       let foundationTopElev;
-      if (Number.isFinite(Number(fromBuildingFound))) foundationTopElev = Number(fromBuildingFound);
-      else if (Number.isFinite(Number(fromPendingFound))) foundationTopElev = Number(fromPendingFound);
+      const fromBuildingTop = parsePastedLevelToken(fromBuildingFound);
+      const fromPendingTop = parsePastedLevelToken(fromPendingFound);
+      if (fromBuildingTop != null) foundationTopElev = fromBuildingTop;
+      else if (fromPendingTop != null) foundationTopElev = fromPendingTop;
       else foundationTopElev = undefined;
       const merged = {
         ...entry.building,
@@ -6265,6 +6261,9 @@ async function handleApplyTowerCranes() {
 
 async function applyAreaDefinitions(kind) {
   const normalizedKind = normalizeAreaKind(kind);
+  // 입력란 포커스가 남아 change 이벤트가 누락되는 모바일 케이스를 방지한다.
+  flushDrillingInputsFromDom(normalizedKind);
+  flushFoundationTopInputsFromDom(normalizedKind);
   if (normalizedKind === AREA_KIND_BUILDING) {
     ensureBuildingsInitialized();
   }

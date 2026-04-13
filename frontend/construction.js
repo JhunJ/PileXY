@@ -1668,14 +1668,14 @@
   function numericFromPerPileMapWithTwins(map, circleId) {
     if (!map || circleId == null) return null;
     const selfKey = String(circleId).trim();
-    const direct = map[circleId] ?? map[selfKey];
-    if (Number.isFinite(Number(direct))) return Number(direct);
+    const direct = toFiniteNumberOrNull(map[circleId] ?? map[selfKey]);
+    if (direct != null) return direct;
     const twins = getFoundationTwinCircleIds(circleId);
     for (let i = 0; i < twins.length; i += 1) {
       const twinKey = String(twins[i] ?? "").trim();
       if (!twinKey || twinKey === selfKey) continue;
-      const value = map[twinKey];
-      if (Number.isFinite(Number(value))) return Number(value);
+      const value = toFiniteNumberOrNull(map[twinKey]);
+      if (value != null) return value;
     }
     return null;
   }
@@ -3028,8 +3028,8 @@
     for (const b of state.buildings || []) {
       if (!b?.name) continue;
       if (normConstructionLoc(b.name) === normLoc) {
-        const v = b.drilling_start_elevation;
-        if (Number.isFinite(Number(v))) return Number(v);
+        const v = toFiniteNumberOrNull(b.drilling_start_elevation);
+        if (v != null) return v;
       }
     }
     return null;
@@ -3039,8 +3039,8 @@
     for (const b of state.buildings || []) {
       if (!b?.name) continue;
       if (normConstructionLoc(b.name) === normLoc) {
-        const v = b.foundation_top_elevation;
-        if (Number.isFinite(Number(v))) return Number(v);
+        const v = toFiniteNumberOrNull(b.foundation_top_elevation);
+        if (v != null) return v;
       }
     }
     return null;
@@ -3537,7 +3537,7 @@ function inferOpenRectangleVertices(vertices) {
   /** 말뚝별 값이 있으면 우선, 없으면 동·주차장 설정(윤곽) 값. */
   function getDrillingElevationMForCircle(circleId) {
     const direct = numericFromPerPileMapWithTwins(constructionState.drillingStartByPileId, circleId);
-    if (Number.isFinite(Number(direct))) return Number(direct);
+    if (direct != null) return direct;
     const circle = getCircleFromMapById(circleId);
     const norm = normForBuildingSettingsFromCircle(circle);
     return norm == null ? null : findDrillingOverrideForNormLocation(norm);
@@ -3545,7 +3545,7 @@ function inferOpenRectangleVertices(vertices) {
 
   function getFoundationTopElevationMForCircle(circleId) {
     const direct = numericFromPerPileMapWithTwins(constructionState.foundationTopByPileId, circleId);
-    if (Number.isFinite(Number(direct))) return Number(direct);
+    if (direct != null) return direct;
     const circle = getCircleFromMapById(circleId);
     const norm = normForBuildingSettingsFromCircle(circle);
     return norm == null ? null : findFoundationTopOverrideForNormLocation(norm);
@@ -5313,8 +5313,9 @@ function inferOpenRectangleVertices(vertices) {
     if (drillSrc && typeof drillSrc === "object") {
       Object.entries(drillSrc).forEach(([id, v]) => {
         if (!circleIds.has(id)) return;
-        if (Number.isFinite(Number(v))) {
-          constructionState.drillingStartByPileId[id] = Number(v);
+        const parsed = toFiniteNumberOrNull(v);
+        if (parsed != null) {
+          constructionState.drillingStartByPileId[id] = parsed;
           nDrill += 1;
         }
       });
@@ -5323,8 +5324,9 @@ function inferOpenRectangleVertices(vertices) {
     if (topSrc && typeof topSrc === "object") {
       Object.entries(topSrc).forEach(([id, v]) => {
         if (!circleIds.has(id)) return;
-        if (Number.isFinite(Number(v))) {
-          constructionState.foundationTopByPileId[id] = Number(v);
+        const parsed = toFiniteNumberOrNull(v);
+        if (parsed != null) {
+          constructionState.foundationTopByPileId[id] = parsed;
           nTop += 1;
         }
       });
@@ -5859,9 +5861,9 @@ function inferOpenRectangleVertices(vertices) {
       let startEl = resolvedStart;
       let startElBasis = basis;
       if (circleId) {
-        const pileDr = constructionState.drillingStartByPileId?.[circleId];
-        if (Number.isFinite(Number(pileDr))) {
-          startEl = Number(pileDr);
+        const pileDr = numericFromPerPileMapWithTwins(constructionState.drillingStartByPileId, circleId);
+        if (pileDr != null) {
+          startEl = pileDr;
           startElBasis = "말뚝별 천공시작";
         }
       }
@@ -6005,9 +6007,9 @@ function inferOpenRectangleVertices(vertices) {
       foundationTop = toFiniteNumberOrNull(manual.foundationTop);
     } else {
       const cid = record?.circle_id || record?.circleId || "";
-      const pileTopOv = cid ? constructionState.foundationTopByPileId?.[cid] : null;
-      if (cid && Number.isFinite(Number(pileTopOv))) {
-        foundationTop = Number(pileTopOv);
+      const pileTopOv = cid ? numericFromPerPileMapWithTwins(constructionState.foundationTopByPileId, cid) : null;
+      if (pileTopOv != null) {
+        foundationTop = pileTopOv;
         foundationTopCellTitle = "말뚝별 기초골조 상단레벨";
       } else {
         foundationTop =
