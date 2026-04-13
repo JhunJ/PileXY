@@ -960,12 +960,8 @@ function normalizeAreaDefinitions(buildings = []) {
       foundation_top_elevation: _ignoredFound,
       ...buildingRest
     } = building || {};
-    const rawDrill = building?.drilling_start_elevation;
-    const numDrill =
-      rawDrill != null && rawDrill !== "" && Number.isFinite(Number(rawDrill)) ? Number(rawDrill) : undefined;
-    const rawFound = building?.foundation_top_elevation;
-    const numFound =
-      rawFound != null && rawFound !== "" && Number.isFinite(Number(rawFound)) ? Number(rawFound) : undefined;
+    const numDrill = parsePastedLevelToken(building?.drilling_start_elevation);
+    const numFound = parsePastedLevelToken(building?.foundation_top_elevation);
     return {
       ...buildingRest,
       kind,
@@ -1002,12 +998,8 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
       counters[kind] += 1;
       const slot = Number(building?.slot);
       const fallbackIndex = isSlotAreaKind(kind) && Number.isFinite(slot) ? Math.round(slot) : order;
-      const rawDrill = building?.drilling_start_elevation;
-      const numDrill =
-        rawDrill != null && rawDrill !== "" && Number.isFinite(Number(rawDrill)) ? Number(rawDrill) : undefined;
-      const rawFound = building?.foundation_top_elevation;
-      const numFound =
-        rawFound != null && rawFound !== "" && Number.isFinite(Number(rawFound)) ? Number(rawFound) : undefined;
+      const numDrill = parsePastedLevelToken(building?.drilling_start_elevation);
+      const numFound = parsePastedLevelToken(building?.foundation_top_elevation);
       return {
         name:
           kind === AREA_KIND_PARKING
@@ -3042,6 +3034,7 @@ function handlePayload(payload) {
       ...buildSameBuildingNumberDuplicateGroups(state.circles),
     ];
     if (state.summary && typeof state.summary === "object") {
+      state.summary.total_texts = countMatchableTexts(state.texts);
       state.summary.duplicate_groups = state.duplicates.length;
     }
   }
@@ -3901,6 +3894,35 @@ const ERROR_TYPE_LABELS = {
 
 const COORD_PRECISION = 6;
 
+function foundationPfOnlyFromTextValue(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\u2212/g, "-")
+    .replace(/\u2013/g, "-")
+    .replace(/\u2014/g, "-");
+  const compact = normalized.replace(/\s+/g, "");
+  if (!compact) return false;
+  if (/^[0-9.\-]+$/.test(compact)) return false;
+  if (/^([Tt])(\d+)-(\d+)$/.test(compact)) return false;
+  const c0 = compact[0]?.toUpperCase();
+  if (c0 !== "P" && c0 !== "F") return false;
+  if (compact.length === 1) return true;
+  const c1 = compact[1];
+  return c1 === "-" || c1 === "." || /\d/.test(c1);
+}
+
+function isFoundationPfOnlyTextRecord(text) {
+  if (!text || typeof text !== "object") return false;
+  if (text.foundation_pf_only === true) return true;
+  return foundationPfOnlyFromTextValue(text.text);
+}
+
+function countMatchableTexts(texts) {
+  return (texts || []).reduce((count, text) => (
+    isFoundationPfOnlyTextRecord(text) ? count : count + 1
+  ), 0);
+}
+
 /** 불러온 circles/texts만으로 에러 목록 재계산 및 각 circle/text에 has_error 반영 (불러오기 시 저장에 에러가 없을 때 사용) */
 function buildErrorsFromCirclesAndTexts(circles, texts) {
   const errors = [];
@@ -3917,6 +3939,12 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     textToCircleIds.get(key).push(c.id);
   });
   (texts || []).forEach((text) => {
+    if (isFoundationPfOnlyTextRecord(text)) {
+      text.foundation_pf_only = true;
+      text.matched_circle_ids = [];
+      text.has_error = false;
+      return;
+    }
     const circleIds = textToCircleIds.get(String(text.id)) || [];
     text.matched_circle_ids = circleIds;
     if (circleIds.length > 1) {
@@ -4088,6 +4116,7 @@ function refreshMatchDerivedUIState() {
   const numDup = buildSameBuildingNumberDuplicateGroups(state.circles);
   state.duplicates = [...geoDup, ...numDup];
   if (state.summary && typeof state.summary === "object") {
+    state.summary.total_texts = countMatchableTexts(state.texts);
     state.summary.matched_pairs = state.circles.filter((c) => c.matched_text_id).length;
     state.summary.duplicate_groups = state.duplicates.length;
   }
@@ -4117,12 +4146,16 @@ function sameFileCircleGeometryLoose(a, b) {
   const ra = rad(a);
   const rb = rad(b);
   if (ra <= 0 || rb <= 0) return false;
-  const dcx = Math.abs(cx(a) - cx(b));
-  const dcy = Math.abs(cy(a) - cy(b));
+  const dx = cx(a) - cx(b);
+  const dy = cy(a) - cy(b);
+  const centerDistance = Math.hypot(dx, dy);
   const dr = Math.abs(ra - rb);
-  const centerTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 8, Math.min(ra, rb) * 0.0035);
-  const rTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 5, Math.min(ra, rb) * 0.0025);
-  return dcx <= centerTol && dcy <= centerTol && dr <= rTol;
+  const minRadius = Math.min(ra, rb);
+  // 「중복 제외」 켜짐: 중심이 파일 반지름의 1/4 이내로 이동한 약한 오차는 동일 심볼로 간주한다.
+  const centerTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 16, minRadius * 0.25);
+  // 반지름은 '동일 크기' 전제를 유지하되 도면 반올림 오차를 위해 소폭 허용.
+  const rTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 10, minRadius * 0.1);
+  return centerDistance <= centerTol && dr <= rTol;
 }
 
 /**
@@ -5589,14 +5622,18 @@ function handleApplyAreaNames(kind) {
       const fromBuilding = entry.building?.drilling_start_elevation;
       const fromPending = pendingDrilling[slot];
       let drilling;
-      if (Number.isFinite(Number(fromBuilding))) drilling = Number(fromBuilding);
-      else if (Number.isFinite(Number(fromPending))) drilling = Number(fromPending);
+      const fromBuildingDrill = parsePastedLevelToken(fromBuilding);
+      const fromPendingDrill = parsePastedLevelToken(fromPending);
+      if (fromBuildingDrill != null) drilling = fromBuildingDrill;
+      else if (fromPendingDrill != null) drilling = fromPendingDrill;
       else drilling = undefined;
       const fromBuildingFound = entry.building?.foundation_top_elevation;
       const fromPendingFound = pendingFound[slot];
       let foundationTopElev;
-      if (Number.isFinite(Number(fromBuildingFound))) foundationTopElev = Number(fromBuildingFound);
-      else if (Number.isFinite(Number(fromPendingFound))) foundationTopElev = Number(fromPendingFound);
+      const fromBuildingTop = parsePastedLevelToken(fromBuildingFound);
+      const fromPendingTop = parsePastedLevelToken(fromPendingFound);
+      if (fromBuildingTop != null) foundationTopElev = fromBuildingTop;
+      else if (fromPendingTop != null) foundationTopElev = fromPendingTop;
       else foundationTopElev = undefined;
       const merged = {
         ...entry.building,
@@ -6224,6 +6261,9 @@ async function handleApplyTowerCranes() {
 
 async function applyAreaDefinitions(kind) {
   const normalizedKind = normalizeAreaKind(kind);
+  // 입력란 포커스가 남아 change 이벤트가 누락되는 모바일 케이스를 방지한다.
+  flushDrillingInputsFromDom(normalizedKind);
+  flushFoundationTopInputsFromDom(normalizedKind);
   if (normalizedKind === AREA_KIND_BUILDING) {
     ensureBuildingsInitialized();
   }
@@ -8707,10 +8747,11 @@ async function handleLoadWork(id, loadBtn) {
       // 저장된 errors는 circles/texts와 불일치할 수 있음(수동 매칭 후 PATCH로 errors만 비운 경우 등) → 항상 현재 데이터 기준으로 재계산
       state.errors = buildErrorsFromCirclesAndTexts(state.circles, state.texts);
       refreshMatchDerivedUIState();
+      if (!state.summary) state.summary = {};
+      state.summary.total_texts = countMatchableTexts(state.texts || []);
       if (!state.summary || typeof state.summary.matched_pairs !== "number") {
         if (!state.summary) state.summary = {};
         state.summary.total_circles = state.summary.total_circles ?? state.circles.length;
-        state.summary.total_texts = state.summary.total_texts ?? (state.texts || []).length;
         state.summary.matched_pairs = state.circles.filter((c) => c.matched_text_id).length;
         state.summary.duplicate_groups = state.summary.duplicate_groups ?? state.duplicates.length;
       }

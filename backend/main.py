@@ -54,7 +54,7 @@ from .construction_reports import (
     list_datasets as list_construction_datasets,
     sync_pdam_workbook,
 )
-from .dxf_parser import parse_dxf_entities
+from .dxf_parser import foundation_pf_only_flag, parse_dxf_entities
 from .excel_compare import compare_excel_workbook, inspect_excel_workbook
 from .models import (
     ApplyFilterRequest,
@@ -557,17 +557,36 @@ def filter_circles(
     return result
 
 
+def _is_foundation_pf_text_item(text: Any) -> bool:
+    """구버전 저장 데이터(플래그 누락)까지 포함해 P/F 기초 표기 여부를 판별."""
+    if isinstance(text, dict):
+        if text.get("foundation_pf_only"):
+            return True
+        if foundation_pf_only_flag(str(text.get("text") or "")):
+            text["foundation_pf_only"] = True
+            return True
+        return False
+    if bool(getattr(text, "foundation_pf_only", False)):
+        return True
+    return foundation_pf_only_flag(str(getattr(text, "text", "") or ""))
+
+
+def _count_non_foundation_texts(texts: List[Any]) -> int:
+    return sum(1 for text in texts or [] if not _is_foundation_pf_text_item(text))
+
+
 def filter_texts(
     texts: List[Dict],
     min_height: float,
     max_height: float,
 ) -> List[Dict]:
-    return [
-        text.copy()
-        for text in texts
-        if min_height <= text["height"] <= max_height
-        or text.get("foundation_pf_only")
-    ]
+    filtered: List[Dict] = []
+    for text in texts:
+        copied = text.copy()
+        is_pf_only = _is_foundation_pf_text_item(copied)
+        if min_height <= copied["height"] <= max_height or is_pf_only:
+            filtered.append(copied)
+    return filtered
 
 
 def build_text_spatial_index(
@@ -1157,6 +1176,8 @@ def compute_building_summary(
         if circle.get("has_error"):
             summary[name]["errors"] += 1
     for text in texts:
+        if _is_foundation_pf_text_item(text):
+            continue
         name = text.get("building_name") or "미할당"
         summary[name]["texts"] += 1
     for building in buildings:
@@ -1482,7 +1503,7 @@ def build_match_errors(
     errors: List[MatchError] = []
 
     for text in texts:
-        if text.get("foundation_pf_only"):
+        if _is_foundation_pf_text_item(text):
             text["matched_circle_ids"] = []
             text["has_error"] = False
             continue
@@ -1875,7 +1896,7 @@ def build_response(
     )
     summary = SummaryStats(
         total_circles=len(filtered_circles),
-        total_texts=len(filtered_texts),
+        total_texts=_count_non_foundation_texts(filtered_texts),
         matched_pairs=matched_pairs,
         duplicate_groups=len(duplicate_groups),
     )
@@ -2008,7 +2029,7 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
     )
     summary = SummaryStats(
         total_circles=len(filtered_circles),
-        total_texts=len(filtered_texts),
+        total_texts=_count_non_foundation_texts(filtered_texts),
         matched_pairs=matched_pairs,
         duplicate_groups=len(duplicate_groups),
     )
@@ -2109,6 +2130,8 @@ def prepare_export_rows(
         if circle.has_error:
             summary_map[name]["errors"] += 1
     for text in texts:
+        if _is_foundation_pf_text_item(text):
+            continue
         name = text.building_name or "Unassigned"
         summary_map[name]["texts"] += 1
 
@@ -2941,7 +2964,7 @@ async def recompute_from_circles(payload: RecomputeRequest) -> CircleResponse:
     matched = sum(1 for c in circles if c.get("matched_text_id"))
     summary = SummaryStats(
         total_circles=len(circles),
-        total_texts=len(texts),
+        total_texts=_count_non_foundation_texts(texts),
         matched_pairs=matched,
         duplicate_groups=0,
     )
@@ -3104,7 +3127,7 @@ def _build_filtered_circle_response(
     )
     summary = SummaryStats(
         total_circles=len(filtered_circles),
-        total_texts=len(filtered_texts),
+        total_texts=_count_non_foundation_texts(filtered_texts),
         matched_pairs=matched_pairs,
         duplicate_groups=len(duplicate_groups),
     )
