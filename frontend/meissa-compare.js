@@ -2098,6 +2098,13 @@
       o.textContent = `${d.name || d.filename || d.id}${proj}`;
       els.dataset.appendChild(o);
     });
+    // 목록은 created_at DESC이므로 첫 항목을 기본(최신 저장 세트)으로 맞춘다.
+    const latestDatasetId = arr[0]?.id || "";
+    if (latestDatasetId && [...els.dataset.options].some((option) => option.value === latestDatasetId)) {
+      els.dataset.value = latestDatasetId;
+    } else {
+      els.dataset.value = "";
+    }
   }
 
   async function postDashboard(payload) {
@@ -12573,7 +12580,12 @@
     initFromQuery();
     try {
       await refreshDatasets();
-      setStatus(els.pdamStatus, "데이터셋을 고른 뒤 날짜 목록을 불러오세요.");
+      setStatus(
+        els.pdamStatus,
+        (els.dataset?.value || "").trim()
+          ? "최신 데이터셋을 자동 선택했습니다. 날짜 목록을 불러오세요."
+          : "데이터셋을 고른 뒤 날짜 목록을 불러오세요."
+      );
     } catch (e) {
       setStatus(els.pdamStatus, e.message || String(e), true);
     }
