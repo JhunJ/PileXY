@@ -1803,7 +1803,7 @@
         const labelParts = buildFoundationCanvasLabelParts(circle);
         if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
           const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
-          drawFoundationCanvasLabelStack(x, y, labelParts);
+          drawFoundationCanvasLabelStack(circle, x, y, labelParts);
         }
       }
       return;
@@ -1840,7 +1840,7 @@
     if (isFoundationLabelVizEnabled()) {
       const labelParts = buildFoundationCanvasLabelParts(circle);
       if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
-        drawFoundationCanvasLabelStack(x, y, labelParts);
+        drawFoundationCanvasLabelStack(circle, x, y, labelParts);
       }
     }
   };
@@ -4993,17 +4993,46 @@ function inferOpenRectangleVertices(vertices) {
     return parts.length ? parts.map((p) => p.text).join(", ") : "";
   }
 
-  function drawFoundationCanvasLabelStack(canvasX, canvasY, parts) {
+  function drawFoundationCanvasLabelStack(circle, canvasX, canvasY, parts) {
     if (!parts.length) return;
+    const rawRadius = Number(circle?.radius);
+    const zoom = Number.isFinite(Number(view.scale)) ? Number(view.scale) : 1;
+    const radiusPx = Number.isFinite(rawRadius) ? Math.max(2, rawRadius * zoom) : 2;
+    const fontPx = Math.max(12, Math.min(15, Math.round(12 + Math.log2(Math.max(zoom, 0.5)))));
+    const lineHeight = fontPx + 4;
+    const textPadX = 6;
+    const textPadY = 5;
+    const topGap = state.showTextLabels !== false ? 22 : 10;
     ctx.save();
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    const lineHeight = 12;
-    const bottomY = canvasY - 7;
+    ctx.font = `600 ${fontPx}px "Segoe UI", sans-serif`;
+    const widths = parts.map((part) => ctx.measureText(part.text).width);
+    const boxWidth = Math.ceil((widths.length ? Math.max(...widths) : 0) + textPadX * 2);
+    const boxHeight = Math.ceil(parts.length * lineHeight + textPadY * 2 - 2);
+    const canvasSize = typeof getCanvasSize === "function"
+      ? getCanvasSize()
+      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
+    let boxX = canvasX + radiusPx + 8;
+    let boxY = canvasY - radiusPx - topGap - boxHeight;
+    const maxBoxX = Math.max(4, canvasSize.width - boxWidth - 4);
+    if (boxX > maxBoxX) {
+      boxX = Math.max(4, canvasX - radiusPx - 8 - boxWidth);
+    }
+    if (boxY < 4) {
+      boxY = Math.min(canvasSize.height - boxHeight - 4, canvasY + radiusPx + 10);
+    }
+    boxY = Math.max(4, Math.min(boxY, canvasSize.height - boxHeight - 4));
+    ctx.fillStyle = "rgba(15, 23, 42, 0.78)";
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
     parts.forEach((part, i) => {
+      const textY = boxY + textPadY + i * lineHeight;
+      const textX = boxX + textPadX;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(2, 6, 23, 0.92)";
+      ctx.strokeText(part.text, textX, textY);
       ctx.fillStyle = part.fillStyle;
-      ctx.fillText(part.text, canvasX, bottomY - (parts.length - 1 - i) * lineHeight);
+      ctx.fillText(part.text, textX, textY);
     });
     ctx.restore();
   }
