@@ -3042,6 +3042,7 @@ function handlePayload(payload) {
       ...buildSameBuildingNumberDuplicateGroups(state.circles),
     ];
     if (state.summary && typeof state.summary === "object") {
+      state.summary.total_texts = countMatchableTexts(state.texts);
       state.summary.duplicate_groups = state.duplicates.length;
     }
   }
@@ -3901,6 +3902,35 @@ const ERROR_TYPE_LABELS = {
 
 const COORD_PRECISION = 6;
 
+function foundationPfOnlyFromTextValue(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\u2212/g, "-")
+    .replace(/\u2013/g, "-")
+    .replace(/\u2014/g, "-");
+  const compact = normalized.replace(/\s+/g, "");
+  if (!compact) return false;
+  if (/^[0-9.\-]+$/.test(compact)) return false;
+  if (/^([Tt])(\d+)-(\d+)$/.test(compact)) return false;
+  const c0 = compact[0]?.toUpperCase();
+  if (c0 !== "P" && c0 !== "F") return false;
+  if (compact.length === 1) return true;
+  const c1 = compact[1];
+  return c1 === "-" || c1 === "." || /\d/.test(c1);
+}
+
+function isFoundationPfOnlyTextRecord(text) {
+  if (!text || typeof text !== "object") return false;
+  if (text.foundation_pf_only === true) return true;
+  return foundationPfOnlyFromTextValue(text.text);
+}
+
+function countMatchableTexts(texts) {
+  return (texts || []).reduce((count, text) => (
+    isFoundationPfOnlyTextRecord(text) ? count : count + 1
+  ), 0);
+}
+
 /** 불러온 circles/texts만으로 에러 목록 재계산 및 각 circle/text에 has_error 반영 (불러오기 시 저장에 에러가 없을 때 사용) */
 function buildErrorsFromCirclesAndTexts(circles, texts) {
   const errors = [];
@@ -3917,6 +3947,12 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     textToCircleIds.get(key).push(c.id);
   });
   (texts || []).forEach((text) => {
+    if (isFoundationPfOnlyTextRecord(text)) {
+      text.foundation_pf_only = true;
+      text.matched_circle_ids = [];
+      text.has_error = false;
+      return;
+    }
     const circleIds = textToCircleIds.get(String(text.id)) || [];
     text.matched_circle_ids = circleIds;
     if (circleIds.length > 1) {
@@ -4088,6 +4124,7 @@ function refreshMatchDerivedUIState() {
   const numDup = buildSameBuildingNumberDuplicateGroups(state.circles);
   state.duplicates = [...geoDup, ...numDup];
   if (state.summary && typeof state.summary === "object") {
+    state.summary.total_texts = countMatchableTexts(state.texts);
     state.summary.matched_pairs = state.circles.filter((c) => c.matched_text_id).length;
     state.summary.duplicate_groups = state.duplicates.length;
   }
@@ -8707,10 +8744,11 @@ async function handleLoadWork(id, loadBtn) {
       // 저장된 errors는 circles/texts와 불일치할 수 있음(수동 매칭 후 PATCH로 errors만 비운 경우 등) → 항상 현재 데이터 기준으로 재계산
       state.errors = buildErrorsFromCirclesAndTexts(state.circles, state.texts);
       refreshMatchDerivedUIState();
+      if (!state.summary) state.summary = {};
+      state.summary.total_texts = countMatchableTexts(state.texts || []);
       if (!state.summary || typeof state.summary.matched_pairs !== "number") {
         if (!state.summary) state.summary = {};
         state.summary.total_circles = state.summary.total_circles ?? state.circles.length;
-        state.summary.total_texts = state.summary.total_texts ?? (state.texts || []).length;
         state.summary.matched_pairs = state.circles.filter((c) => c.matched_text_id).length;
         state.summary.duplicate_groups = state.summary.duplicate_groups ?? state.duplicates.length;
       }
