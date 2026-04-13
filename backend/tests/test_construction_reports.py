@@ -1406,6 +1406,32 @@ def test_dedupe_circles_loose_geometry_uses_quarter_radius_center_tolerance():
     assert len(loose_outside) == 2
 
 
+def test_location_progress_infers_unspecified_record_to_unique_circle_location():
+    circles = [
+        {
+            "id": "c1",
+            "building_name": "B2",
+            "matched_text": {"text": "470"},
+            "center_x": 100.0,
+            "center_y": 200.0,
+            "radius": 0.4,
+        }
+    ]
+    period_latest = [{"location": "", "pile_number": "470"}]
+    cumulative_latest = [{"location": "미지정", "pile_number": "470"}]
+    rows = construction_reports._build_location_progress(
+        circles,
+        period_latest,
+        cumulative_latest,
+        parking_unified_location="B2",
+    )
+    assert len(rows) == 1
+    assert rows[0]["location"] == "B2"
+    assert rows[0]["periodInstalledCount"] == 1
+    assert rows[0]["cumulativeInstalledCount"] == 1
+    assert rows[0]["totalPlannedCount"] == 1
+
+
 def test_build_filter_options_excludes_column_header_echo_rows():
     """엑셀 열 이름(시공장비·시공공법·시공위치 등)이 값으로 들어간 행은 필터 칩 집계에서 제외한다."""
     records = [

@@ -2891,10 +2891,15 @@ def _build_mapping_diagnostics(
     }
 
 
-def _circle_location_totals(circles: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+def _circle_location_totals(
+    circles: Sequence[Dict[str, Any]],
+    *,
+    parking_unified_location: Optional[str] = None,
+) -> Dict[str, int]:
     totals: Dict[str, int] = defaultdict(int)
     for circle in circles:
-        totals[_location_progress_bucket(circle.get("building_name"))] += 1
+        circle_location = _circle_location_for_pdam_match(circle, parking_unified_location)
+        totals[_location_progress_bucket(circle_location)] += 1
     return totals
 
 
@@ -2921,15 +2926,51 @@ def _build_location_progress(
     circles: Sequence[Dict[str, Any]],
     settlement_latest: Sequence[Dict[str, Any]],
     cumulative_latest: Sequence[Dict[str, Any]],
+    *,
+    parking_unified_location: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    planned_totals = _circle_location_totals(circles)
+    planned_totals = _circle_location_totals(
+        circles,
+        parking_unified_location=parking_unified_location,
+    )
     period_counts: Dict[str, int] = defaultdict(int)
     cumulative_counts: Dict[str, int] = defaultdict(int)
+    location_by_pile: Dict[str, set[str]] = defaultdict(set)
+
+    for circle in circles:
+        pile = _circle_number(circle)
+        if not pile:
+            continue
+        bucket = _location_progress_bucket(
+            _circle_location_for_pdam_match(circle, parking_unified_location)
+        )
+        if bucket and bucket != "미지정":
+            location_by_pile[pile].add(bucket)
+
+    def bucket_for_record(record: Dict[str, Any]) -> str:
+        base_location = (
+            _record_location_for_pdam_match(record, parking_unified_location)
+            if parking_unified_location
+            else record.get("location")
+        )
+        bucket = _location_progress_bucket(base_location)
+        if bucket != "미지정":
+            return bucket
+        inferred: set[str] = set()
+        for alias in _pile_number_aliases(
+            record.get("pile_number"),
+            location=record.get("location"),
+        ):
+            inferred.update(location_by_pile.get(alias, set()))
+        inferred.discard("미지정")
+        if len(inferred) == 1:
+            return next(iter(inferred))
+        return bucket
 
     for record in settlement_latest:
-        period_counts[_location_progress_bucket(record.get("location"))] += 1
+        period_counts[bucket_for_record(record)] += 1
     for record in cumulative_latest:
-        cumulative_counts[_location_progress_bucket(record.get("location"))] += 1
+        cumulative_counts[bucket_for_record(record)] += 1
 
     keys = set(planned_totals) | set(period_counts) | set(cumulative_counts)
     rows: List[Dict[str, Any]] = []
@@ -2960,6 +3001,7 @@ def _build_settlement_summary(
     settlement_start_day: Optional[int],
     settlement_end_day: Optional[int],
     remaining_threshold: Optional[float],
+    parking_unified_location: Optional[str] = None,
 ) -> Dict[str, Any]:
     months = sorted({record.get("construction_month") for record in records if record.get("construction_month")})
     period = _build_settlement_period(months, settlement_month, settlement_start_day, settlement_end_day)
@@ -2983,9 +3025,15 @@ def _build_settlement_summary(
         }
 
     period_records = _apply_filters(records, date_from=start_date, date_to=end_date, month=None)
-    period_latest = _latest_records_by_pile(period_records)
+    period_latest = _latest_records_by_pile(
+        period_records,
+        parking_unified_location=parking_unified_location,
+    )
     cumulative_records = _apply_filters(records, date_from=None, date_to=end_date, month=None)
-    cumulative_latest = _latest_records_by_pile(cumulative_records)
+    cumulative_latest = _latest_records_by_pile(
+        cumulative_records,
+        parking_unified_location=parking_unified_location,
+    )
 
     penetration_values = [record["penetration_depth"] for record in period_latest if record.get("penetration_depth") is not None]
     remaining_values = [record["pile_remaining"] for record in period_latest if record.get("pile_remaining") is not None]
@@ -3024,7 +3072,12 @@ def _build_settlement_summary(
             end_date=end_date,
         ),
         "byMethod": _group_summary(period_records, "construction_method"),
-        "locationProgress": _build_location_progress(circles, period_latest, cumulative_latest),
+        "locationProgress": _build_location_progress(
+            circles,
+            period_latest,
+            cumulative_latest,
+            parking_unified_location=parking_unified_location,
+        ),
         "records": period_records_grid,
     }
 
@@ -3149,6 +3202,7 @@ def build_dashboard(
         settlement_start_day=settlement_start_day,
         settlement_end_day=settlement_end_day,
         remaining_threshold=remaining_threshold,
+        parking_unified_location=parking_unified_location,
     )
 
     return {
