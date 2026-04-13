@@ -593,6 +593,9 @@
     foundationBackgroundPolylineCache: [],
     foundationGroupItemsCacheKey: "",
     foundationGroupItemsCache: [],
+    foundationTwinCircleIdsLookupKey: "",
+    foundationTwinCircleIdsLookupRef: null,
+    foundationTwinCircleIdsLookup: null,
   });
   if (!constructionState.settlementManualByKey || typeof constructionState.settlementManualByKey !== "object") {
     constructionState.settlementManualByKey = {};
@@ -1572,6 +1575,84 @@
     return `${Math.round(x * 100) / 100}_${Math.round(y * 100) / 100}`;
   }
 
+  function circlesMatchFoundationDuplicatePolicy(a, b) {
+    if (!a || !b) return false;
+    if (typeof geometryMatchesCoLocatedDupPolicy === "function") {
+      try {
+        return Boolean(geometryMatchesCoLocatedDupPolicy(a, b));
+      } catch (_error) {
+        // ignore and fallback to strict key match
+      }
+    }
+    const ak = foundationOverlayWorldPosKey(a);
+    const bk = foundationOverlayWorldPosKey(b);
+    return Boolean(ak && bk && ak === bk);
+  }
+
+  function getFoundationTwinCircleIdsLookup() {
+    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const excludeLoose = Boolean(state.filter?.excludeIdenticalGeometryDuplicates);
+    const key = `${circles.length}|${excludeLoose}`;
+    if (
+      constructionState.foundationTwinCircleIdsLookupKey === key
+      && constructionState.foundationTwinCircleIdsLookupRef === circles
+      && constructionState.foundationTwinCircleIdsLookup
+    ) {
+      return constructionState.foundationTwinCircleIdsLookup;
+    }
+    const n = circles.length;
+    const parent = circles.map((_, i) => i);
+    const find = (i) => {
+      if (parent[i] !== i) parent[i] = find(parent[i]);
+      return parent[i];
+    };
+    const union = (i, j) => {
+      const pi = find(i);
+      const pj = find(j);
+      if (pi !== pj) parent[pi] = pj;
+    };
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < n; j += 1) {
+        if (!circlesMatchFoundationDuplicatePolicy(circles[i], circles[j])) continue;
+        union(i, j);
+      }
+    }
+    const groups = new Map();
+    for (let i = 0; i < n; i += 1) {
+      const root = find(i);
+      if (!groups.has(root)) groups.set(root, []);
+      const idKey = String(circles[i]?.id ?? "").trim();
+      if (idKey) groups.get(root).push(idKey);
+    }
+    const lookup = new Map();
+    groups.forEach((idKeys) => {
+      const uniq = Array.from(new Set(idKeys)).sort((a, b) => a.localeCompare(b, "en"));
+      if (!uniq.length) return;
+      uniq.forEach((idKey) => lookup.set(idKey, uniq));
+    });
+    constructionState.foundationTwinCircleIdsLookupKey = key;
+    constructionState.foundationTwinCircleIdsLookupRef = circles;
+    constructionState.foundationTwinCircleIdsLookup = lookup;
+    return lookup;
+  }
+
+  function getFoundationTwinCircleIds(circleId) {
+    const idKey = String(circleId ?? "").trim();
+    if (!idKey) return [];
+    const lookup = getFoundationTwinCircleIdsLookup();
+    return lookup.get(idKey) || [idKey];
+  }
+
+  function expandFoundationCircleIdsWithTwins(circleIds) {
+    const out = new Set();
+    (Array.isArray(circleIds) ? circleIds : []).forEach((circleId) => {
+      const twins = getFoundationTwinCircleIds(circleId);
+      if (!twins.length) return;
+      twins.forEach((id) => out.add(String(id)));
+    });
+    return Array.from(out);
+  }
+
   /** slot: "ring" | "label" — 같은 좌표에서 링 한 번·라벨 한 번만. */
   function consumeFoundationOverlaySlot(circle, slot) {
     const posKey = foundationOverlayWorldPosKey(circle);
@@ -1584,10 +1665,23 @@
     return true;
   }
 
-  function pileNumericFromMap(map, circleId) {
+  function numericFromPerPileMapWithTwins(map, circleId) {
     if (!map || circleId == null) return null;
-    const v = map[circleId] ?? map[String(circleId)];
-    return Number.isFinite(Number(v)) ? Number(v) : null;
+    const selfKey = String(circleId).trim();
+    const direct = map[circleId] ?? map[selfKey];
+    if (Number.isFinite(Number(direct))) return Number(direct);
+    const twins = getFoundationTwinCircleIds(circleId);
+    for (let i = 0; i < twins.length; i += 1) {
+      const twinKey = String(twins[i] ?? "").trim();
+      if (!twinKey || twinKey === selfKey) continue;
+      const value = map[twinKey];
+      if (Number.isFinite(Number(value))) return Number(value);
+    }
+    return null;
+  }
+
+  function pileNumericFromMap(map, circleId) {
+    return numericFromPerPileMapWithTwins(map, circleId);
   }
 
   /** 동일 좌표 다중 말뚝일 때 누구 링/라벨을 먼저 그릴지 — 말뚝별 입력·선택이 보이게 한다. */
@@ -3393,28 +3487,8 @@ function inferOpenRectangleVertices(vertices) {
     return filteredCircles;
   }
 
-  function getFoundationThicknessMmRaw(circleId) {
-    const map = constructionState.foundationThicknessByPileId;
-    if (!map || circleId == null) return null;
-    const direct = map[circleId] ?? map[String(circleId)];
-    return Number.isFinite(Number(direct)) ? Number(direct) : null;
-  }
-
   function getFoundationThicknessMm(circleId) {
-    const direct = getFoundationThicknessMmRaw(circleId);
-    if (Number.isFinite(direct)) return direct;
-    const circle = getCircleFromMapById(circleId);
-    const worldKey = foundationOverlayWorldPosKey(circle);
-    if (!worldKey) return null;
-    const twins = Array.isArray(state.circles) ? state.circles : [];
-    for (let i = 0; i < twins.length; i += 1) {
-      const twin = twins[i];
-      if (!twin || twin.id === circleId) continue;
-      if (foundationOverlayWorldPosKey(twin) !== worldKey) continue;
-      const twinThickness = getFoundationThicknessMmRaw(twin.id);
-      if (Number.isFinite(twinThickness)) return twinThickness;
-    }
-    return null;
+    return numericFromPerPileMapWithTwins(constructionState.foundationThicknessByPileId, circleId);
   }
 
   /** 구역(정규화 위치명)별로 이미 지정된 두께 중 건수가 가장 많은 mm (기초골조 탭 불러오기용). */
@@ -3434,8 +3508,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function getFoundationPitOffsetM(circleId) {
-    const value = constructionState.foundationPitOffsetByPileId?.[circleId];
-    return Number.isFinite(Number(value)) ? Number(value) : null;
+    return numericFromPerPileMapWithTwins(constructionState.foundationPitOffsetByPileId, circleId);
   }
 
   /** circleMap 키가 숫자/문자 혼용일 때 조회 실패 방지 */
@@ -3463,7 +3536,7 @@ function inferOpenRectangleVertices(vertices) {
 
   /** 말뚝별 값이 있으면 우선, 없으면 동·주차장 설정(윤곽) 값. */
   function getDrillingElevationMForCircle(circleId) {
-    const direct = constructionState.drillingStartByPileId?.[circleId];
+    const direct = numericFromPerPileMapWithTwins(constructionState.drillingStartByPileId, circleId);
     if (Number.isFinite(Number(direct))) return Number(direct);
     const circle = getCircleFromMapById(circleId);
     const norm = normForBuildingSettingsFromCircle(circle);
@@ -3471,7 +3544,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function getFoundationTopElevationMForCircle(circleId) {
-    const direct = constructionState.foundationTopByPileId?.[circleId];
+    const direct = numericFromPerPileMapWithTwins(constructionState.foundationTopByPileId, circleId);
     if (Number.isFinite(Number(direct))) return Number(direct);
     const circle = getCircleFromMapById(circleId);
     const norm = normForBuildingSettingsFromCircle(circle);
@@ -3487,7 +3560,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function applyFoundationThicknessToCircles(circleIds, mmValue) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     if (!ids.length) return;
     if (!Number.isFinite(mmValue) || mmValue < 0) return;
     ids.forEach((circleId) => {
@@ -3499,7 +3572,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function clearFoundationThicknessForCircles(circleIds) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     ids.forEach((circleId) => {
       delete constructionState.foundationThicknessByPileId[circleId];
     });
@@ -3509,7 +3582,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function applyFoundationPitOffsetToCircles(circleIds, offsetM) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     if (!ids.length) return;
     if (!Number.isFinite(offsetM) || offsetM < 0) return;
     ids.forEach((circleId) => {
@@ -3525,7 +3598,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function clearFoundationPitOffsetForCircles(circleIds) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     ids.forEach((circleId) => {
       delete constructionState.foundationPitOffsetByPileId[circleId];
     });
@@ -3535,7 +3608,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function applyDrillingStartToCircles(circleIds, mValue) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     if (!ids.length) return;
     if (!Number.isFinite(mValue)) return;
     ids.forEach((circleId) => {
@@ -3547,7 +3620,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function clearDrillingStartForCircles(circleIds) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     ids.forEach((circleId) => {
       delete constructionState.drillingStartByPileId[circleId];
     });
@@ -3557,7 +3630,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function applyFoundationTopElevationToCircles(circleIds, mValue) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     if (!ids.length) return;
     if (!Number.isFinite(mValue)) return;
     ids.forEach((circleId) => {
@@ -3569,7 +3642,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function clearFoundationTopElevationForCircles(circleIds) {
-    const ids = Array.isArray(circleIds) ? circleIds : [];
+    const ids = expandFoundationCircleIdsWithTwins(circleIds);
     ids.forEach((circleId) => {
       delete constructionState.foundationTopByPileId[circleId];
     });
@@ -5705,8 +5778,8 @@ function inferOpenRectangleVertices(vertices) {
 
   /**
    * PDAM 행 ↔ 도면 말뚝 연결.
-   * 동일 좌표에 원이 여러 개(중복 지오메트리)일 때 번호 텍스트는 한쪽(C4)에만 있고 두께는 다른 id(C4034)에만 있는 경우가 있음.
-   * 같은 중심(반올림) 그룹 안에서 파일번호를 합쳐, 번호 없는 원도 `위치|470`에 mergeSettlementCircleId로 묶인다.
+   * 동일/근접 좌표(중복 지오메트리)로 원이 여러 개인 경우 번호 텍스트·두께 입력이 서로 다른 id에 분산될 수 있다.
+   * 중복 제외 정책(엄격/느슨)과 같은 클러스터로 파일번호를 합쳐, 번호 없는 원도 `위치|470`에 mergeSettlementCircleId로 묶는다.
    */
   function buildCircleLookupByLocationAndPile() {
     const lookup = new Map();
@@ -5714,10 +5787,12 @@ function inferOpenRectangleVertices(vertices) {
     const circles = state.circles || [];
     const byPos = new Map();
     circles.forEach((c) => {
-      const wk = foundationOverlayWorldPosKey(c);
-      if (!wk) return;
-      if (!byPos.has(wk)) byPos.set(wk, []);
-      byPos.get(wk).push(c);
+      const idKey = String(c?.id ?? "").trim();
+      if (!idKey) return;
+      const twins = getFoundationTwinCircleIds(idKey);
+      const clusterKey = twins.length ? twins[0] : idKey;
+      if (!byPos.has(clusterKey)) byPos.set(clusterKey, []);
+      byPos.get(clusterKey).push(c);
     });
     byPos.forEach((group) => {
       const unionPileKeys = new Set();

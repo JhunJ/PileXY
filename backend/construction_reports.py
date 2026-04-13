@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import sqlite3
@@ -1305,13 +1306,14 @@ def _circles_loose_same_file_geometry(a: Dict[str, Any], b: Dict[str, Any]) -> b
     if ra <= 0 or rb <= 0:
         return False
     eps = 1e-4
-    dcx = abs(ax - bx)
-    dcy = abs(ay - by)
+    center_distance = math.hypot(ax - bx, ay - by)
     dr = abs(ra - rb)
     mn = min(ra, rb)
-    center_tol = max(eps * 8, mn * 0.0035)
-    r_tol = max(eps * 5, mn * 0.0025)
-    return dcx <= center_tol and dcy <= center_tol and dr <= r_tol
+    # 「중복 제외」 켜짐: 중심이 파일 반지름 1/4 이내로 어긋난 약한 좌표 오차는 동일 심볼로 본다.
+    center_tol = max(eps * 16, mn * 0.25)
+    # 반지름은 동일 크기 전제를 유지하되 도면 반올림 오차를 위해 소폭 허용.
+    r_tol = max(eps * 10, mn * 0.1)
+    return center_distance <= center_tol and dr <= r_tol
 
 
 def _circle_mapping_priority_score(circle: Dict[str, Any]) -> int:

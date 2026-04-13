@@ -4154,12 +4154,16 @@ function sameFileCircleGeometryLoose(a, b) {
   const ra = rad(a);
   const rb = rad(b);
   if (ra <= 0 || rb <= 0) return false;
-  const dcx = Math.abs(cx(a) - cx(b));
-  const dcy = Math.abs(cy(a) - cy(b));
+  const dx = cx(a) - cx(b);
+  const dy = cy(a) - cy(b);
+  const centerDistance = Math.hypot(dx, dy);
   const dr = Math.abs(ra - rb);
-  const centerTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 8, Math.min(ra, rb) * 0.0035);
-  const rTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 5, Math.min(ra, rb) * 0.0025);
-  return dcx <= centerTol && dcy <= centerTol && dr <= rTol;
+  const minRadius = Math.min(ra, rb);
+  // 「중복 제외」 켜짐: 중심이 파일 반지름의 1/4 이내로 이동한 약한 오차는 동일 심볼로 간주한다.
+  const centerTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 16, minRadius * 0.25);
+  // 반지름은 '동일 크기' 전제를 유지하되 도면 반올림 오차를 위해 소폭 허용.
+  const rTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 10, minRadius * 0.1);
+  return centerDistance <= centerTol && dr <= rTol;
 }
 
 /**

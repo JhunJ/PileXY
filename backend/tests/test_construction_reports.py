@@ -1374,6 +1374,38 @@ def test_dedupe_circles_loose_geometry_matches_exclude_duplicate_option():
     assert len(loose) == 1
 
 
+def test_dedupe_circles_loose_geometry_uses_quarter_radius_center_tolerance():
+    a = {
+        "id": "a",
+        "center_x": 100.0,
+        "center_y": 200.0,
+        "radius": 0.4,
+        "matched_text": {"text": "470"},
+    }
+    b_inside = {
+        "id": "b_inside",
+        "center_x": 100.09,  # radius(0.4)의 1/4(0.1) 이내
+        "center_y": 200.0,
+        "radius": 0.4,
+        "matched_text": {"text": "470"},
+    }
+    b_outside = {
+        "id": "b_outside",
+        "center_x": 100.11,  # radius(0.4)의 1/4(0.1) 초과
+        "center_y": 200.0,
+        "radius": 0.4,
+        "matched_text": {"text": "470"},
+    }
+    loose_inside, _ = construction_reports.dedupe_circles_for_construction_mapping(
+        [a, b_inside], exclude_identical_geometry_duplicates=True
+    )
+    loose_outside, _ = construction_reports.dedupe_circles_for_construction_mapping(
+        [a, b_outside], exclude_identical_geometry_duplicates=True
+    )
+    assert len(loose_inside) == 1
+    assert len(loose_outside) == 2
+
+
 def test_build_filter_options_excludes_column_header_echo_rows():
     """엑셀 열 이름(시공장비·시공공법·시공위치 등)이 값으로 들어간 행은 필터 칩 집계에서 제외한다."""
     records = [
