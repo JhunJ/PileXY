@@ -1803,7 +1803,7 @@
         const labelParts = buildFoundationCanvasLabelParts(circle);
         if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
           const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
-          drawFoundationCanvasLabelStack(x, y, labelParts);
+          drawFoundationCanvasLabelStack(circle, x, y, labelParts);
         }
       }
       return;
@@ -1840,7 +1840,7 @@
     if (isFoundationLabelVizEnabled()) {
       const labelParts = buildFoundationCanvasLabelParts(circle);
       if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
-        drawFoundationCanvasLabelStack(x, y, labelParts);
+        drawFoundationCanvasLabelStack(circle, x, y, labelParts);
       }
     }
   };
@@ -3251,7 +3251,9 @@ function inferOpenRectangleVertices(vertices) {
       return constructionState.foundationGroupItemsCache;
     }
     const targetKinds = new Set(["building", "parking"]);
-    const circles = (state.circles || []).filter((circle) => targetKinds.has(getCircleAreaKind(circle)));
+    const circles = (state.circles || []).filter((circle) => (
+      targetKinds.has(getCircleAreaKind(circle)) && isNumberMatchedCircle(circle)
+    ));
     // 클릭 선택 경로와 동일한 폴리라인 집합을 사용해 필터 결과 불일치를 줄인다.
     const polylines = getBackgroundPolylinesForClick();
     const byNormName = new Map();
@@ -3342,6 +3344,8 @@ function inferOpenRectangleVertices(vertices) {
     groups.forEach((group) => {
       const insideKey = `${group.key}:inside`;
       const outsideKey = `${group.key}:outside`;
+      const specifiedKey = `${group.key}:specified`;
+      const unspecifiedKey = `${group.key}:unspecified`;
       if (group.kind === "parking") {
         const bucket = getBasementCountBucket(group.insideIds.length);
         const filter = constructionState.foundationParkingCountFilter || "all";
@@ -3354,6 +3358,16 @@ function inferOpenRectangleVertices(vertices) {
       if (subgroupKeys.has(outsideKey)) {
         group.outsideIds.forEach((id) => ids.add(id));
         // 외부 선택은 파일 선택 범위만 의미하고, 폴리라인 강조 대상은 아니다.
+      }
+      if (subgroupKeys.has(specifiedKey)) {
+        group.circleIds.forEach((id) => {
+          if (Number.isFinite(getFoundationThicknessMm(id))) ids.add(id);
+        });
+      }
+      if (subgroupKeys.has(unspecifiedKey)) {
+        group.circleIds.forEach((id) => {
+          if (!Number.isFinite(getFoundationThicknessMm(id))) ids.add(id);
+        });
       }
     });
     if (subgroupKeys.size) {
@@ -3379,9 +3393,28 @@ function inferOpenRectangleVertices(vertices) {
     return filteredCircles;
   }
 
+  function getFoundationThicknessMmRaw(circleId) {
+    const map = constructionState.foundationThicknessByPileId;
+    if (!map || circleId == null) return null;
+    const direct = map[circleId] ?? map[String(circleId)];
+    return Number.isFinite(Number(direct)) ? Number(direct) : null;
+  }
+
   function getFoundationThicknessMm(circleId) {
-    const value = constructionState.foundationThicknessByPileId?.[circleId];
-    return Number.isFinite(Number(value)) ? Number(value) : null;
+    const direct = getFoundationThicknessMmRaw(circleId);
+    if (Number.isFinite(direct)) return direct;
+    const circle = getCircleFromMapById(circleId);
+    const worldKey = foundationOverlayWorldPosKey(circle);
+    if (!worldKey) return null;
+    const twins = Array.isArray(state.circles) ? state.circles : [];
+    for (let i = 0; i < twins.length; i += 1) {
+      const twin = twins[i];
+      if (!twin || twin.id === circleId) continue;
+      if (foundationOverlayWorldPosKey(twin) !== worldKey) continue;
+      const twinThickness = getFoundationThicknessMmRaw(twin.id);
+      if (Number.isFinite(twinThickness)) return twinThickness;
+    }
+    return null;
   }
 
   /** 구역(정규화 위치명)별로 이미 지정된 두께 중 건수가 가장 많은 mm (기초골조 탭 불러오기용). */
@@ -3614,8 +3647,12 @@ function inferOpenRectangleVertices(vertices) {
     const renderKindRows = (kindRows, kindClass) => kindRows.map((group) => {
       const insideKey = `${group.key}:inside`;
       const outsideKey = `${group.key}:outside`;
+      const specifiedKey = `${group.key}:specified`;
+      const unspecifiedKey = `${group.key}:unspecified`;
       const insideChecked = constructionState.foundationSelectedSubgroupKeys?.has(insideKey);
       const outsideChecked = constructionState.foundationSelectedSubgroupKeys?.has(outsideKey);
+      const specifiedChecked = constructionState.foundationSelectedSubgroupKeys?.has(specifiedKey);
+      const unspecifiedChecked = constructionState.foundationSelectedSubgroupKeys?.has(unspecifiedKey);
       const ids = group.circleIds || [];
       let thicknessSpecified = 0;
       ids.forEach((id) => {
@@ -3633,6 +3670,12 @@ function inferOpenRectangleVertices(vertices) {
           </button>
           <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--outside${outsideChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(outsideKey)}" title="외부 선택">
             <span>외부 ${group.outsideIds.length}</span>
+          </button>
+          <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--specified${specifiedChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(specifiedKey)}" title="두께 지정 말뚝만 선택">
+            <span>지정 ${thicknessSpecified}</span>
+          </button>
+          <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--unspecified${unspecifiedChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(unspecifiedKey)}" title="두께 미지정 말뚝만 선택">
+            <span>미지정 ${thicknessUnset}</span>
           </button>
         </div>
       </label>`;
@@ -4993,17 +5036,54 @@ function inferOpenRectangleVertices(vertices) {
     return parts.length ? parts.map((p) => p.text).join(", ") : "";
   }
 
-  function drawFoundationCanvasLabelStack(canvasX, canvasY, parts) {
+  function drawFoundationCanvasLabelStack(circle, canvasX, canvasY, parts) {
     if (!parts.length) return;
+    const rawRadius = Number(circle?.radius);
+    const zoom = Number.isFinite(Number(view.scale)) ? Number(view.scale) : 1;
+    const radiusPx = Number.isFinite(rawRadius) ? Math.max(2, rawRadius * zoom) : 2;
+    const fontPx = Math.max(12, Math.min(15, Math.round(12 + Math.log2(Math.max(zoom, 0.5)))));
+    const lineHeight = fontPx + 4;
+    const textPadX = 6;
+    const textPadY = 5;
+    const textLayerGap = state.showTextLabels !== false ? 22 : 10;
+    const anchorLift = state.showTextLabels !== false ? 24 : 14;
+    const canvasSize = typeof getCanvasSize === "function"
+      ? getCanvasSize()
+      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
+    const viewportPadding = 24;
+    if (
+      canvasX < -viewportPadding
+      || canvasX > canvasSize.width + viewportPadding
+      || canvasY < -viewportPadding
+      || canvasY > canvasSize.height + viewportPadding
+    ) {
+      return;
+    }
     ctx.save();
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    const lineHeight = 12;
-    const bottomY = canvasY - 7;
+    ctx.font = `600 ${fontPx}px "Segoe UI", sans-serif`;
+    const widths = parts.map((part) => ctx.measureText(part.text).width);
+    const boxWidth = Math.ceil((widths.length ? Math.max(...widths) : 0) + textPadX * 2);
+    const boxHeight = Math.ceil(parts.length * lineHeight + textPadY * 2 - 2);
+    let boxX = canvasX - boxWidth / 2;
+    let boxY = canvasY - anchorLift - boxHeight;
+    const maxBoxX = Math.max(4, canvasSize.width - boxWidth - 4);
+    boxX = Math.max(4, Math.min(boxX, maxBoxX));
+    if (boxY < 4) {
+      boxY = Math.min(canvasSize.height - boxHeight - 4, canvasY + Math.min(24, radiusPx + 8));
+    }
+    boxY = Math.max(4, Math.min(boxY, canvasSize.height - boxHeight - 4));
+    ctx.fillStyle = "rgba(15, 23, 42, 0.78)";
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
     parts.forEach((part, i) => {
+      const textY = boxY + textPadY + i * lineHeight;
+      const textX = boxX + textPadX;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(2, 6, 23, 0.92)";
+      ctx.strokeText(part.text, textX, textY);
       ctx.fillStyle = part.fillStyle;
-      ctx.fillText(part.text, canvasX, bottomY - (parts.length - 1 - i) * lineHeight);
+      ctx.fillText(part.text, textX, textY);
     });
     ctx.restore();
   }
