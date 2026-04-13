@@ -3344,6 +3344,8 @@ function inferOpenRectangleVertices(vertices) {
     groups.forEach((group) => {
       const insideKey = `${group.key}:inside`;
       const outsideKey = `${group.key}:outside`;
+      const specifiedKey = `${group.key}:specified`;
+      const unspecifiedKey = `${group.key}:unspecified`;
       if (group.kind === "parking") {
         const bucket = getBasementCountBucket(group.insideIds.length);
         const filter = constructionState.foundationParkingCountFilter || "all";
@@ -3356,6 +3358,16 @@ function inferOpenRectangleVertices(vertices) {
       if (subgroupKeys.has(outsideKey)) {
         group.outsideIds.forEach((id) => ids.add(id));
         // 외부 선택은 파일 선택 범위만 의미하고, 폴리라인 강조 대상은 아니다.
+      }
+      if (subgroupKeys.has(specifiedKey)) {
+        group.circleIds.forEach((id) => {
+          if (Number.isFinite(getFoundationThicknessMm(id))) ids.add(id);
+        });
+      }
+      if (subgroupKeys.has(unspecifiedKey)) {
+        group.circleIds.forEach((id) => {
+          if (!Number.isFinite(getFoundationThicknessMm(id))) ids.add(id);
+        });
       }
     });
     if (subgroupKeys.size) {
@@ -3616,8 +3628,12 @@ function inferOpenRectangleVertices(vertices) {
     const renderKindRows = (kindRows, kindClass) => kindRows.map((group) => {
       const insideKey = `${group.key}:inside`;
       const outsideKey = `${group.key}:outside`;
+      const specifiedKey = `${group.key}:specified`;
+      const unspecifiedKey = `${group.key}:unspecified`;
       const insideChecked = constructionState.foundationSelectedSubgroupKeys?.has(insideKey);
       const outsideChecked = constructionState.foundationSelectedSubgroupKeys?.has(outsideKey);
+      const specifiedChecked = constructionState.foundationSelectedSubgroupKeys?.has(specifiedKey);
+      const unspecifiedChecked = constructionState.foundationSelectedSubgroupKeys?.has(unspecifiedKey);
       const ids = group.circleIds || [];
       let thicknessSpecified = 0;
       ids.forEach((id) => {
@@ -3635,6 +3651,12 @@ function inferOpenRectangleVertices(vertices) {
           </button>
           <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--outside${outsideChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(outsideKey)}" title="외부 선택">
             <span>외부 ${group.outsideIds.length}</span>
+          </button>
+          <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--specified${specifiedChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(specifiedKey)}" title="두께 지정 말뚝만 선택">
+            <span>지정 ${thicknessSpecified}</span>
+          </button>
+          <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--unspecified${unspecifiedChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(unspecifiedKey)}" title="두께 미지정 말뚝만 선택">
+            <span>미지정 ${thicknessUnset}</span>
           </button>
         </div>
       </label>`;
