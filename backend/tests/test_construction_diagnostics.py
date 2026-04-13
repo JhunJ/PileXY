@@ -92,8 +92,9 @@ def test_build_dashboard_reports_auto_matches_and_mapping_diagnostics(monkeypatc
         circles=[
             {"id": "C1", "building_name": "201", "matched_text": {"text": "10"}},
             {"id": "C2", "building_name": "B3", "matched_text": {"text": "34"}},
-            {"id": "C3", "building_name": "B2", "matched_text": {"text": "50"}},
-            {"id": "C4", "building_name": "B2", "matched_text": {"text": "50"}},
+            # 서로 다른 좌표(동일 기하 병합 대상 아님)인데 동·번호가 같아 프로젝트 중복으로 잡힌다.
+            {"id": "C3", "building_name": "B2", "matched_text": {"text": "50"}, "center_x": 10.0, "center_y": 20.0, "radius": 0.4},
+            {"id": "C4", "building_name": "B2", "matched_text": {"text": "50"}, "center_x": 100.0, "center_y": 200.0, "radius": 0.4},
             {"id": "C5", "building_name": "building_8", "matched_text": {"text": "999"}},
         ],
     )
@@ -110,6 +111,7 @@ def test_build_dashboard_reports_auto_matches_and_mapping_diagnostics(monkeypatc
         "pdamOnlyCount": 1,
         "projectDuplicateCount": 1,
         "pdamDuplicateCount": 0,
+        "parkingPileFormatIssueCount": 0,
     }
     assert diagnostics["autoMatched"][0]["pileNumber"] == "34"
     assert diagnostics["pdamOnly"][0]["location"] == "B3"
@@ -229,6 +231,46 @@ def test_pdam_duplicates_merge_unicode_dash_pile_numbers(monkeypatch):
 
     assert dashboard["diagnostics"]["summary"]["pdamDuplicateCount"] == 1
     assert dashboard["diagnostics"]["pdamDuplicates"][0]["count"] == 2
+
+
+def test_parking_location_flags_dong_hyphen_pile_as_numeric_format_issue(monkeypatch):
+    """시공위치가 주차장으로 정규화되는데 파일번호만 동-번호 형식(예: 8-12)이면 숫자 오류 진단에 포함."""
+    records = [
+        {
+            "sheet_name": "record",
+            "row_number": 1,
+            "sequence_no": "1",
+            "construction_date": "2025-09-01",
+            "construction_month": "2025-09",
+            "equipment": "1",
+            "pile_type": "PHC",
+            "construction_method": "T4",
+            "location": "주차장",
+            "pile_number": "8-12",
+            "pile_number_sort": 12,
+            "pile_remaining": 0.2,
+            "penetration_depth": 6.0,
+            "boring_depth": 6.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+
+    monkeypatch.setattr(
+        construction_reports,
+        "_get_dataset",
+        lambda dataset_id: {"id": dataset_id, "name": "sample"},
+    )
+    monkeypatch.setattr(construction_reports, "_list_records", lambda dataset_id: list(records))
+
+    dashboard = construction_reports.build_dashboard("sample-dataset", circles=[])
+
+    assert dashboard["diagnostics"]["summary"]["parkingPileFormatIssueCount"] == 1
+    issue = dashboard["diagnostics"]["parkingPileFormatIssues"][0]
+    assert issue["pileNumber"] == "8-12"
+    assert issue["rawPileNumber"] == "8-12"
+    assert issue["issueType"] == "숫자 오류"
+    assert issue["rawLocation"] == "주차장"
 
 
 def test_mapping_diagnostics_do_not_report_same_display_number_as_pdam_only_when_already_matched(monkeypatch):

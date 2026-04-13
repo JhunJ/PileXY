@@ -26,6 +26,13 @@ const filterMaxInput = document.getElementById("filter-max");
 const filterHeightMinInput = document.getElementById("filter-height-min");
 const filterHeightMaxInput = document.getElementById("filter-height-max");
 const filterDistanceInput = document.getElementById("filter-match-distance");
+const filterPileNumberHyphenInput = document.getElementById("filter-pile-number-hyphen");
+const filterExcludeIdenticalGeometryDuplicatesInput = document.getElementById(
+  "filter-exclude-identical-geometry-duplicates",
+);
+const filterTowerCraneNumberInput = document.getElementById("filter-tower-crane-number-format");
+const buildingSeqSummaryHead = document.getElementById("building-seq-summary-head");
+const buildingSeqSummaryHint = document.getElementById("building-seq-summary-hint");
 const applyFilterBtn = document.getElementById("apply-filter");
 const tableBody = document.getElementById("circles-table-body");
 const duplicatesTableBody = document.getElementById("duplicates-table-body");
@@ -41,8 +48,11 @@ const togglePointsInput = document.getElementById("toggle-points");
 const toggleCirclesInput = document.getElementById("toggle-circles");
 const toggleTextsInput = document.getElementById("toggle-texts");
 const toggleMatchLinesInput = document.getElementById("toggle-match-lines");
+const toggleFoundationLabelVizInput = document.getElementById("toggle-foundation-label-viz");
+const togglePfPolyLinkVizInput = document.getElementById("toggle-pf-poly-link-viz");
 const toggleBuildingHatchInput = document.getElementById("toggle-building-hatch");
 const toggleParkingHatchInput = document.getElementById("toggle-parking-hatch");
+const toggleTowerCraneHatchInput = document.getElementById("toggle-tower-crane-hatch");
 const downloadCsvBtn = document.getElementById("download-csv");
 const downloadXlsxBtn = document.getElementById("download-xlsx");
 const canvas = document.getElementById("circle-canvas");
@@ -60,24 +70,33 @@ const buildingCountInput = document.getElementById("building-count");
 const buildingNameEditor = document.getElementById("building-name-editor");
 const parkingCountInput = document.getElementById("parking-count");
 const parkingNameEditor = document.getElementById("parking-name-editor");
+const towerCraneCountInput = document.getElementById("tower-crane-count");
+const towerCraneNameEditor = document.getElementById("tower-crane-name-editor");
 const toggleAreaListFocusInput = document.getElementById("toggle-area-list-focus");
 const addBuildingNameBtn = document.getElementById("add-building-name");
 const addParkingNameBtn = document.getElementById("add-parking-name");
+const addTowerCraneNameBtn = document.getElementById("add-tower-crane-name");
 const toggleBuildingNameListExpandBtn = document.getElementById("toggle-building-name-list-expand");
 const toggleParkingNameListExpandBtn = document.getElementById("toggle-parking-name-list-expand");
+const toggleTowerCraneNameListExpandBtn = document.getElementById("toggle-tower-crane-name-list-expand");
 const applyBuildingNamesBtn = document.getElementById("apply-building-names");
 const applyParkingNamesBtn = document.getElementById("apply-parking-names");
+const applyTowerCraneNamesBtn = document.getElementById("apply-tower-crane-names");
 const applyBuildingCountBtn = document.getElementById("apply-building-count");
 const applyParkingCountBtn = document.getElementById("apply-parking-count");
+const applyTowerCraneCountBtn = document.getElementById("apply-tower-crane-count");
 const generateBuildingsBtn = document.getElementById("generate-buildings");
 const toggleEditBuildingsBtn = document.getElementById("toggle-edit-buildings");
 const toggleEditParkingsBtn = document.getElementById("toggle-edit-parkings");
+const toggleEditTowerCranesBtn = document.getElementById("toggle-edit-tower-cranes");
 const canvasToggleEditBuildingsBtn = document.getElementById("canvas-toggle-edit-buildings");
 const generateBuildingOutlinesBtn = document.getElementById("generate-building-outlines");
 const applyBuildingsBtn = document.getElementById("apply-buildings");
 const applyParkingsBtn = document.getElementById("apply-parkings");
+const applyTowerCranesBtn = document.getElementById("apply-tower-cranes");
 const saveBuildingDrillingBtn = document.getElementById("save-building-drilling-btn");
 const saveParkingDrillingBtn = document.getElementById("save-parking-drilling-btn");
+const saveTowerCraneDrillingBtn = document.getElementById("save-tower-crane-drilling-btn");
 const buildingTabsContainer = document.getElementById("building-tabs");
 const manualCircleValue = document.getElementById("manual-circle-value");
 const manualTextValue = document.getElementById("manual-text-value");
@@ -298,9 +317,15 @@ let comparePinchStartScale = 1;
 const DEFAULT_FILTER = {
   minDiameter: 0.5,
   maxDiameter: 0.65,
-  textHeightMin: 0.5,
+  textHeightMin: 0.4,
   textHeightMax: 1.1,
   maxMatchDistance: 2,
+  /** 매칭 텍스트를 `동키-번호`로 읽고 번호는 − 뒤만 사용 (예: 1-12) */
+  pileNumberHyphenFormat: false,
+  /** 중심·반지름이 같은 원끼리는 겹침 중복으로 묶지 않음 (DXF상 동일 위치 중복 엔티티 등) */
+  excludeIdenticalGeometryDuplicates: true,
+  /** T4-1 형식: T=타워크레인, 4=호기, 뒤=파일번호 (동-번호와 동시 가능 — 매칭마다 T형식 우선) */
+  towerCraneNumberFormat: false,
 };
 
 const DEFAULT_PROJECT_NAME = "기본";
@@ -332,6 +357,8 @@ const buildingPalette = [
 
 const AREA_KIND_BUILDING = "building";
 const AREA_KIND_PARKING = "parking";
+/** 지하주차장(Bn)과 동일 슬롯·네모 생성 패턴, 라벨은 Tn */
+const AREA_KIND_TOWER_CRANE = "tower_crane";
 
 const state = {
   circles: [],
@@ -346,6 +373,7 @@ const state = {
   buildings: [],
   pendingNames: [],
   pendingParkingNames: [],
+  pendingTowerCraneNames: [],
   hasDataset: false,
   filter: { ...DEFAULT_FILTER },
   circleMap: new Map(),
@@ -357,8 +385,13 @@ const state = {
   showCircles: true,
   showTextLabels: true,
   showMatchLines: true,
+  /** 캔버스: 말뚝 주변 기초 수치 글자·두께 링 등 (번호–파일 연결선과 별도) */
+  showFoundationLabelViz: true,
+  /** P/F 삽입점 ↔ 닫힌 윤곽(중심)·윤곽 내 파일 연결선 */
+  showPfPolyLinkViz: true,
   showBuildingHatch: true,
   showParkingHatch: true,
+  showTowerCraneHatch: true,
   manualSelection: { circleId: "", textId: "" },
   manualPickMode: null,
   buildingEditMode: false,
@@ -368,6 +401,11 @@ const state = {
   activeErrorTypeFilter: "ALL",
   draggingVertex: null,
   areaRectCreate: null,
+  /** 수동 동 윤곽: 폴리라인 다중 선택 후 최외곽선 생성 — { order, selectedIds: Set<string> } */
+  buildingOutlinePickMode: null,
+  buildingOutlinePickClick: null,
+  /** 동별 클러스터 윤곽 자동생성 — 이름 목록 순서와 동일 */
+  autoBuildingOutlineByOrder: [],
   lastUploadedFileName: "",
   /** 불러오기 시점의 원본 circles/texts. 필터 적용 시 항상 이 기준으로 재적용 (필터할 때마다 이전 결과에서 다시 필터하지 않음). */
   sourceCircles: null,
@@ -388,13 +426,19 @@ const state = {
   /** 윤곽 없는 행 전용: 천공시작 입력고 (이름 적용 시 building 으로 병합) */
   pendingDrillingElevationsBuilding: [],
   pendingDrillingElevationsParking: [],
+  pendingDrillingElevationsTowerCrane: [],
   /** 윤곽 없는 행 전용: 기초골조 상단레벨(m) — 기성 정리표 기본값 */
   pendingFoundationTopBuilding: [],
   pendingFoundationTopParking: [],
+  pendingFoundationTopTowerCrane: [],
   /** 파일 단위 기초골조 두께(mm) 맵 */
   foundationThicknessByPileId: {},
   /** 파일 단위 엘레베이터 피트 오프셋(m) 맵 */
   foundationPitOffsetByPileId: {},
+  /** 말뚝별 천공시작(m) — 동 설정보다 우선 */
+  drillingStartByPileId: {},
+  /** 말뚝별 기초상단(m) — 동 설정보다 우선 */
+  foundationTopByPileId: {},
   /** 수동 매칭 히스토리 자동 재사용 (끄고 적용 시 히스토리만 제거, 세션 수동 매칭은 유지) */
   reuseManualHistory: false,
   /** 저장 작업 ID(work_…). 재사용 시 참고할 버전(하나만) */
@@ -402,6 +446,48 @@ const state = {
   settingsContextProject: "",
   settingsContextProjectId: "",
 };
+
+function ensureAutoBuildingOutlineFlagsLength() {
+  const names = getAreaNames(AREA_KIND_BUILDING);
+  if (!Array.isArray(state.autoBuildingOutlineByOrder)) {
+    state.autoBuildingOutlineByOrder = [];
+  }
+  const arr = state.autoBuildingOutlineByOrder;
+  while (arr.length < names.length) arr.push(false);
+  if (arr.length > names.length) arr.length = names.length;
+}
+
+function isAutoBuildingOutlineAtOrder(order) {
+  ensureAutoBuildingOutlineFlagsLength();
+  return Boolean(state.autoBuildingOutlineByOrder[order]);
+}
+
+function hasAnyAutoBuildingOutlineFromClusters() {
+  ensureAutoBuildingOutlineFlagsLength();
+  return state.autoBuildingOutlineByOrder.some(Boolean);
+}
+
+/** 저장본 clustering 또는 최상위 배열에서 동별 자동생성 플래그 복원 */
+function applyLoadedAutoBuildingOutlineOrderPayload(clustering, topLevelOrder) {
+  if (Array.isArray(topLevelOrder)) {
+    state.autoBuildingOutlineByOrder = topLevelOrder.map(Boolean);
+    ensureAutoBuildingOutlineFlagsLength();
+    return;
+  }
+  if (!clustering || typeof clustering !== "object") {
+    ensureAutoBuildingOutlineFlagsLength();
+    return;
+  }
+  if (Array.isArray(clustering.autoBuildingOutlineByOrder)) {
+    state.autoBuildingOutlineByOrder = clustering.autoBuildingOutlineByOrder.map(Boolean);
+    ensureAutoBuildingOutlineFlagsLength();
+    return;
+  }
+  const namesLen = Math.max(1, getAreaNames(AREA_KIND_BUILDING).length);
+  const legacy = clustering.autoBuildingOutlineFromClusters;
+  state.autoBuildingOutlineByOrder = Array.from({ length: namesLen }, () => legacy !== false);
+  ensureAutoBuildingOutlineFlagsLength();
+}
 
 function formatLoadedProjectVersionLabel(versionId) {
   const vid = versionId != null ? String(versionId) : "";
@@ -464,13 +550,22 @@ function notifyWorkContextChanged() {
 }
 
 function normalizeAreaKind(value) {
-  return String(value || "").trim().toLowerCase() === AREA_KIND_PARKING
-    ? AREA_KIND_PARKING
-    : AREA_KIND_BUILDING;
+  const v = String(value || "").trim().toLowerCase();
+  if (v === AREA_KIND_PARKING) return AREA_KIND_PARKING;
+  if (v === AREA_KIND_TOWER_CRANE || v === "tower" || v === "tower-crane") return AREA_KIND_TOWER_CRANE;
+  return AREA_KIND_BUILDING;
+}
+
+function isSlotAreaKind(kind) {
+  const k = normalizeAreaKind(kind);
+  return k === AREA_KIND_PARKING || k === AREA_KIND_TOWER_CRANE;
 }
 
 function getDefaultAreaName(kind, index) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING ? `B${index + 1}` : `동 ${index + 1}`;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return `B${index + 1}`;
+  if (k === AREA_KIND_TOWER_CRANE) return `T${index + 1}`;
+  return `동 ${index + 1}`;
 }
 
 function getParkingAreaNumber(value, fallbackIndex = 0) {
@@ -480,6 +575,10 @@ function getParkingAreaNumber(value, fallbackIndex = 0) {
 
 function normalizeParkingAreaName(value, fallbackIndex = 0) {
   return `B${getParkingAreaNumber(value, fallbackIndex)}`;
+}
+
+function normalizeTowerAreaName(value, fallbackIndex = 0) {
+  return `T${getParkingAreaNumber(value, fallbackIndex)}`;
 }
 
 /** PDAM 시공위치·좌표 building_name 과 동일 규칙 (백엔드 construction_reports._normalize_location 대응) */
@@ -500,6 +599,13 @@ function normalizeConstructionLocationValue(value) {
     return "B";
   }
   if (compact === "B" || compact.startsWith("B")) return "B";
+
+  const towerPlain = compact.match(/^T(\d+)$/i);
+  if (towerPlain) return `T${parseInt(towerPlain[1], 10)}`;
+  const twKoLoc = String(text).match(/(?:타워크레인|타워)\s*(\d+)/i);
+  if (twKoLoc) return `T${parseInt(twKoLoc[1], 10)}`;
+  const towerSuffix = compact.match(/T(\d+)/i);
+  if (towerSuffix) return `T${parseInt(towerSuffix[1], 10)}`;
 
   const dongMatch = compact.match(/^(\d+)(?:동)?$/);
   if (dongMatch) return `${parseInt(dongMatch[1], 10)}동`;
@@ -524,6 +630,14 @@ function normalizeAreaNameForSearch(value) {
   if (basementMatch) {
     return `B${parseInt(basementMatch[1], 10)}`;
   }
+  const towerMatch = compact.match(/^T(\d+)$/);
+  if (towerMatch) {
+    return `T${parseInt(towerMatch[1], 10)}`;
+  }
+  const twKoSearch = String(raw).match(/(?:타워크레인|타워)\s*(\d+)/i);
+  if (twKoSearch) {
+    return `T${parseInt(twKoSearch[1], 10)}`;
+  }
   const buildingMatch = compact.match(/^(\d+)(?:동)?$/);
   if (buildingMatch) {
     return `${parseInt(buildingMatch[1], 10)}동`;
@@ -543,6 +657,11 @@ function compareNormalizedAreaSearchKeys(valueA, valueB) {
   if (basementA && basementB) return Number(basementA[1]) - Number(basementB[1]);
   if (basementA) return -1;
   if (basementB) return 1;
+  const towerA = valueA.match(/^T(\d+)$/);
+  const towerB = valueB.match(/^T(\d+)$/);
+  if (towerA && towerB) return Number(towerA[1]) - Number(towerB[1]);
+  if (towerA) return -1;
+  if (towerB) return 1;
   if (valueA === "미지정" && valueB !== "미지정") return 1;
   if (valueB === "미지정" && valueA !== "미지정") return -1;
   return valueA.localeCompare(valueB, "ko");
@@ -572,6 +691,8 @@ function getCircleSearchNumberTokens(circle) {
   tokens.add(raw.replace(/\s+/g, "").toUpperCase());
   const digits = normalizeSearchNumber(raw);
   if (digits) tokens.add(digits);
+  const eff = getEffectivePileSequenceNumber(raw);
+  if (Number.isInteger(eff) && eff >= 1) tokens.add(String(eff));
   return tokens;
 }
 
@@ -638,6 +759,7 @@ function getConfiguredCanvasSearchGroups() {
   [
     ...getAreaNames(AREA_KIND_BUILDING),
     ...getAreaNames(AREA_KIND_PARKING),
+    ...getAreaNames(AREA_KIND_TOWER_CRANE),
     ...(state.buildings || []).map((building) => building?.name),
   ].forEach(addGroupValue);
   (state.circles || []).forEach((circle) => addGroupValue(circle?.building_name));
@@ -695,29 +817,35 @@ function buildAreaNameListFromEntries(kind, areaEntries = []) {
   if (!Array.isArray(areaEntries) || !areaEntries.length) {
     return [];
   }
-  if (normalizedKind === AREA_KIND_PARKING) {
-    const len = getParkingAreaListSpan(areaEntries);
+  if (isSlotAreaKind(normalizedKind)) {
+    const len = getSlotAreaListSpan(normalizedKind, areaEntries);
     return Array.from({ length: len }, (_, order) => {
       const matchedEntry = areaEntries.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order);
-      return normalizeParkingAreaName(
-        matchedEntry?.building?.name || getDefaultAreaName(normalizedKind, order),
-        order,
-      );
+      const raw = matchedEntry?.building?.name || getDefaultAreaName(normalizedKind, order);
+      return normalizedKind === AREA_KIND_PARKING
+        ? normalizeParkingAreaName(raw, order)
+        : normalizeTowerAreaName(raw, order);
     });
   }
   return areaEntries.map((entry, order) => entry.building.name || getDefaultAreaName(normalizedKind, order));
 }
 
 function getAreaNames(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING
-    ? state.pendingParkingNames
-    : state.pendingNames;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return state.pendingParkingNames;
+  if (k === AREA_KIND_TOWER_CRANE) return state.pendingTowerCraneNames;
+  return state.pendingNames;
 }
 
 function setAreaNames(kind, names) {
-  if (normalizeAreaKind(kind) === AREA_KIND_PARKING) {
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) {
     state.pendingParkingNames = (Array.isArray(names) ? names : []).map((name, index) =>
       normalizeParkingAreaName(name, index),
+    );
+  } else if (k === AREA_KIND_TOWER_CRANE) {
+    state.pendingTowerCraneNames = (Array.isArray(names) ? names : []).map((name, index) =>
+      normalizeTowerAreaName(name, index),
     );
   } else {
     state.pendingNames = names;
@@ -725,19 +853,32 @@ function setAreaNames(kind, names) {
 }
 
 function getAreaCountInput(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING ? parkingCountInput : buildingCountInput;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return parkingCountInput;
+  if (k === AREA_KIND_TOWER_CRANE) return towerCraneCountInput;
+  return buildingCountInput;
 }
 
 function getAreaEditorElement(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING ? parkingNameEditor : buildingNameEditor;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return parkingNameEditor;
+  if (k === AREA_KIND_TOWER_CRANE) return towerCraneNameEditor;
+  return buildingNameEditor;
 }
 
 const NAME_LIST_EXPAND_LS_BUILDING = "pilexy:nameListExpandBuilding";
 const NAME_LIST_EXPAND_LS_PARKING = "pilexy:nameListExpandParking";
+const NAME_LIST_EXPAND_LS_TOWER = "pilexy:nameListExpandTower";
+
+function getNameListExpandStorageKey(kind) {
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return NAME_LIST_EXPAND_LS_PARKING;
+  if (k === AREA_KIND_TOWER_CRANE) return NAME_LIST_EXPAND_LS_TOWER;
+  return NAME_LIST_EXPAND_LS_BUILDING;
+}
 
 function readNameListExpanded(kind) {
-  const key =
-    normalizeAreaKind(kind) === AREA_KIND_PARKING ? NAME_LIST_EXPAND_LS_PARKING : NAME_LIST_EXPAND_LS_BUILDING;
+  const key = getNameListExpandStorageKey(kind);
   try {
     return localStorage.getItem(key) === "1";
   } catch {
@@ -746,8 +887,7 @@ function readNameListExpanded(kind) {
 }
 
 function writeNameListExpanded(kind, expanded) {
-  const key =
-    normalizeAreaKind(kind) === AREA_KIND_PARKING ? NAME_LIST_EXPAND_LS_PARKING : NAME_LIST_EXPAND_LS_BUILDING;
+  const key = getNameListExpandStorageKey(kind);
   try {
     localStorage.setItem(key, expanded ? "1" : "0");
   } catch (_) {}
@@ -770,7 +910,11 @@ function applyNameListExpandState(kind, expanded) {
 function syncNameListExpandButton(kind) {
   const normalized = normalizeAreaKind(kind);
   const btn =
-    normalized === AREA_KIND_PARKING ? toggleParkingNameListExpandBtn : toggleBuildingNameListExpandBtn;
+    normalized === AREA_KIND_PARKING
+      ? toggleParkingNameListExpandBtn
+      : normalized === AREA_KIND_TOWER_CRANE
+        ? toggleTowerCraneNameListExpandBtn
+        : toggleBuildingNameListExpandBtn;
   if (!btn) return;
   btn.textContent = readNameListExpanded(normalized) ? "목록 접기" : "목록 펼치기";
 }
@@ -778,8 +922,10 @@ function syncNameListExpandButton(kind) {
 function initNameListExpandFromStorage() {
   applyNameListExpandState(AREA_KIND_BUILDING, readNameListExpanded(AREA_KIND_BUILDING));
   applyNameListExpandState(AREA_KIND_PARKING, readNameListExpanded(AREA_KIND_PARKING));
+  applyNameListExpandState(AREA_KIND_TOWER_CRANE, readNameListExpanded(AREA_KIND_TOWER_CRANE));
   syncNameListExpandButton(AREA_KIND_BUILDING);
   syncNameListExpandButton(AREA_KIND_PARKING);
+  syncNameListExpandButton(AREA_KIND_TOWER_CRANE);
 }
 
 function toggleNameListExpanded(kind) {
@@ -791,20 +937,24 @@ function toggleNameListExpanded(kind) {
 }
 
 function getAreaLabel(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING ? "지하주차장" : "동";
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return "지하주차장";
+  if (k === AREA_KIND_TOWER_CRANE) return "타워크레인";
+  return "동";
 }
 
 function normalizeAreaDefinitions(buildings = []) {
   const counters = {
     [AREA_KIND_BUILDING]: 0,
     [AREA_KIND_PARKING]: 0,
+    [AREA_KIND_TOWER_CRANE]: 0,
   };
   return (Array.isArray(buildings) ? buildings : []).map((building) => {
     const kind = normalizeAreaKind(building?.kind);
     const order = counters[kind];
     counters[kind] += 1;
     const slot = Number.isFinite(Number(building?.slot)) ? Math.round(Number(building.slot)) : undefined;
-    const fallbackIndex = kind === AREA_KIND_PARKING && Number.isFinite(slot) ? slot : order;
+    const fallbackIndex = isSlotAreaKind(kind) && Number.isFinite(slot) ? slot : order;
     const {
       drilling_start_elevation: _ignoredDrill,
       foundation_top_elevation: _ignoredFound,
@@ -823,7 +973,9 @@ function normalizeAreaDefinitions(buildings = []) {
       name:
         kind === AREA_KIND_PARKING
           ? normalizeParkingAreaName(building?.name, fallbackIndex)
-          : String(building?.name || "").trim() || getDefaultAreaName(kind, order),
+          : kind === AREA_KIND_TOWER_CRANE
+            ? normalizeTowerAreaName(building?.name, fallbackIndex)
+            : String(building?.name || "").trim() || getDefaultAreaName(kind, order),
       vertices: Array.isArray(building?.vertices)
         ? building.vertices.map((vertex) => ({
             x: Number(vertex.x),
@@ -840,6 +992,7 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
   const counters = {
     [AREA_KIND_BUILDING]: 0,
     [AREA_KIND_PARKING]: 0,
+    [AREA_KIND_TOWER_CRANE]: 0,
   };
   return (Array.isArray(buildings) ? buildings : [])
     .filter((building) => Array.isArray(building?.vertices) && building.vertices.length >= 3)
@@ -848,7 +1001,7 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
       const order = counters[kind];
       counters[kind] += 1;
       const slot = Number(building?.slot);
-      const fallbackIndex = kind === AREA_KIND_PARKING && Number.isFinite(slot) ? Math.round(slot) : order;
+      const fallbackIndex = isSlotAreaKind(kind) && Number.isFinite(slot) ? Math.round(slot) : order;
       const rawDrill = building?.drilling_start_elevation;
       const numDrill =
         rawDrill != null && rawDrill !== "" && Number.isFinite(Number(rawDrill)) ? Number(rawDrill) : undefined;
@@ -859,7 +1012,9 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
         name:
           kind === AREA_KIND_PARKING
             ? normalizeParkingAreaName(building?.name, fallbackIndex)
-            : String(building?.name || "").trim() || getDefaultAreaName(kind, order),
+            : kind === AREA_KIND_TOWER_CRANE
+              ? normalizeTowerAreaName(building?.name, fallbackIndex)
+              : String(building?.name || "").trim() || getDefaultAreaName(kind, order),
         kind,
         slot: Number.isFinite(slot) ? Math.round(slot) : undefined,
         vertices: (building.vertices || []).map((vertex) => ({
@@ -887,11 +1042,15 @@ function getAreaSlot(entry, fallbackOrder = 0) {
   return Number.isFinite(raw) ? raw : fallbackOrder;
 }
 
-/** 실제 주차장 폴리곤 개수와 slot 범위 중 큰 값 — 이름 목록 행 수·개수 입력과 맞출 때 사용 */
-function getParkingAreaListSpan(areas = getAreasByKind(AREA_KIND_PARKING)) {
+/** 슬롯 기반 구역(지하주차장·타워크레인): 폴리곤 개수와 slot 범위 중 큰 값 */
+function getSlotAreaListSpan(kind, areas = getAreasByKind(kind)) {
   if (!Array.isArray(areas) || !areas.length) return 0;
   const maxSlot = Math.max(...areas.map((entry, order) => getAreaSlot(entry, order)));
   return Math.max(areas.length, maxSlot + 1);
+}
+
+function getParkingAreaListSpan(areas) {
+  return getSlotAreaListSpan(AREA_KIND_PARKING, areas);
 }
 
 function setAreasByKind(kind, nextAreas) {
@@ -902,7 +1061,7 @@ function setAreasByKind(kind, nextAreas) {
       kind: normalizedKind,
     })),
   );
-  if (normalizedKind === AREA_KIND_PARKING) {
+  if (isSlotAreaKind(normalizedKind)) {
     normalizedAreas.sort((left, right) => {
       const leftSlot = Number(left?.slot);
       const rightSlot = Number(right?.slot);
@@ -919,7 +1078,11 @@ function setAreasByKind(kind, nextAreas) {
     normalizedKind === AREA_KIND_PARKING
       ? normalizedAreas
       : getAreasByKind(AREA_KIND_PARKING).map((entry) => entry.building);
-  state.buildings = [...buildingAreas, ...parkingAreas];
+  const towerAreas =
+    normalizedKind === AREA_KIND_TOWER_CRANE
+      ? normalizedAreas
+      : getAreasByKind(AREA_KIND_TOWER_CRANE).map((entry) => entry.building);
+  state.buildings = [...buildingAreas, ...parkingAreas, ...towerAreas];
 }
 
 function syncAreaCountInputs() {
@@ -929,15 +1092,20 @@ function syncAreaCountInputs() {
     buildingCountInput.value = Math.max(1, areasLen, namesLen);
   }
   if (parkingCountInput) {
-    const span = getParkingAreaListSpan();
+    const span = getSlotAreaListSpan(AREA_KIND_PARKING);
     const namesLen = getAreaNames(AREA_KIND_PARKING).length;
     parkingCountInput.value = Math.max(0, span, namesLen);
+  }
+  if (towerCraneCountInput) {
+    const span = getSlotAreaListSpan(AREA_KIND_TOWER_CRANE);
+    const namesLen = getAreaNames(AREA_KIND_TOWER_CRANE).length;
+    towerCraneCountInput.value = Math.max(0, span, namesLen);
   }
 }
 
 function getConfiguredAreaCount(kind) {
   const normalizedKind = normalizeAreaKind(kind);
-  const minimum = normalizedKind === AREA_KIND_PARKING ? 0 : 1;
+  const minimum = isSlotAreaKind(normalizedKind) ? 0 : 1;
   const input = getAreaCountInput(normalizedKind);
   const parsed = Number(input?.value);
   if (Number.isFinite(parsed)) {
@@ -1496,6 +1664,7 @@ function init() {
   updateCanvasSearchAvailability();
   syncMeissaCompareBtnEnabled();
   initNameListExpandFromStorage();
+  syncBuildingOutlineAutoUi();
   requestRedraw();
 }
 
@@ -1521,6 +1690,50 @@ function bindEvents() {
     handleUpload({ preventDefault() {} });
   });
   applyFilterBtn.addEventListener("click", applyFilterFromPanel);
+  if (filterPileNumberHyphenInput) {
+    filterPileNumberHyphenInput.addEventListener("change", () => {
+      const h = !!filterPileNumberHyphenInput.checked;
+      state.filter = {
+        ...state.filter,
+        pileNumberHyphenFormat: h,
+      };
+      if (state.circles?.length) {
+        refreshMatchDerivedUIState();
+        updateCircleTable();
+      } else {
+        updateBuildingSeqSummary();
+      }
+    });
+  }
+  if (filterTowerCraneNumberInput) {
+    filterTowerCraneNumberInput.addEventListener("change", () => {
+      const t = !!filterTowerCraneNumberInput.checked;
+      state.filter = {
+        ...state.filter,
+        towerCraneNumberFormat: t,
+      };
+      if (state.circles?.length) {
+        refreshMatchDerivedUIState();
+        updateCircleTable();
+      } else {
+        updateBuildingSeqSummary();
+      }
+    });
+  }
+  if (filterExcludeIdenticalGeometryDuplicatesInput) {
+    filterExcludeIdenticalGeometryDuplicatesInput.addEventListener("change", () => {
+      state.filter = {
+        ...state.filter,
+        excludeIdenticalGeometryDuplicates: !!filterExcludeIdenticalGeometryDuplicatesInput.checked,
+      };
+      if (state.circles?.length) {
+        refreshMatchDerivedUIState();
+        updateDuplicatesTable();
+        updateSummaryCards();
+        requestRedraw();
+      }
+    });
+  }
   if (manualHistoryReuseToggle) {
     manualHistoryReuseToggle.addEventListener("change", () => {
       readManualHistoryReuseControlsToState();
@@ -1574,10 +1787,27 @@ function bindEvents() {
     state.showTextLabels = event.target.checked;
     requestRedraw();
   });
-  toggleMatchLinesInput.addEventListener("change", (event) => {
-    state.showMatchLines = event.target.checked;
-    requestRedraw();
-  });
+  if (toggleMatchLinesInput) {
+    toggleMatchLinesInput.checked = state.showMatchLines !== false;
+    toggleMatchLinesInput.addEventListener("change", (event) => {
+      state.showMatchLines = event.target.checked;
+      requestRedraw();
+    });
+  }
+  if (toggleFoundationLabelVizInput) {
+    toggleFoundationLabelVizInput.checked = state.showFoundationLabelViz !== false;
+    toggleFoundationLabelVizInput.addEventListener("change", (event) => {
+      state.showFoundationLabelViz = event.target.checked;
+      requestRedraw();
+    });
+  }
+  if (togglePfPolyLinkVizInput) {
+    togglePfPolyLinkVizInput.checked = state.showPfPolyLinkViz !== false;
+    togglePfPolyLinkVizInput.addEventListener("change", (event) => {
+      state.showPfPolyLinkViz = event.target.checked;
+      requestRedraw();
+    });
+  }
   if (toggleBuildingHatchInput) {
     toggleBuildingHatchInput.addEventListener("change", (event) => {
       state.showBuildingHatch = event.target.checked;
@@ -1587,6 +1817,12 @@ function bindEvents() {
   if (toggleParkingHatchInput) {
     toggleParkingHatchInput.addEventListener("change", (event) => {
       state.showParkingHatch = event.target.checked;
+      requestRedraw();
+    });
+  }
+  if (toggleTowerCraneHatchInput) {
+    toggleTowerCraneHatchInput.addEventListener("change", (event) => {
+      state.showTowerCraneHatch = event.target.checked;
       requestRedraw();
     });
   }
@@ -1611,10 +1847,12 @@ function bindEvents() {
   if (applyBuildingCountBtn) applyBuildingCountBtn.addEventListener("click", handleApplyBuildingCount);
   if (toggleEditBuildingsBtn) toggleEditBuildingsBtn.addEventListener("click", toggleBuildingEditMode);
   if (toggleEditParkingsBtn) toggleEditParkingsBtn.addEventListener("click", toggleBuildingEditMode);
+  if (toggleEditTowerCranesBtn) toggleEditTowerCranesBtn.addEventListener("click", toggleBuildingEditMode);
   if (canvasToggleEditBuildingsBtn) canvasToggleEditBuildingsBtn.addEventListener("click", toggleBuildingEditMode);
   if (generateBuildingOutlinesBtn) generateBuildingOutlinesBtn.addEventListener("click", handleGenerateBuildingOutlines);
   applyBuildingsBtn.addEventListener("click", handleApplyBuildings);
   if (applyParkingsBtn) applyParkingsBtn.addEventListener("click", handleApplyParkings);
+  if (applyTowerCranesBtn) applyTowerCranesBtn.addEventListener("click", handleApplyTowerCranes);
   if (saveBuildingDrillingBtn) {
     saveBuildingDrillingBtn.addEventListener("click", () => {
       void handleSaveDrillingElevations(AREA_KIND_BUILDING);
@@ -1625,17 +1863,41 @@ function bindEvents() {
       void handleSaveDrillingElevations(AREA_KIND_PARKING);
     });
   }
+  if (saveTowerCraneDrillingBtn) {
+    saveTowerCraneDrillingBtn.addEventListener("click", () => {
+      void handleSaveDrillingElevations(AREA_KIND_TOWER_CRANE);
+    });
+  }
   buildingCountInput.addEventListener("change", handleBuildingCountChange);
   if (parkingCountInput) parkingCountInput.addEventListener("change", handleParkingCountChange);
+  if (towerCraneCountInput) towerCraneCountInput.addEventListener("change", handleTowerCraneCountChange);
   if (toggleParkingNameListExpandBtn) {
     toggleParkingNameListExpandBtn.addEventListener("click", () => toggleNameListExpanded(AREA_KIND_PARKING));
   }
+  if (toggleTowerCraneNameListExpandBtn) {
+    toggleTowerCraneNameListExpandBtn.addEventListener("click", () =>
+      toggleNameListExpanded(AREA_KIND_TOWER_CRANE),
+    );
+  }
   if (addParkingNameBtn) addParkingNameBtn.addEventListener("click", handleAddParkingName);
+  if (addTowerCraneNameBtn) addTowerCraneNameBtn.addEventListener("click", handleAddTowerCraneName);
   if (applyParkingNamesBtn) applyParkingNamesBtn.addEventListener("click", handleApplyParkingNames);
+  if (applyTowerCraneNamesBtn) applyTowerCraneNamesBtn.addEventListener("click", handleApplyTowerCraneNames);
   if (applyParkingCountBtn) applyParkingCountBtn.addEventListener("click", handleApplyParkingCount);
+  if (applyTowerCraneCountBtn) applyTowerCraneCountBtn.addEventListener("click", handleApplyTowerCraneCount);
   
   toggleClusteringSettingsBtn.addEventListener("click", toggleClusteringSettings);
   applyClusteringSettingsBtn.addEventListener("click", handleApplyClusteringSettings);
+  document.addEventListener("keydown", (e) => {
+    if (!state.buildingOutlinePickMode) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      confirmBuildingOutlinePolylinePick();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelBuildingOutlinePolylinePick();
+    }
+  });
 
   if (saveProjectBtn) {
     saveProjectBtn.addEventListener("click", handleSaveProject);
@@ -2051,8 +2313,9 @@ function setPhase(phase, progress = null) {
   const progressText =
     progress !== null && Number.isFinite(progress) ? `${label} (${progress}%)` : label;
   progressLabel.textContent = progressText;
-  const isIdle = phase === "idle" || phase === "ready";
-  progressWrapper.classList.toggle("visible", !isIdle || progress !== null);
+  // idle / ready 는 작업 종료 상태 → 상단 진행바·스피너 숨김 (ready 에 100% 를 넘겨도 계속 보이던 문제 방지)
+  const workFinished = phase === "idle" || phase === "ready";
+  progressWrapper.classList.toggle("visible", !workFinished);
   const isIndeterminate = progress === null || Number.isNaN(progress);
   progressWrapper.classList.toggle("indeterminate", isIndeterminate);
   if (!isIndeterminate) {
@@ -2303,6 +2566,19 @@ async function handleUpload(event) {
     setPhase("matching", 95);
     setUploadStatus("Processing DXF...");
     handlePayload(payload);
+    // 클라이언트 전용 옵션(동-번호·타워·동일 기하 중복 제외)은 서버 filter에 없음 → 체크박스 기준으로 확정 후 파생 상태 재계산
+    state.filter.pileNumberHyphenFormat = !!filterValues.pileNumberHyphenFormat;
+    state.filter.towerCraneNumberFormat = !!filterValues.towerCraneNumberFormat;
+    state.filter.excludeIdenticalGeometryDuplicates = !!filterValues.excludeIdenticalGeometryDuplicates;
+    if (state.circles.length) {
+      refreshMatchDerivedUIState();
+    }
+    updateFilterInputs(state.filter);
+    updateSummaryCards();
+    updateCircleTable();
+    updateDuplicatesTable();
+    updateErrorsTable();
+    requestRedraw();
     state.sourceCircles = null;
     state.sourceTexts = null;
     state.loadedWorkId = null;
@@ -2453,7 +2729,22 @@ function getFilterValuesFromInputs() {
     setUploadStatus("Match distance must be positive.", true);
     return null;
   }
-  return { minDiameter, maxDiameter, textHeightMin, textHeightMax, maxMatchDistance, textReferencePoint };
+  const towerCraneNumberFormat = !!(filterTowerCraneNumberInput && filterTowerCraneNumberInput.checked);
+  const pileNumberHyphenFormat = !!(filterPileNumberHyphenInput && filterPileNumberHyphenInput.checked);
+
+  return {
+    minDiameter,
+    maxDiameter,
+    textHeightMin,
+    textHeightMax,
+    maxMatchDistance,
+    textReferencePoint,
+    pileNumberHyphenFormat,
+    towerCraneNumberFormat,
+    excludeIdenticalGeometryDuplicates: !!(
+      filterExcludeIdenticalGeometryDuplicatesInput && filterExcludeIdenticalGeometryDuplicatesInput.checked
+    ),
+  };
 }
 
 /** 필터 적용 시 서버로 넘길 수동 매칭: circle에 manual_match === true 인 것만 (잘못된 자동 매칭 고정 방지) */
@@ -2607,6 +2898,13 @@ async function applyFilterFromPanel() {
     setUploadStatus("결과 데이터 처리 중...");
     setPhase("matching", 95);
     handlePayload(payload);
+    state.filter.pileNumberHyphenFormat = !!filterValues.pileNumberHyphenFormat;
+    state.filter.towerCraneNumberFormat = !!filterValues.towerCraneNumberFormat;
+    state.filter.excludeIdenticalGeometryDuplicates = !!filterValues.excludeIdenticalGeometryDuplicates;
+    if (state.circles.length) {
+      refreshMatchDerivedUIState();
+    }
+    updateFilterInputs(state.filter);
 
     updateSummaryCards();
     updateCircleTable();
@@ -2664,8 +2962,44 @@ function handlePayload(payload) {
       state.circleMap.has(circleId) && Number.isFinite(Number(value)) && Number(value) >= 0
     )).map(([circleId, value]) => [circleId, Number(value)]),
   );
+  state.drillingStartByPileId = Object.fromEntries(
+    Object.entries(state.drillingStartByPileId || {}).filter(([circleId, value]) => (
+      state.circleMap.has(circleId) && Number.isFinite(Number(value))
+    )).map(([circleId, value]) => [circleId, Number(value)]),
+  );
+  state.foundationTopByPileId = Object.fromEntries(
+    Object.entries(state.foundationTopByPileId || {}).filter(([circleId, value]) => (
+      state.circleMap.has(circleId) && Number.isFinite(Number(value))
+    )).map(([circleId, value]) => [circleId, Number(value)]),
+  );
   rebuildManualOverridesFromCircles();
+  const prevPileHyphen = state.filter?.pileNumberHyphenFormat;
+  const prevTowerCrane = state.filter?.towerCraneNumberFormat;
+  const prevExcludeIdenticalGeom = state.filter?.excludeIdenticalGeometryDuplicates;
   state.filter = normalizeFilter(payload.filter);
+  const pf = payload.filter;
+  if (
+    pf == null ||
+    typeof pf !== "object" ||
+    (pf.pile_number_hyphen_format === undefined && pf.pileNumberHyphenFormat === undefined)
+  ) {
+    state.filter.pileNumberHyphenFormat = !!prevPileHyphen;
+  }
+  if (
+    pf == null ||
+    typeof pf !== "object" ||
+    (pf.tower_crane_number_format === undefined && pf.towerCraneNumberFormat === undefined)
+  ) {
+    state.filter.towerCraneNumberFormat = !!prevTowerCrane;
+  }
+  if (
+    pf == null ||
+    typeof pf !== "object" ||
+    (pf.exclude_identical_geometry_duplicates === undefined &&
+      pf.excludeIdenticalGeometryDuplicates === undefined)
+  ) {
+    state.filter.excludeIdenticalGeometryDuplicates = !!prevExcludeIdenticalGeom;
+  }
   state.hasDataset = true;
   state.activeBuildingFilter = "ALL";
   state.highlightedCircleIds.clear();
@@ -2684,6 +3018,15 @@ function handlePayload(payload) {
       ? buildAreaNameListFromEntries(AREA_KIND_PARKING, payloadParkingAreas)
       : state.pendingParkingNames.length
       ? state.pendingParkingNames
+      : [],
+  );
+  const payloadTowerAreas = getAreasByKind(AREA_KIND_TOWER_CRANE, state.buildings);
+  setAreaNames(
+    AREA_KIND_TOWER_CRANE,
+    payloadTowerAreas.length
+      ? buildAreaNameListFromEntries(AREA_KIND_TOWER_CRANE, payloadTowerAreas)
+      : state.pendingTowerCraneNames.length
+      ? state.pendingTowerCraneNames
       : [],
   );
   ensureBuildingsInitialized();
@@ -2727,6 +3070,14 @@ function handlePayload(payload) {
 }
 
 function normalizeFilter(filter = {}) {
+  const rawHyphen =
+    filter.pile_number_hyphen_format ?? filter.pileNumberHyphenFormat ?? DEFAULT_FILTER.pileNumberHyphenFormat;
+  const rawTower =
+    filter.tower_crane_number_format ?? filter.towerCraneNumberFormat ?? DEFAULT_FILTER.towerCraneNumberFormat;
+  const hyphenOn =
+    rawHyphen === true || rawHyphen === 1 || rawHyphen === "1" || String(rawHyphen).toLowerCase() === "true";
+  const towerOn =
+    rawTower === true || rawTower === 1 || rawTower === "1" || String(rawTower).toLowerCase() === "true";
   return {
     minDiameter: Number(filter.min_diameter ?? filter.minDiameter ?? DEFAULT_FILTER.minDiameter),
     maxDiameter: Number(filter.max_diameter ?? filter.maxDiameter ?? DEFAULT_FILTER.maxDiameter),
@@ -2736,6 +3087,16 @@ function normalizeFilter(filter = {}) {
       filter.max_match_distance ?? filter.maxMatchDistance ?? DEFAULT_FILTER.maxMatchDistance,
     ),
     textReferencePoint: filter.text_reference_point ?? filter.textReferencePoint ?? "center",
+    pileNumberHyphenFormat: hyphenOn,
+    towerCraneNumberFormat: towerOn,
+    excludeIdenticalGeometryDuplicates: (() => {
+      const raw =
+        filter.exclude_identical_geometry_duplicates ?? filter.excludeIdenticalGeometryDuplicates;
+      if (raw === undefined || raw === null) {
+        return DEFAULT_FILTER.excludeIdenticalGeometryDuplicates;
+      }
+      return raw === true || raw === 1 || raw === "1" || String(raw).toLowerCase() === "true";
+    })(),
   };
 }
 
@@ -2753,6 +3114,15 @@ function updateFilterInputs(filter) {
     if (radioInput) {
       radioInput.checked = true;
     }
+  }
+  if (filterPileNumberHyphenInput) {
+    filterPileNumberHyphenInput.checked = !!filter.pileNumberHyphenFormat;
+  }
+  if (filterExcludeIdenticalGeometryDuplicatesInput) {
+    filterExcludeIdenticalGeometryDuplicatesInput.checked = !!filter.excludeIdenticalGeometryDuplicates;
+  }
+  if (filterTowerCraneNumberInput) {
+    filterTowerCraneNumberInput.checked = !!filter.towerCraneNumberFormat;
   }
 }
 
@@ -2787,8 +3157,8 @@ function updateCircleTable() {
     if (buildingA !== buildingB) {
       return compareBuildingNamesByConfiguration(buildingA, buildingB, buildingNameOrder);
     }
-    const numA = getMatchedTextNumber(a.matched_text?.text);
-    const numB = getMatchedTextNumber(b.matched_text?.text);
+    const numA = getEffectivePileSequenceNumber(a.matched_text?.text);
+    const numB = getEffectivePileSequenceNumber(b.matched_text?.text);
     const sortA = Number.isInteger(numA) && numA >= 1 ? numA : Infinity;
     const sortB = Number.isInteger(numB) && numB >= 1 ? numB : Infinity;
     if (sortA !== sortB) return sortA - sortB;
@@ -2870,24 +3240,242 @@ function getMatchedTextNumber(matchedText) {
   return digits.length ? parseInt(digits, 10) : NaN;
 }
 
+function normalizePileTextHyphens(value) {
+  return String(value ?? "").replace(/\u2212|\u2013|\u2014/g, "-");
+}
+
+/** 첫 번째 `-` 기준: 앞쪽 숫자=동키, 뒤쪽 첫 숫자 그룹=파일 번호 */
+function parseHyphenPileText(matchedText) {
+  const s = normalizePileTextHyphens(String(matchedText ?? "").replace(/\s+/g, "")).trim();
+  /** T4-1 형만 타워(호기-파일). 앞에 T 없이 4-1만 있으면 동-번호이므로 여기서 하이픈으로 보지 않음 */
+  if (/^T\d+-\d+$/i.test(s)) {
+    return { hasHyphen: false, dongKey: null, seqNum: NaN };
+  }
+  const idx = s.indexOf("-");
+  if (idx < 0) return { hasHyphen: false, dongKey: null, seqNum: NaN };
+  const leftDigits = s.slice(0, idx).replace(/\D/g, "");
+  const rightRaw = s.slice(idx + 1);
+  const rm = rightRaw.match(/\d+/);
+  const dongKey = leftDigits.length ? parseInt(leftDigits, 10) : null;
+  const seqNum = rm ? parseInt(rm[0], 10) : NaN;
+  return { hasHyphen: true, dongKey, seqNum };
+}
+
+/** 예: T4-1 — 앞에 T가 있을 때만 타워(호기-번호). 4-1만 있으면 타워가 아님(동-번호) */
+function parseTowerCranePileText(matchedText) {
+  const noSpace = String(matchedText ?? "").replace(/\s+/g, "");
+  const s = normalizePileTextHyphens(noSpace);
+  const m = s.match(/^T(\d+)-(\d+)$/i);
+  if (!m) return { isTower: false, craneNum: null, seqNum: NaN };
+  const craneNum = parseInt(m[1], 10);
+  const seqNum = parseInt(m[2], 10);
+  const ok =
+    Number.isInteger(craneNum) && craneNum >= 1 && Number.isInteger(seqNum) && seqNum >= 1;
+  return { isTower: ok, craneNum: ok ? craneNum : null, seqNum: ok ? seqNum : NaN };
+}
+
+function extractLeadingIntFromAreaName(buildingName) {
+  const m = String(buildingName ?? "").match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 /**
- * 동별(미할당 포함) Matched TEXT 숫자 기준 범위(1~최대값)와 빠진 숫자 계산
+ * 하이픈 앞 동키 k와 윤곽 동명의 숫자 B(예: 101동→101) 대응.
+ * B≥100이면 끝 두 자리만 본다: 101·201·301·1101 모두 k=1과 1-xx 형으로 매칭(B%100===k).
+ * 두 자리 이하 동명은 전번 일치·앞자리 일치(11동↔1-)·십의 자리 일치(25동↔2) 등 보조 규칙.
  */
-function computeBuildingSeqSummary() {
-  if (!state.circles || !state.circles.length) return [];
+function dongKeyMatchesBuildingName(dongKey, buildingName) {
+  if (dongKey == null || !Number.isFinite(dongKey) || dongKey < 0) return true;
+  const raw = String(buildingName ?? "").trim();
+  if (!raw || raw === "미할당") return true;
+  const B = extractLeadingIntFromAreaName(raw);
+  if (!Number.isFinite(B)) return false;
+  const k = Math.trunc(dongKey);
+  if (B === k) return true;
+  if (B >= 100) {
+    if (B % 100 === k) return true;
+  }
+  const bStr = String(B);
+  const kStr = String(k);
+  if (B < 100 && bStr.startsWith(kStr)) return true;
+  if (B >= 10 && B <= 99 && Math.floor(B / 10) === k) return true;
+  return false;
+}
+
+/**
+ * 파일 번호(시퀀스) 추출: Tn-m 형(T 접두)은 항상 −뒤 번호, 그다음 동-번호(하이픈) 옵션, 그다음 일반 하이픈(4-1→1), 아니면 전체 숫자.
+ */
+function getEffectivePileSequenceNumber(matchedText) {
+  const t0 = parseTowerCranePileText(matchedText);
+  if (t0.isTower) return t0.seqNum;
+  const towerOn = !!state.filter?.towerCraneNumberFormat;
+  const hyphenOn = !!state.filter?.pileNumberHyphenFormat;
+  if (hyphenOn) {
+    const p = parseHyphenPileText(matchedText);
+    if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      return p.seqNum;
+    }
+    const fallback = getMatchedTextNumber(matchedText);
+    if (Number.isInteger(fallback) && fallback >= 1) return fallback;
+    return NaN;
+  }
+  const pPlain = parseHyphenPileText(matchedText);
+  if (pPlain.hasHyphen && Number.isInteger(pPlain.seqNum) && pPlain.seqNum >= 1) {
+    return pPlain.seqNum;
+  }
+  if (towerOn) {
+    const fallback = getMatchedTextNumber(matchedText);
+    if (Number.isInteger(fallback) && fallback >= 1) return fallback;
+    return NaN;
+  }
+  return getMatchedTextNumber(matchedText);
+}
+
+/**
+ * 동·미지정 내 번호 중복 판별용 키.
+ * 동-번호 모드에서 하이픈이 있으면 `동명\\0동키-뒤숫자`로 구분 (10-7 과 11-7이 뒤 7만으로 묶이지 않게).
+ */
+function getSameBuildingNumberGroupKey(circle) {
+  const bname = (circle.building_name || "").trim() || "미할당";
+  const mt = circle.matched_text?.text;
+  const tFirst = parseTowerCranePileText(mt);
+  if (tFirst.isTower) {
+    return `${bname}\0TC${tFirst.craneNum}-${tFirst.seqNum}`;
+  }
+  if (state.filter?.pileNumberHyphenFormat) {
+    const p = parseHyphenPileText(mt);
+    if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      const dk = p.dongKey != null ? p.dongKey : "X";
+      return `${bname}\0${dk}-${p.seqNum}`;
+    }
+  }
+  const num = getEffectivePileSequenceNumber(mt);
+  if (!Number.isInteger(num) || num < 1) return null;
+  return `${bname}\0${num}`;
+}
+
+function getSameBuildingDuplicateDisplayLabel(circle) {
+  const mt = circle.matched_text?.text;
+  const t0 = parseTowerCranePileText(mt);
+  if (t0.isTower) return `T${t0.craneNum}-${t0.seqNum}`;
+  if (state.filter?.pileNumberHyphenFormat) {
+    const p = parseHyphenPileText(mt);
+    if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      return p.dongKey != null ? `${p.dongKey}-${p.seqNum}` : `?-${p.seqNum}`;
+    }
+  }
+  const n = getEffectivePileSequenceNumber(mt);
+  return Number.isInteger(n) ? String(n) : "?";
+}
+
+/** 타워 전용 버킷 → 요약 행 (TC_X 비포함: 순수 T형식만) */
+function towerBucketsMapToSummaryRows(byKey) {
+  const result = [];
+  [...byKey.entries()]
+    .sort(([ka], [kb]) => ka.localeCompare(kb))
+    .forEach(([, bucket]) => {
+      const { buildingName, craneNum, numSet, pileCount, invalidFormatCount } = bucket;
+      if (!numSet.size) {
+        result.push({
+          buildingName,
+          craneNum,
+          towerColumnLabel: null,
+          maxNum: 0,
+          missing: [],
+          pileCount,
+          mismatchCount: 0,
+          invalidFormatCount,
+          hyphenMode: false,
+          towerMode: true,
+        });
+        return;
+      }
+      const maxNum = Math.max(...numSet);
+      const missing = [];
+      for (let n = 1; n <= maxNum; n++) {
+        if (!numSet.has(n)) missing.push(n);
+      }
+      result.push({
+        buildingName,
+        craneNum,
+        towerColumnLabel: null,
+        maxNum,
+        missing,
+        pileCount,
+        mismatchCount: 0,
+        invalidFormatCount,
+        hyphenMode: false,
+        towerMode: true,
+      });
+    });
+  return result;
+}
+
+/**
+ * 동-번호 집계만 (hyphen 플래그에 따라 하이픈/전체 숫자 처리) — 동일 로직 재사용
+ */
+function computeHyphenStyleBuildingSummary(hyphen) {
   const byBuilding = new Map();
   state.circles.forEach((c) => {
     const name = (c.building_name || "").trim() || "미할당";
-    if (!byBuilding.has(name)) byBuilding.set(name, new Set());
-    const num = getMatchedTextNumber(c.matched_text?.text);
-    if (Number.isInteger(num) && num >= 1) byBuilding.get(name).add(num);
+    if (!byBuilding.has(name)) {
+      byBuilding.set(name, { numSet: new Set(), pileCount: 0, mismatchCount: 0, invalidFormatCount: 0 });
+    }
+    const bucket = byBuilding.get(name);
+    const mt = c.matched_text?.text;
+    const hasMatch = c.matched_text_id != null && c.matched_text_id !== "";
+    if (hyphen) {
+      const p = parseHyphenPileText(mt);
+      if (!hasMatch) return;
+      if (!p.hasHyphen) {
+        const fb = getMatchedTextNumber(mt);
+        if (Number.isInteger(fb) && fb >= 1) {
+          bucket.numSet.add(fb);
+          bucket.pileCount += 1;
+        } else {
+          bucket.invalidFormatCount += 1;
+        }
+        return;
+      }
+      if (!Number.isInteger(p.seqNum) || p.seqNum < 1) {
+        const fb = getMatchedTextNumber(mt);
+        if (Number.isInteger(fb) && fb >= 1) {
+          bucket.numSet.add(fb);
+          bucket.pileCount += 1;
+        } else {
+          bucket.invalidFormatCount += 1;
+        }
+        return;
+      }
+      if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
+        bucket.mismatchCount += 1;
+      }
+      bucket.numSet.add(p.seqNum);
+      bucket.pileCount += 1;
+      return;
+    }
+    const num = getMatchedTextNumber(mt);
+    if (Number.isInteger(num) && num >= 1) {
+      bucket.numSet.add(num);
+      bucket.pileCount += 1;
+    }
   });
   const result = [];
   const names = [...byBuilding.keys()].sort((a, b) => (a === "미할당" ? 1 : b === "미할당" ? -1 : a.localeCompare(b)));
   names.forEach((buildingName) => {
-    const numSet = byBuilding.get(buildingName);
+    const { numSet, pileCount, mismatchCount, invalidFormatCount } = byBuilding.get(buildingName);
     if (!numSet.size) {
-      result.push({ buildingName, maxNum: 0, missing: [] });
+      result.push({
+        buildingName,
+        craneNum: null,
+        maxNum: 0,
+        missing: [],
+        pileCount,
+        mismatchCount: hyphen ? mismatchCount : 0,
+        invalidFormatCount: hyphen ? invalidFormatCount : 0,
+        hyphenMode: hyphen,
+        towerMode: false,
+      });
       return;
     }
     const maxNum = Math.max(...numSet);
@@ -2895,20 +3483,284 @@ function computeBuildingSeqSummary() {
     for (let n = 1; n <= maxNum; n++) {
       if (!numSet.has(n)) missing.push(n);
     }
-    result.push({ buildingName, maxNum, missing });
+    result.push({
+      buildingName,
+      craneNum: null,
+      maxNum,
+      missing,
+      pileCount,
+      mismatchCount: hyphen ? mismatchCount : 0,
+      invalidFormatCount: hyphen ? invalidFormatCount : 0,
+      hyphenMode: hyphen,
+      towerMode: false,
+    });
   });
   return result;
+}
+
+/** 타워 + 동-번호 동시: T형식 매칭은 타워 집계, 나머지는 동-번호 집계 */
+function computeBuildingSeqSummaryTowerAndHyphenTogether() {
+  const byKey = new Map();
+  state.circles.forEach((c) => {
+    const mt = c.matched_text?.text;
+    const t = parseTowerCranePileText(mt);
+    if (!t.isTower) return;
+    const name = (c.building_name || "").trim() || "미할당";
+    const hasMatch = c.matched_text_id != null && c.matched_text_id !== "";
+    const rowKey = `${name}\0TC${t.craneNum}`;
+    if (!byKey.has(rowKey)) {
+      byKey.set(rowKey, {
+        buildingName: name,
+        craneNum: t.craneNum,
+        numSet: new Set(),
+        pileCount: 0,
+        invalidFormatCount: 0,
+      });
+    }
+    const bucket = byKey.get(rowKey);
+    if (!hasMatch) return;
+    bucket.numSet.add(t.seqNum);
+    bucket.pileCount += 1;
+  });
+  const towerRows = towerBucketsMapToSummaryRows(byKey);
+
+  const byBuilding = new Map();
+  state.circles.forEach((c) => {
+    const mt = c.matched_text?.text;
+    if (parseTowerCranePileText(mt).isTower) return;
+    const name = (c.building_name || "").trim() || "미할당";
+    if (!byBuilding.has(name)) {
+      byBuilding.set(name, { numSet: new Set(), pileCount: 0, mismatchCount: 0, invalidFormatCount: 0 });
+    }
+    const bucket = byBuilding.get(name);
+    const hasMatch = c.matched_text_id != null && c.matched_text_id !== "";
+    const p = parseHyphenPileText(mt);
+    if (!hasMatch) return;
+    if (!p.hasHyphen) {
+      const fb = getMatchedTextNumber(mt);
+      if (Number.isInteger(fb) && fb >= 1) {
+        bucket.numSet.add(fb);
+        bucket.pileCount += 1;
+      } else {
+        bucket.invalidFormatCount += 1;
+      }
+      return;
+    }
+    if (!Number.isInteger(p.seqNum) || p.seqNum < 1) {
+      const fb = getMatchedTextNumber(mt);
+      if (Number.isInteger(fb) && fb >= 1) {
+        bucket.numSet.add(fb);
+        bucket.pileCount += 1;
+      } else {
+        bucket.invalidFormatCount += 1;
+      }
+      return;
+    }
+    if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
+      bucket.mismatchCount += 1;
+    }
+    bucket.numSet.add(p.seqNum);
+    bucket.pileCount += 1;
+  });
+  const hyphenRows = [];
+  const names = [...byBuilding.keys()].sort((a, b) => (a === "미할당" ? 1 : b === "미할당" ? -1 : a.localeCompare(b)));
+  names.forEach((buildingName) => {
+    const { numSet, pileCount, mismatchCount, invalidFormatCount } = byBuilding.get(buildingName);
+    if (!numSet.size) {
+      hyphenRows.push({
+        buildingName,
+        craneNum: null,
+        maxNum: 0,
+        missing: [],
+        pileCount,
+        mismatchCount,
+        invalidFormatCount,
+        hyphenMode: true,
+        towerMode: false,
+      });
+      return;
+    }
+    const maxNum = Math.max(...numSet);
+    const missing = [];
+    for (let n = 1; n <= maxNum; n++) {
+      if (!numSet.has(n)) missing.push(n);
+    }
+    hyphenRows.push({
+      buildingName,
+      craneNum: null,
+      maxNum,
+      missing,
+      pileCount,
+      mismatchCount,
+      invalidFormatCount,
+      hyphenMode: true,
+      towerMode: false,
+    });
+  });
+  return [...towerRows, ...hyphenRows];
+}
+
+/**
+ * 동별(미할당 포함) Matched TEXT 숫자 기준 범위(1~최대값)와 빠진 숫자 계산
+ * 타워크레인 모드: 동·호기(Tn)별로 − 뒤 번호 집계. 동-번호 모드: 동키·형식 등.
+ */
+function computeBuildingSeqSummary() {
+  if (!state.circles || !state.circles.length) return [];
+  const tower = !!state.filter?.towerCraneNumberFormat;
+  const hyphen = !!state.filter?.pileNumberHyphenFormat;
+  if (tower && hyphen) {
+    return computeBuildingSeqSummaryTowerAndHyphenTogether();
+  }
+  if (tower) {
+    const byKey = new Map();
+    state.circles.forEach((c) => {
+      const name = (c.building_name || "").trim() || "미할당";
+      const mt = c.matched_text?.text;
+      const hasMatch = c.matched_text_id != null && c.matched_text_id !== "";
+      const t = parseTowerCranePileText(mt);
+      const p = parseHyphenPileText(mt);
+      let rowKey;
+      let craneNum = null;
+      let towerColumnLabel = null;
+      if (t.isTower) {
+        rowKey = `${name}\0TC${t.craneNum}`;
+        craneNum = t.craneNum;
+      } else if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+        const dk = p.dongKey != null ? p.dongKey : "X";
+        rowKey = `${name}\0HY\0${dk}`;
+        towerColumnLabel = p.dongKey != null ? `동${p.dongKey}` : "동-번호";
+      } else {
+        rowKey = `${name}\0TC_X`;
+      }
+      if (!byKey.has(rowKey)) {
+        byKey.set(rowKey, {
+          buildingName: name,
+          craneNum,
+          towerColumnLabel,
+          numSet: new Set(),
+          pileCount: 0,
+          invalidFormatCount: 0,
+          mismatchCount: 0,
+        });
+      }
+      const bucket = byKey.get(rowKey);
+      if (!hasMatch) return;
+      if (t.isTower) {
+        bucket.numSet.add(t.seqNum);
+        bucket.pileCount += 1;
+        return;
+      }
+      if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+        if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
+          bucket.mismatchCount += 1;
+        }
+        bucket.numSet.add(p.seqNum);
+        bucket.pileCount += 1;
+        return;
+      }
+      const fb = getMatchedTextNumber(mt);
+      if (Number.isInteger(fb) && fb >= 1) {
+        bucket.numSet.add(fb);
+        bucket.pileCount += 1;
+      } else {
+        bucket.invalidFormatCount += 1;
+      }
+    });
+    const result = [];
+    [...byKey.entries()]
+      .sort(([ka], [kb]) => ka.localeCompare(kb))
+      .forEach(([, bucket]) => {
+        const { buildingName, craneNum, towerColumnLabel, numSet, pileCount, invalidFormatCount, mismatchCount } = bucket;
+        if (!numSet.size) {
+          result.push({
+            buildingName,
+            craneNum,
+            towerColumnLabel,
+            maxNum: 0,
+            missing: [],
+            pileCount,
+            mismatchCount: mismatchCount || 0,
+            invalidFormatCount,
+            hyphenMode: false,
+            towerMode: true,
+          });
+          return;
+        }
+        const maxNum = Math.max(...numSet);
+        const missing = [];
+        for (let n = 1; n <= maxNum; n++) {
+          if (!numSet.has(n)) missing.push(n);
+        }
+        result.push({
+          buildingName,
+          craneNum,
+          towerColumnLabel,
+          maxNum,
+          missing,
+          pileCount,
+          mismatchCount: mismatchCount || 0,
+          invalidFormatCount,
+          hyphenMode: false,
+          towerMode: true,
+        });
+      });
+    return result;
+  }
+
+  return computeHyphenStyleBuildingSummary(hyphen);
 }
 
 function updateBuildingSeqSummary() {
   const tbody = document.getElementById("building-seq-summary-body");
   if (!tbody) return;
+  const tower = !!state.filter?.towerCraneNumberFormat;
+  const hyphen = !!state.filter?.pileNumberHyphenFormat;
+  if (buildingSeqSummaryHint) {
+    buildingSeqSummaryHint.style.display = tower || hyphen ? "block" : "none";
+    if (tower && hyphen) {
+      buildingSeqSummaryHint.textContent =
+        "T4-1(T 접두)만 타워 호기 집계, 4-1처럼 T 없는 하이픈은 동-번호(앞=동키)로 집계합니다.";
+    } else if (tower) {
+      buildingSeqSummaryHint.textContent =
+        "T4-1만 타워(호기−파일). 4-1 형식은 동-번호(앞 숫자=동키, −뒤=파일 번호)로 집계합니다.";
+    } else if (hyphen) {
+      buildingSeqSummaryHint.textContent =
+        "동-번호 형식: 하이픈 앞은 동키, 뒤는 파일 번호만 사용합니다.";
+    }
+  }
+  if (buildingSeqSummaryHead) {
+    if (tower) {
+      buildingSeqSummaryHead.innerHTML = `<tr>
+      <th>Building (윤곽)</th>
+      <th>타워<br /><small style="font-weight:400">호기</small></th>
+      <th>본수<br /><small style="font-weight:400">−뒤 유효</small></th>
+      <th>범위<br /><small style="font-weight:400">−뒤만</small></th>
+      <th>빠진/형식</th>
+    </tr>`;
+    } else {
+      buildingSeqSummaryHead.innerHTML = hyphen
+        ? `<tr>
+      <th>Building (윤곽)</th>
+      <th>본수<br /><small style="font-weight:400">−뒤 유효</small></th>
+      <th>범위<br /><small style="font-weight:400">−뒤만</small></th>
+      <th>빠진 번호<br /><small style="font-weight:400">−뒤만</small></th>
+      <th>동키↔동명</th>
+    </tr>`
+        : `<tr>
+      <th>Building</th>
+      <th>본수</th>
+      <th>범위 (1 ~ 최대값)</th>
+      <th>빠진 숫자</th>
+    </tr>`;
+    }
+  }
   tbody.innerHTML = "";
   const rows = computeBuildingSeqSummary();
+  const colSpan = tower || hyphen ? 5 : 4;
   if (!rows.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 3;
+    cell.colSpan = colSpan;
     cell.className = "empty-row";
     cell.textContent = state.hasDataset ? "동별 데이터가 없습니다." : "DXF를 업로드하면 동별 번호 현황이 표시됩니다.";
     row.appendChild(cell);
@@ -2916,17 +3768,85 @@ function updateBuildingSeqSummary() {
     return;
   }
   const fragment = document.createDocumentFragment();
-  rows.forEach(({ buildingName, maxNum, missing }) => {
-    const row = document.createElement("tr");
-    const rangeText = maxNum >= 1 ? `1 ~ ${maxNum}` : "—";
-    const missingText = missing.length ? missing.join(", ") : "—";
-    row.innerHTML = `
+  const bothTowerAndHyphen = tower && hyphen;
+  let hyphenSectionInserted = false;
+  rows.forEach(
+    ({
+      buildingName,
+      craneNum,
+      towerColumnLabel = null,
+      maxNum,
+      missing,
+      pileCount,
+      mismatchCount,
+      invalidFormatCount,
+      hyphenMode,
+      towerMode,
+    }) => {
+      if (bothTowerAndHyphen && hyphenMode && !hyphenSectionInserted) {
+        hyphenSectionInserted = true;
+        const sep = document.createElement("tr");
+        sep.innerHTML = `<td colspan="5" style="font-weight:600;background:rgba(148,163,184,0.12)">동-번호 형식 (T 접두 없는 하이픈 매칭)</td>`;
+        fragment.appendChild(sep);
+      }
+      const row = document.createElement("tr");
+      const rangeText = maxNum >= 1 ? `1 ~ ${maxNum}` : "—";
+      const missingText = missing.length ? missing.join(", ") : "—";
+      if (towerMode) {
+        const craneLabel =
+          craneNum != null ? `T${craneNum}` : towerColumnLabel != null ? towerColumnLabel : "기타";
+        const tailParts = [];
+        if (invalidFormatCount > 0) tailParts.push(`T형식 외 ${invalidFormatCount}`);
+        if ((mismatchCount || 0) > 0) tailParts.push(`동키↔동명 ${mismatchCount}`);
+        const tailCell =
+          tailParts.length > 0
+            ? `${escapeHtml(missingText)} · ${tailParts.join(" · ")}`
+            : escapeHtml(missingText);
+        row.innerHTML = `
       <td>${escapeHtml(buildingName)}</td>
+      <td>${escapeHtml(craneLabel)}</td>
+      <td>${pileCount}</td>
+      <td>${rangeText}</td>
+      <td>${tailCell}</td>
+    `;
+      } else if (hyphenMode) {
+        let dongCell = "—";
+        if (mismatchCount > 0 || invalidFormatCount > 0) {
+          const parts = [];
+          if (mismatchCount > 0) parts.push(`불일치 ${mismatchCount}`);
+          if (invalidFormatCount > 0) parts.push(`−형식 ${invalidFormatCount}`);
+          dongCell = parts.join(" · ");
+        } else {
+          dongCell = "OK";
+        }
+        if (bothTowerAndHyphen) {
+          row.innerHTML = `
+      <td>${escapeHtml(buildingName)}</td>
+      <td>동-번호</td>
+      <td>${pileCount}</td>
+      <td>${rangeText}</td>
+      <td>${escapeHtml(missingText)} · ${escapeHtml(dongCell)}</td>
+    `;
+        } else {
+          row.innerHTML = `
+      <td>${escapeHtml(buildingName)}</td>
+      <td>${pileCount}</td>
+      <td>${rangeText}</td>
+      <td>${escapeHtml(missingText)}</td>
+      <td>${escapeHtml(dongCell)}</td>
+    `;
+        }
+      } else {
+        row.innerHTML = `
+      <td>${escapeHtml(buildingName)}</td>
+      <td>${pileCount}</td>
       <td>${rangeText}</td>
       <td>${escapeHtml(missingText)}</td>
     `;
-    fragment.appendChild(row);
-  });
+      }
+      fragment.appendChild(row);
+    },
+  );
   tbody.appendChild(fragment);
 }
 
@@ -2976,6 +3896,7 @@ const ERROR_TYPE_LABELS = {
   CIRCLE_NO_MATCH: "좌표 미매칭",
   MATCH_DISTANCE_EXCEEDED: "거리초과",
   SAME_BUILDING_NUMBER_DUPLICATE: "동·미지정 내 번호중복",
+  TEXT_DONG_BUILDING_MISMATCH: "동키↔윤곽 동명 불일치",
 };
 
 const COORD_PRECISION = 6;
@@ -3041,20 +3962,52 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
       });
     }
     if (!ctid) {
-      codes.push("CIRCLE_NO_MATCH");
-      errors.push({
-        error_type: "CIRCLE_NO_MATCH",
-        text_id: null,
-        text_value: null,
-        circle_ids: [circle.id],
-        message: `Circle ${circle.id} has no matching TEXT.`,
-      });
+      if (!hasSameGeometryCircleWithMatchedText(circle, circles)) {
+        codes.push("CIRCLE_NO_MATCH");
+        errors.push({
+          error_type: "CIRCLE_NO_MATCH",
+          text_id: null,
+          text_value: null,
+          circle_ids: [circle.id],
+          message: `Circle ${circle.id} has no matching TEXT.`,
+        });
+      }
     }
     circle.has_error = codes.length > 0;
     circle.error_codes = codes;
   });
   appendSameBuildingNumberErrors(circles, errors);
+  appendHyphenDongBuildingMismatchErrors(circles, errors);
   return errors;
+}
+
+/** 동-번호 모드: 텍스트 앞 동키가 윤곽선으로 정해진 동명과 맞지 않을 때 */
+function appendHyphenDongBuildingMismatchErrors(circles, errors) {
+  if (!state.filter?.pileNumberHyphenFormat) return;
+  (circles || []).forEach((c) => {
+    let tid = c.matched_text_id;
+    if ((tid == null || tid === "") && c.matched_text && c.matched_text.id != null && c.matched_text.id !== "") {
+      tid = c.matched_text.id;
+    }
+    if (tid == null || tid === "") return;
+    const mt = c.matched_text?.text;
+    if (parseTowerCranePileText(mt).isTower) return;
+    const p = parseHyphenPileText(mt);
+    if (!p.hasHyphen || p.dongKey == null) return;
+    const bname = (c.building_name || "").trim() || "미할당";
+    if (dongKeyMatchesBuildingName(p.dongKey, bname)) return;
+    errors.push({
+      error_type: "TEXT_DONG_BUILDING_MISMATCH",
+      text_id: c.matched_text?.id ?? null,
+      text_value: c.matched_text?.text ?? null,
+      circle_ids: [c.id],
+      message: `텍스트 동키(${p.dongKey})와 윤곽 동명 "${bname}"이(가) 맞지 않습니다.`,
+    });
+    const codes = c.error_codes ? [...c.error_codes] : [];
+    if (!codes.includes("TEXT_DONG_BUILDING_MISMATCH")) codes.push("TEXT_DONG_BUILDING_MISMATCH");
+    c.error_codes = codes;
+    c.has_error = true;
+  });
 }
 
 /** 같은 동(미할당 포함)에서 매칭 번호가 동일한 좌표가 2개 이상이면 에러·has_error 반영 */
@@ -3066,16 +4019,14 @@ function appendSameBuildingNumberErrors(circles, errors) {
       tid = c.matched_text.id;
     }
     if (tid == null || tid === "") return;
-    const num = getMatchedTextNumber(c.matched_text?.text);
-    if (!Number.isInteger(num) || num < 1) return;
-    const bname = (c.building_name || "").trim() || "미할당";
-    const key = `${bname}\0${num}`;
+    const key = getSameBuildingNumberGroupKey(c);
+    if (key == null) return;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   });
   groups.forEach((items) => {
     if (items.length < 2) return;
-    const num = getMatchedTextNumber(items[0].matched_text?.text);
+    const display = getSameBuildingDuplicateDisplayLabel(items[0]);
     const bname = (items[0].building_name || "").trim() || "미할당";
     items.forEach((c) => {
       const codes = c.error_codes ? [...c.error_codes] : [];
@@ -3086,9 +4037,9 @@ function appendSameBuildingNumberErrors(circles, errors) {
     errors.push({
       error_type: "SAME_BUILDING_NUMBER_DUPLICATE",
       text_id: null,
-      text_value: String(num),
+      text_value: display,
       circle_ids: items.map((c) => c.id),
-      message: `"${bname}"(동)에서 번호 ${num}이(가) ${items.length}개 좌표에 중복되었습니다.`,
+      message: `"${bname}"(동)에서 파일번호 ${display}이(가) ${items.length}개 좌표에 중복되었습니다.`,
     });
   });
 }
@@ -3098,10 +4049,8 @@ function buildSameBuildingNumberDuplicateGroups(circles) {
   const groups = new Map();
   (circles || []).forEach((c) => {
     if (c.matched_text_id == null || c.matched_text_id === "") return;
-    const num = getMatchedTextNumber(c.matched_text?.text);
-    if (!Number.isInteger(num) || num < 1) return;
-    const bname = (c.building_name || "").trim() || "미할당";
-    const key = `${bname}\0${num}`;
+    const key = getSameBuildingNumberGroupKey(c);
+    if (key == null) return;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   });
@@ -3144,18 +4093,77 @@ function refreshMatchDerivedUIState() {
   }
 }
 
-/** 두 원이 직경(겹침) 기준으로 겹치는지: 중심 거리 <= 반지름 합 */
-function circlesOverlap(a, b) {
-  const cx = (c) => c.center_x ?? c.centerX;
-  const cy = (c) => c.center_y ?? c.centerY;
+/** 파일 좌표에서 중심·반지름이 실질적으로 동일한 원인지 (완전 겹침 엔티티 중복 판별). DXF 부동소수 반올림을 넉넉히 허용 */
+const SAME_FILE_CIRCLE_GEOMETRY_EPS = 1e-4;
+
+function sameFileCircleGeometry(a, b) {
+  const cx = (c) => Number(c.center_x ?? c.centerX ?? 0);
+  const cy = (c) => Number(c.center_y ?? c.centerY ?? 0);
   const r = (c) => Number(c.radius ?? (c.diameter != null ? c.diameter / 2 : 0));
-  const dx = cx(b) - cx(a);
-  const dy = cy(b) - cy(a);
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  return dist <= r(a) + r(b);
+  return (
+    Math.abs(cx(a) - cx(b)) <= SAME_FILE_CIRCLE_GEOMETRY_EPS &&
+    Math.abs(cy(a) - cy(b)) <= SAME_FILE_CIRCLE_GEOMETRY_EPS &&
+    Math.abs(r(a) - r(b)) <= SAME_FILE_CIRCLE_GEOMETRY_EPS
+  );
 }
 
-/** 불러온 circles만으로 중복 그룹 재계산 — 원의 직경 안에 겹쳐 있는 것끼리 묶음 */
+/**
+ * strict 보다 약간 넓게 동일 파일 중복으로 간주(DXF 반올림). `geometryMatchesCoLocatedDupPolicy` 안에서만 쓰는 보조.
+ */
+function sameFileCircleGeometryLoose(a, b) {
+  const cx = (c) => Number(c.center_x ?? c.centerX ?? 0);
+  const cy = (c) => Number(c.center_y ?? c.centerY ?? 0);
+  const rad = (c) => Number(c.radius ?? (c.diameter != null ? c.diameter / 2 : 0));
+  const ra = rad(a);
+  const rb = rad(b);
+  if (ra <= 0 || rb <= 0) return false;
+  const dcx = Math.abs(cx(a) - cx(b));
+  const dcy = Math.abs(cy(a) - cy(b));
+  const dr = Math.abs(ra - rb);
+  const centerTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 8, Math.min(ra, rb) * 0.0035);
+  const rTol = Math.max(SAME_FILE_CIRCLE_GEOMETRY_EPS * 5, Math.min(ra, rb) * 0.0025);
+  return dcx <= centerTol && dcy <= centerTol && dr <= rTol;
+}
+
+/**
+ * 「동일 좌표·크기 원은 중복 제외」옵션에 따른 동일 말뚝 심볼 판정(겹침 중복·미매칭 완화 모두 동일 기준).
+ * 켜짐: 느슨한 기준 / 꺼짐: 엄격한 기준
+ */
+function geometryMatchesCoLocatedDupPolicy(a, b) {
+  if (state.filter?.excludeIdenticalGeometryDuplicates) {
+    return sameFileCircleGeometryLoose(a, b);
+  }
+  return sameFileCircleGeometry(a, b);
+}
+
+/** 겹침 중복 Union-Find에 넣을 쌍인지(옵션과 일관되게) */
+function shouldUnionGeometricDuplicatePair(a, b) {
+  if (state.filter?.excludeIdenticalGeometryDuplicates && sameFileCircleGeometryLoose(a, b)) {
+    return false;
+  }
+  return sameFileCircleGeometry(a, b);
+}
+
+/**
+ * 동일 기하의 다른 원에 이미 TEXT가 매칭되어 있으면 이 원은 좌표 미매칭(CIRCLE_NO_MATCH)으로 보지 않음.
+ * 기준은 geometryMatchesCoLocatedDupPolicy 와 동일.
+ */
+function hasSameGeometryCircleWithMatchedText(circle, circles) {
+  if (!circles?.length) return false;
+  for (let i = 0; i < circles.length; i++) {
+    const o = circles[i];
+    if (!o || o.id === circle.id) continue;
+    if (!geometryMatchesCoLocatedDupPolicy(circle, o)) continue;
+    let oid = o.matched_text_id;
+    if ((oid == null || oid === "") && o.matched_text && o.matched_text.id != null && o.matched_text.id !== "") {
+      oid = o.matched_text.id;
+    }
+    if (oid != null && oid !== "") return true;
+  }
+  return false;
+}
+
+/** 불러온 circles만으로 좌표 겹침 중복 그룹 재계산 — 동일 위치·동일 반지름(이중 엔티티)만 묶음 */
 function buildDuplicatesFromCircles(circles) {
   const cx = (c) => c.center_x ?? c.centerX;
   const cy = (c) => c.center_y ?? c.centerY;
@@ -3172,7 +4180,8 @@ function buildDuplicatesFromCircles(circles) {
   };
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if (circlesOverlap(circles[i], circles[j])) union(i, j);
+      if (!shouldUnionGeometricDuplicatePair(circles[i], circles[j])) continue;
+      union(i, j);
     }
   }
   const comp = new Map();
@@ -3391,6 +4400,20 @@ function beginParkingRectangleCreation(order) {
   requestRedraw();
 }
 
+function beginTowerCraneRectangleCreation(order) {
+  state.areaRectCreate = {
+    kind: AREA_KIND_TOWER_CRANE,
+    order,
+    startWorld: null,
+    currentWorld: null,
+  };
+  state.buildingEditMode = true;
+  syncBuildingEditModeButtons();
+  updateCanvasModeHint();
+  setUploadStatus("캔버스에서 좌상단과 우하단을 차례로 클릭해 타워크레인 네모를 만드세요.");
+  requestRedraw();
+}
+
 function upsertAreaPolygonByOrder(kind, order, vertices) {
   const normalizedKind = normalizeAreaKind(kind);
   const currentAreas = getAreasByKind(normalizedKind).map((entry) => entry.building);
@@ -3460,6 +4483,13 @@ function ensureAreaDefinitionsInitialized(kind) {
   const count = names.length;
   let generated = [];
   if (normalizedKind === AREA_KIND_BUILDING) {
+    ensureAutoBuildingOutlineFlagsLength();
+    const anyAuto = names.some((_, i) => isAutoBuildingOutlineAtOrder(i));
+    if (!anyAuto) {
+      setAreasByKind(AREA_KIND_BUILDING, []);
+      syncPendingNamesWithBuildings();
+      return;
+    }
     const usablePolylines = (Array.isArray(state.clusterPolylines) ? state.clusterPolylines : []).filter(
       (polyline) =>
         polyline.closed !== false &&
@@ -3467,6 +4497,13 @@ function ensureAreaDefinitionsInitialized(kind) {
         polyline.points.length >= 3,
     );
     generated = names.map((name, index) => {
+      if (!isAutoBuildingOutlineAtOrder(index)) {
+        return {
+          kind: normalizedKind,
+          name: name || getDefaultAreaName(normalizedKind, index),
+          vertices: [],
+        };
+      }
       const source = usablePolylines[index % Math.max(1, usablePolylines.length)];
       const vertices =
         source && Array.isArray(source.points) && source.points.length >= 3
@@ -3490,9 +4527,10 @@ function ensureAreaDefinitionsInitialized(kind) {
 }
 
 function getPendingDrillingElevationsArray(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING
-    ? state.pendingDrillingElevationsParking
-    : state.pendingDrillingElevationsBuilding;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return state.pendingDrillingElevationsParking;
+  if (k === AREA_KIND_TOWER_CRANE) return state.pendingDrillingElevationsTowerCrane;
+  return state.pendingDrillingElevationsBuilding;
 }
 
 function ensurePendingDrillingElevationsLength(kind) {
@@ -3504,9 +4542,10 @@ function ensurePendingDrillingElevationsLength(kind) {
 }
 
 function getPendingFoundationTopArray(kind) {
-  return normalizeAreaKind(kind) === AREA_KIND_PARKING
-    ? state.pendingFoundationTopParking
-    : state.pendingFoundationTopBuilding;
+  const k = normalizeAreaKind(kind);
+  if (k === AREA_KIND_PARKING) return state.pendingFoundationTopParking;
+  if (k === AREA_KIND_TOWER_CRANE) return state.pendingFoundationTopTowerCrane;
+  return state.pendingFoundationTopBuilding;
 }
 
 function ensurePendingFoundationTopLength(kind) {
@@ -3606,11 +4645,14 @@ function sortBuildingAreasByDisplayName() {
 function syncPendingNamesWithBuildings() {
   syncPendingNamesForKind(AREA_KIND_BUILDING);
   syncPendingNamesForKind(AREA_KIND_PARKING);
+  syncPendingNamesForKind(AREA_KIND_TOWER_CRANE);
   syncAreaCountInputs();
   ensurePendingDrillingElevationsLength(AREA_KIND_BUILDING);
   ensurePendingDrillingElevationsLength(AREA_KIND_PARKING);
+  ensurePendingDrillingElevationsLength(AREA_KIND_TOWER_CRANE);
   ensurePendingFoundationTopLength(AREA_KIND_BUILDING);
   ensurePendingFoundationTopLength(AREA_KIND_PARKING);
+  ensurePendingFoundationTopLength(AREA_KIND_TOWER_CRANE);
 }
 
 function syncPendingNamesForKind(kind) {
@@ -3618,7 +4660,7 @@ function syncPendingNamesForKind(kind) {
   const areas = getAreasByKind(normalizedKind);
   let names = [...getAreaNames(normalizedKind)];
   if (!names.length && areas.length) {
-    if (normalizedKind === AREA_KIND_PARKING) {
+    if (isSlotAreaKind(normalizedKind)) {
       const maxSlot = Math.max(...areas.map((entry, order) => getAreaSlot(entry, order)));
       names = Array.from({ length: maxSlot + 1 }, (_, order) => {
         const matchedEntry = areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order);
@@ -3633,16 +4675,15 @@ function syncPendingNamesForKind(kind) {
   }
   // 동: 폴리곤은 아직 1개인데 입력/이름 목록만 늘린 경우(동 개수 적용 전) 이름을 유지해야 함.
   const requiredLength =
-    normalizedKind === AREA_KIND_PARKING && areas.length
-      ? getParkingAreaListSpan(areas)
+    isSlotAreaKind(normalizedKind) && areas.length
+      ? getSlotAreaListSpan(normalizedKind, areas)
       : normalizedKind === AREA_KIND_BUILDING
         ? Math.max(areas.length, getConfiguredAreaCount(AREA_KIND_BUILDING))
         : areas.length;
   while (requiredLength && names.length < requiredLength) {
-    const matchedEntry =
-      normalizedKind === AREA_KIND_PARKING
-        ? areas.find((entry, order) => getAreaSlot(entry, order) === names.length)
-        : areas[names.length];
+    const matchedEntry = isSlotAreaKind(normalizedKind)
+      ? areas.find((entry, order) => getAreaSlot(entry, order) === names.length)
+      : areas[names.length];
     names.push(matchedEntry?.building?.name || getDefaultAreaName(normalizedKind, names.length));
   }
   if (normalizedKind === AREA_KIND_BUILDING && requiredLength && names.length > requiredLength) {
@@ -3779,6 +4820,10 @@ function handleAddParkingName() {
   handleAddAreaName(AREA_KIND_PARKING);
 }
 
+function handleAddTowerCraneName() {
+  handleAddAreaName(AREA_KIND_TOWER_CRANE);
+}
+
 function handleAddAreaName(kind) {
   const normalizedKind = normalizeAreaKind(kind);
   if (normalizedKind === AREA_KIND_BUILDING) {
@@ -3796,6 +4841,7 @@ function handleAddAreaName(kind) {
 function renderPendingNameEditor() {
   renderAreaNameEditor(AREA_KIND_BUILDING);
   renderAreaNameEditor(AREA_KIND_PARKING);
+  renderAreaNameEditor(AREA_KIND_TOWER_CRANE);
 }
 
 /** 천공·기초 셀 우하단 엑셀식 채우기 핸들 */
@@ -3841,10 +4887,23 @@ function renderAreaNameEditor(kind) {
   table.className = "name-editor-table";
   const thead = document.createElement("thead");
   const headTr = document.createElement("tr");
-  const thLabels = [
+  const thLabels = [];
+  if (normalizedKind === AREA_KIND_BUILDING) {
+    thLabels.push({
+      text: "",
+      className: "name-editor-table__th name-editor-table__th--building-auto",
+      title: "동별 클러스터 자동생성(목록 위 「자동생성」 열)",
+    });
+  }
+  thLabels.push(
     { text: "번호", className: "name-editor-table__th name-editor-table__th--num", title: "" },
     {
-      text: normalizedKind === AREA_KIND_BUILDING ? "동 이름" : "주차장 이름",
+      text:
+        normalizedKind === AREA_KIND_BUILDING
+          ? "동 이름"
+          : normalizedKind === AREA_KIND_PARKING
+            ? "주차장 이름"
+            : "호기 번호",
       className: "name-editor-table__th name-editor-table__th--name",
       title: "",
     },
@@ -3855,7 +4914,7 @@ function renderAreaNameEditor(kind) {
       title: "기초골조 상단레벨(m) — 기성 정리표 기본값",
     },
     { text: "설정", className: "name-editor-table__th name-editor-table__th--actions", title: "" },
-  ];
+  );
   thLabels.forEach(({ text, className, title }) => {
     const th = document.createElement("th");
     th.scope = "col";
@@ -3869,17 +4928,21 @@ function renderAreaNameEditor(kind) {
 
   const tbody = document.createElement("tbody");
   names.forEach((name, order) => {
-    const areaEntry =
-      normalizedKind === AREA_KIND_PARKING
-        ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
-        : areas[order] || null;
+    const areaEntry = isSlotAreaKind(normalizedKind)
+      ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
+      : areas[order] || null;
     const actualIndex = areaEntry?.actualIndex ?? null;
+    const outlinePickingThis =
+      normalizedKind === AREA_KIND_BUILDING &&
+      state.buildingOutlinePickMode &&
+      state.buildingOutlinePickMode.order === order;
     const row = document.createElement("tr");
     row.className =
       "name-editor-row" +
       (actualIndex !== null && state.highlightedBuildingNameIndex === actualIndex
         ? " name-editor-row--selected"
-        : "");
+        : "") +
+      (outlinePickingThis ? " name-editor-row--outline-picking" : "");
     if (actualIndex !== null) {
       row.setAttribute("data-building-index", String(actualIndex));
     }
@@ -3892,10 +4955,10 @@ function renderAreaNameEditor(kind) {
     const valueWrap = document.createElement("div");
     valueWrap.className = "name-editor-value";
     const input = document.createElement("input");
-    if (normalizedKind === AREA_KIND_PARKING) {
+    if (isSlotAreaKind(normalizedKind)) {
       const prefix = document.createElement("span");
       prefix.className = "name-editor-prefix";
-      prefix.textContent = "B";
+      prefix.textContent = normalizedKind === AREA_KIND_PARKING ? "B" : "T";
       input.inputMode = "numeric";
       input.pattern = "[0-9]*";
       input.value = getParkingAreaNumber(name, order);
@@ -3903,7 +4966,10 @@ function renderAreaNameEditor(kind) {
         const digits = input.value.replace(/\D+/g, "");
         input.value = digits;
         const nextNames = [...getAreaNames(normalizedKind)];
-        nextNames[order] = normalizeParkingAreaName(digits, order);
+        nextNames[order] =
+          normalizedKind === AREA_KIND_PARKING
+            ? normalizeParkingAreaName(digits, order)
+            : normalizeTowerAreaName(digits, order);
         setAreaNames(normalizedKind, nextNames);
       });
       valueWrap.appendChild(prefix);
@@ -3940,7 +5006,7 @@ function renderAreaNameEditor(kind) {
     drillInput.dataset.drillingOrder = String(order);
     drillInput.placeholder = "레벨";
     drillInput.title =
-      "천공시작 레벨(m). 비우면 해당 동·주차장에 배정된 좌표의 평균 Z를 시작 지반고로 사용합니다.";
+      "천공시작 레벨(m). 비우면 해당 동·주차장·타워크레인에 배정된 좌표의 평균 Z를 시작 지반고로 사용합니다.";
     const drillingDisplayValue = (() => {
       if (actualIndex !== null) {
         const v = state.buildings[actualIndex]?.drilling_start_elevation;
@@ -3988,12 +5054,36 @@ function renderAreaNameEditor(kind) {
 
     const createBtn = document.createElement("button");
     createBtn.type = "button";
-    createBtn.className = "ghost";
-    createBtn.textContent = normalizedKind === AREA_KIND_PARKING ? "생성" : "보기";
-    createBtn.disabled = normalizedKind === AREA_KIND_BUILDING && actualIndex === null;
+    createBtn.className =
+      "ghost" +
+      (normalizedKind === AREA_KIND_BUILDING && outlinePickingThis ? " name-editor-btn--outline-confirm" : "");
+    if (normalizedKind === AREA_KIND_BUILDING) {
+      if (isAutoBuildingOutlineAtOrder(order)) {
+        createBtn.textContent = "보기";
+        createBtn.disabled = actualIndex === null;
+      } else {
+        createBtn.textContent = outlinePickingThis ? "확인" : "생성";
+        createBtn.disabled = !state.hasDataset;
+      }
+    } else {
+      createBtn.textContent = isSlotAreaKind(normalizedKind) ? "생성" : "보기";
+      createBtn.disabled = false;
+    }
     createBtn.addEventListener("click", () => {
       if (normalizedKind === AREA_KIND_PARKING) {
         beginParkingRectangleCreation(order);
+        return;
+      }
+      if (normalizedKind === AREA_KIND_TOWER_CRANE) {
+        beginTowerCraneRectangleCreation(order);
+        return;
+      }
+      if (normalizedKind === AREA_KIND_BUILDING && !isAutoBuildingOutlineAtOrder(order)) {
+        if (outlinePickingThis) {
+          confirmBuildingOutlinePolylinePick();
+        } else {
+          beginBuildingOutlinePolylinePick(order);
+        }
         return;
       }
       if (actualIndex !== null) focusOnBuilding(actualIndex);
@@ -4039,7 +5129,7 @@ function renderAreaNameEditor(kind) {
     const actionGroup = document.createElement("div");
     actionGroup.className = "name-editor-actions";
     actionGroup.appendChild(createBtn);
-    if (normalizedKind === AREA_KIND_PARKING) {
+    if (isSlotAreaKind(normalizedKind)) {
       actionGroup.appendChild(viewBtn);
     }
     actionGroup.appendChild(removeBtn);
@@ -4058,6 +5148,29 @@ function renderAreaNameEditor(kind) {
     tdAct.className = "name-editor-table__td name-editor-table__td--actions";
     tdAct.appendChild(actionGroup);
 
+    if (normalizedKind === AREA_KIND_BUILDING) {
+      const tdBuildingAuto = document.createElement("td");
+      tdBuildingAuto.className = "name-editor-table__td name-editor-table__td--building-auto";
+      const autoCb = document.createElement("input");
+      autoCb.type = "checkbox";
+      autoCb.className = "name-editor-building-auto-cb";
+      autoCb.dataset.buildingAutoOrder = String(order);
+      autoCb.checked = isAutoBuildingOutlineAtOrder(order);
+      autoCb.title = "이 동만 클러스터 폴리라인으로 윤곽 자동 생성";
+      autoCb.addEventListener("change", () => {
+        ensureAutoBuildingOutlineFlagsLength();
+        state.autoBuildingOutlineByOrder[order] = autoCb.checked;
+        if (autoCb.checked && state.buildingOutlinePickMode?.order === order) {
+          state.buildingOutlinePickMode = null;
+          state.buildingOutlinePickClick = null;
+          updateCanvasModeHint();
+        }
+        syncBuildingOutlineAutoUi();
+        renderPendingNameEditor();
+      });
+      tdBuildingAuto.appendChild(autoCb);
+      row.appendChild(tdBuildingAuto);
+    }
     row.appendChild(tdNum);
     row.appendChild(tdName);
     row.appendChild(tdDrill);
@@ -4075,10 +5188,9 @@ function applyDrillingAtOrder(normalizedKind, order, num) {
   ensurePendingDrillingElevationsLength(normalizedKind);
   const pend = getPendingDrillingElevationsArray(normalizedKind);
   const areas = getAreasByKind(normalizedKind);
-  const areaEntry =
-    normalizedKind === AREA_KIND_PARKING
-      ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
-      : areas[order] || null;
+  const areaEntry = isSlotAreaKind(normalizedKind)
+    ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
+    : areas[order] || null;
   const actualIndex = areaEntry?.actualIndex ?? null;
   if (actualIndex !== null) {
     const b = state.buildings[actualIndex];
@@ -4094,10 +5206,9 @@ function applyFoundationAtOrder(normalizedKind, order, num) {
   ensurePendingFoundationTopLength(normalizedKind);
   const pend = getPendingFoundationTopArray(normalizedKind);
   const areas = getAreasByKind(normalizedKind);
-  const areaEntry =
-    normalizedKind === AREA_KIND_PARKING
-      ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
-      : areas[order] || null;
+  const areaEntry = isSlotAreaKind(normalizedKind)
+    ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
+    : areas[order] || null;
   const actualIndex = areaEntry?.actualIndex ?? null;
   if (actualIndex !== null) {
     const b = state.buildings[actualIndex];
@@ -4330,10 +5441,9 @@ function flushDrillingInputsFromDom(kind) {
       return;
     }
     const areas = getAreasByKind(normalizedKind);
-    const areaEntry =
-      normalizedKind === AREA_KIND_PARKING
-        ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
-        : areas[order] || null;
+    const areaEntry = isSlotAreaKind(normalizedKind)
+      ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
+      : areas[order] || null;
     const actualIndex = areaEntry?.actualIndex ?? null;
     const raw = String(input.value ?? "").trim();
     const parsed = raw === "" ? null : Number(raw);
@@ -4367,10 +5477,9 @@ function flushFoundationTopInputsFromDom(kind) {
       return;
     }
     const areas = getAreasByKind(normalizedKind);
-    const areaEntry =
-      normalizedKind === AREA_KIND_PARKING
-        ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
-        : areas[order] || null;
+    const areaEntry = isSlotAreaKind(normalizedKind)
+      ? areas.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order) || null
+      : areas[order] || null;
     const actualIndex = areaEntry?.actualIndex ?? null;
     const raw = String(input.value ?? "").trim();
     const parsed = raw === "" ? null : Number(raw);
@@ -4395,7 +5504,12 @@ function flushFoundationTopInputsFromDom(kind) {
  */
 async function handleSaveDrillingElevations(kind) {
   const normalizedKind = normalizeAreaKind(kind);
-  const label = normalizedKind === AREA_KIND_PARKING ? "지하주차장" : "동";
+  const label =
+    normalizedKind === AREA_KIND_PARKING
+      ? "지하주차장"
+      : normalizedKind === AREA_KIND_TOWER_CRANE
+        ? "타워크레인"
+        : "동";
   const names = getAreaNames(normalizedKind);
   if (!names.length) {
     setUploadStatus(`${label} 이름 목록이 없습니다.`, true);
@@ -4452,6 +5566,10 @@ function handleApplyParkingNames() {
   handleApplyAreaNames(AREA_KIND_PARKING);
 }
 
+function handleApplyTowerCraneNames() {
+  handleApplyAreaNames(AREA_KIND_TOWER_CRANE);
+}
+
 function handleApplyAreaNames(kind) {
   const normalizedKind = normalizeAreaKind(kind);
   const areas = getAreasByKind(normalizedKind);
@@ -4467,7 +5585,7 @@ function handleApplyAreaNames(kind) {
   setAreasByKind(
     normalizedKind,
     areas.map((entry, order) => {
-      const slot = normalizedKind === AREA_KIND_PARKING ? getAreaSlot(entry, order) : order;
+      const slot = isSlotAreaKind(normalizedKind) ? getAreaSlot(entry, order) : order;
       const fromBuilding = entry.building?.drilling_start_elevation;
       const fromPending = pendingDrilling[slot];
       let drilling;
@@ -4508,14 +5626,18 @@ function handleParkingCountChange() {
   handleAreaCountChange(AREA_KIND_PARKING);
 }
 
+function handleTowerCraneCountChange() {
+  handleAreaCountChange(AREA_KIND_TOWER_CRANE);
+}
+
 function handleAreaCountChange(kind) {
   const input = getAreaCountInput(kind);
-  const minimum = normalizeAreaKind(kind) === AREA_KIND_PARKING ? 0 : 1;
+  const minimum = isSlotAreaKind(kind) ? 0 : 1;
   const desired = Math.max(minimum, Number(input?.value));
   if (Number.isNaN(desired)) return;
   ensurePendingNameCount(kind, desired);
   renderPendingNameEditor();
-  if (normalizeAreaKind(kind) === AREA_KIND_PARKING) {
+  if (isSlotAreaKind(kind)) {
     renderBuildingTabs();
     populateBuildingSelect();
     requestRedraw();
@@ -4524,7 +5646,7 @@ function handleAreaCountChange(kind) {
 
 function ensurePendingNameCount(kind, desired) {
   const normalizedKind = normalizeAreaKind(kind);
-  const minimum = normalizedKind === AREA_KIND_PARKING ? 0 : 1;
+  const minimum = isSlotAreaKind(normalizedKind) ? 0 : 1;
   const target = Math.max(minimum, desired || minimum);
   const names = [...getAreaNames(normalizedKind)];
   while (names.length < target) {
@@ -4534,7 +5656,7 @@ function ensurePendingNameCount(kind, desired) {
     names.length = target;
   }
   setAreaNames(normalizedKind, names);
-  if (normalizedKind === AREA_KIND_PARKING) {
+  if (isSlotAreaKind(normalizedKind)) {
     const nextAreas = getAreasByKind(normalizedKind)
       .filter((entry, order) => getAreaSlot(entry, order) < target)
       .map((entry) => entry.building);
@@ -4550,6 +5672,9 @@ function ensurePendingNameCount(kind, desired) {
     }
   }
   ensurePendingDrillingElevationsLength(normalizedKind);
+  if (normalizedKind === AREA_KIND_BUILDING) {
+    ensureAutoBuildingOutlineFlagsLength();
+  }
   syncAreaCountInputs();
 }
 
@@ -4557,6 +5682,7 @@ function syncBuildingEditModeButtons() {
   const label = state.buildingEditMode ? "편집 모드 ON" : "편집 모드 OFF";
   if (toggleEditBuildingsBtn) toggleEditBuildingsBtn.textContent = label;
   if (toggleEditParkingsBtn) toggleEditParkingsBtn.textContent = label;
+  if (toggleEditTowerCranesBtn) toggleEditTowerCranesBtn.textContent = label;
   if (canvasToggleEditBuildingsBtn) canvasToggleEditBuildingsBtn.textContent = label;
 }
 
@@ -4564,6 +5690,10 @@ function toggleBuildingEditMode() {
   state.buildingEditMode = !state.buildingEditMode;
   if (!state.buildingEditMode && state.areaRectCreate) {
     state.areaRectCreate = null;
+  }
+  if (!state.buildingEditMode && state.buildingOutlinePickMode) {
+    state.buildingOutlinePickMode = null;
+    state.buildingOutlinePickClick = null;
   }
   syncBuildingEditModeButtons();
   updateCanvasModeHint();
@@ -4583,11 +5713,21 @@ function updateCanvasModeHint() {
     && construction.foundationWindowSelect,
   );
   if (state.areaRectCreate) {
-    const { order, startWorld } = state.areaRectCreate;
-    const name = getAreaNames(AREA_KIND_PARKING)[order] || getDefaultAreaName(AREA_KIND_PARKING, order);
+    const { order, startWorld, kind: rectKind } = state.areaRectCreate;
+    const rk = normalizeAreaKind(rectKind);
+    const name =
+      getAreaNames(rk)[order] || getDefaultAreaName(rk, order);
     canvasModeHint.textContent = startWorld
       ? `${name} 네모 생성: 우하단 점을 클릭하세요`
       : `${name} 네모 생성: 좌상단 점을 클릭하세요`;
+    return;
+  }
+  if (state.buildingOutlinePickMode) {
+    const ord = state.buildingOutlinePickMode.order;
+    const nm =
+      getAreaNames(AREA_KIND_BUILDING)[ord] || getDefaultAreaName(AREA_KIND_BUILDING, ord);
+    const n = state.buildingOutlinePickMode.selectedIds?.size ?? 0;
+    canvasModeHint.textContent = `${nm} 동 윤곽: 폴리라인을 클릭해 선택·해제 (${n}개). 설정 열 「확인」· Enter 로 완료 · Esc 취소`;
     return;
   }
   if (state.buildingEditMode) {
@@ -4595,6 +5735,174 @@ function updateCanvasModeHint() {
   } else {
     canvasModeHint.textContent = "화면 이동: 좌측 마우스 클릭·드래그";
   }
+}
+
+function getBuildingOutlinePolylineSourceList() {
+  const raw = Array.isArray(state.rawPolylines) && state.rawPolylines.length ? state.rawPolylines : [];
+  const fallback = Array.isArray(state.clusterPolylines) ? state.clusterPolylines : [];
+  const source = raw.length ? raw : fallback;
+  return source.map((polyline, index) => {
+    const points = (Array.isArray(polyline?.points) ? polyline.points : [])
+      .filter((pt) => Number.isFinite(Number(pt?.x)) && Number.isFinite(Number(pt?.y)))
+      .map((pt) => ({ x: Number(pt.x), y: Number(pt.y) }));
+    const id = String(polyline?.id ?? polyline?.cluster_id ?? `polyline-${index}`);
+    return { id, points, closed: polyline?.closed !== false };
+  });
+}
+
+function isPolylineClosedRough(points) {
+  if (!Array.isArray(points) || points.length < 3) return false;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const d = Math.hypot(first.x - last.x, first.y - last.y);
+  if (d < 1e-6) return true;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const span = Math.max(
+    Math.max(...xs) - Math.min(...xs) || 0,
+    Math.max(...ys) - Math.min(...ys) || 0,
+    1,
+  );
+  return d <= span * 0.02;
+}
+
+function convexHull2d(points) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const uniq = [];
+  const seen = new Set();
+  points.forEach((p) => {
+    const k = `${p.x.toFixed(8)}\u0001${p.y.toFixed(8)}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    uniq.push({ x: p.x, y: p.y });
+  });
+  if (uniq.length <= 2) return uniq;
+  const pts = [...uniq].sort((a, b) => (a.x !== b.x ? a.x - b.x : a.y - b.y));
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  upper.pop();
+  lower.pop();
+  return lower.concat(upper);
+}
+
+function buildBuildingOutlineVerticesFromSelection(selectedIds) {
+  const ids = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  if (!ids.size) return null;
+  const list = getBuildingOutlinePolylineSourceList().filter((row) => ids.has(row.id));
+  if (!list.length) return null;
+  if (list.length === 1 && list[0].points.length >= 3) {
+    const pts = list[0].points;
+    if (list[0].closed !== false || isPolylineClosedRough(pts)) {
+      const out = pts.map((p) => ({ x: p.x, y: p.y }));
+      if (isPolylineClosedRough(out)) out.pop();
+      return out.length >= 3 ? out : null;
+    }
+  }
+  const all = [];
+  list.forEach((row) => {
+    row.points.forEach((p) => all.push(p));
+    for (let i = 0; i < row.points.length - 1; i++) {
+      const a = row.points[i];
+      const b = row.points[i + 1];
+      const steps = Math.min(12, Math.max(3, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 800)));
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        all.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+    }
+  });
+  const hull = convexHull2d(all);
+  return hull.length >= 3 ? hull : null;
+}
+
+function pickBuildingOutlinePolylineIdAtCanvas(canvasX, canvasY) {
+  const world = canvasToWorld(canvasX, canvasY);
+  const tol = Math.max(6 / view.scale, 0.05);
+  let bestId = null;
+  let bestD = Infinity;
+  getBuildingOutlinePolylineSourceList().forEach((row) => {
+    if (row.points.length < 2) return;
+    for (let i = 0; i < row.points.length - 1; i++) {
+      const d = pointToSegmentDistance(world, row.points[i], row.points[i + 1]);
+      if (d < bestD && d <= tol) {
+        bestD = d;
+        bestId = row.id;
+      }
+    }
+    if (row.points.length >= 3) {
+      const a = row.points[row.points.length - 1];
+      const b = row.points[0];
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 1e-6) {
+        const d = pointToSegmentDistance(world, a, b);
+        if (d < bestD && d <= tol) {
+          bestD = d;
+          bestId = row.id;
+        }
+      }
+    }
+  });
+  return bestId;
+}
+
+function beginBuildingOutlinePolylinePick(order) {
+  if (!state.hasDataset) {
+    setUploadStatus("DXF 데이터가 필요합니다.", true);
+    return;
+  }
+  state.buildingOutlinePickMode = {
+    order,
+    selectedIds: new Set(),
+  };
+  state.buildingOutlinePickClick = null;
+  state.buildingEditMode = true;
+  syncBuildingEditModeButtons();
+  updateCanvasModeHint();
+  setUploadStatus("동 윤곽: 도면 폴리라인을 클릭해 선택·해제합니다. 같은 행 설정의 「확인」 또는 Enter로 완료, Esc로 취소합니다.");
+  renderPendingNameEditor();
+  requestRedraw();
+}
+
+function cancelBuildingOutlinePolylinePick() {
+  state.buildingOutlinePickMode = null;
+  state.buildingOutlinePickClick = null;
+  updateCanvasModeHint();
+  setUploadStatus("동 윤곽 선택을 취소했습니다.");
+  renderPendingNameEditor();
+  requestRedraw();
+}
+
+function confirmBuildingOutlinePolylinePick() {
+  const mode = state.buildingOutlinePickMode;
+  if (!mode) return;
+  const vertices = buildBuildingOutlineVerticesFromSelection(mode.selectedIds);
+  if (!vertices || vertices.length < 3) {
+    setUploadStatus("폴리라인을 하나 이상 선택한 뒤 확정하세요.", true);
+    return;
+  }
+  const order = mode.order;
+  state.buildingOutlinePickMode = null;
+  state.buildingOutlinePickClick = null;
+  upsertAreaPolygonByOrder(AREA_KIND_BUILDING, order, vertices);
+  updateCanvasModeHint();
+  const name =
+    getAreaNames(AREA_KIND_BUILDING)[order] || getDefaultAreaName(AREA_KIND_BUILDING, order);
+  setUploadStatus(`${name} 동 윤곽선을 생성했습니다. 편집 모드에서 절점을 조정할 수 있습니다.`);
+  renderPendingNameEditor();
+  requestRedraw();
 }
 
 /**
@@ -4617,17 +5925,33 @@ async function applyBuildingCountFromClusters(count, showStatus = true) {
   const refreshed = await refreshClustersForCount(desired, showStatus, false);
   if (!refreshed) return null;
 
+  ensurePendingNameCount(AREA_KIND_BUILDING, desired);
+  renderPendingNameEditor();
+  ensureAutoBuildingOutlineFlagsLength();
+
+  const names = getAreaNames(AREA_KIND_BUILDING).slice(0, desired);
+  const anyAuto = names.some((_, i) => isAutoBuildingOutlineAtOrder(i));
+
+  if (!anyAuto) {
+    if (showStatus) {
+      setPhase("matching", 60);
+      setUploadStatus("동 목록만 반영했습니다. 자동생성을 켠 동은 없습니다. 나머지는 「생성」으로 윤곽을 지정하세요.");
+    }
+    syncPendingNamesWithBuildings();
+    syncAreaCountInputs();
+    populateBuildingSelect();
+    renderBuildingTabs();
+    renderPendingNameEditor();
+    requestRedraw();
+    return { success: true, generated: getAreasByKind(AREA_KIND_BUILDING).map((e) => e.building) };
+  }
+
   if (showStatus) {
     setPhase("matching", 60);
     setUploadStatus("폴리라인으로 동 생성 중...");
   }
-  ensurePendingNameCount(AREA_KIND_BUILDING, desired);
-  renderPendingNameEditor();
-  const names = getAreaNames(AREA_KIND_BUILDING).slice(0, desired);
 
-  // 동 형상은 클러스터 폴리라인만 사용. 기본 폴리라인(raw)은 참고용 표시만 되고 선택되지 않음.
   const availablePolylines = state.clusterPolylines || [];
-
   const closedPolylines = availablePolylines.filter(
     (polyline) =>
       polyline.closed !== false &&
@@ -4635,7 +5959,23 @@ async function applyBuildingCountFromClusters(count, showStatus = true) {
       polyline.points.length >= 3,
   );
 
+  const existingAreas = getAreasByKind(AREA_KIND_BUILDING);
   const generated = names.map((name, index) => {
+    if (!isAutoBuildingOutlineAtOrder(index)) {
+      const ex = existingAreas[index];
+      if (ex?.building?.vertices?.length >= 3) {
+        return {
+          ...ex.building,
+          kind: AREA_KIND_BUILDING,
+          name: name || getDefaultAreaName(AREA_KIND_BUILDING, index),
+        };
+      }
+      return {
+        kind: AREA_KIND_BUILDING,
+        name: name || getDefaultAreaName(AREA_KIND_BUILDING, index),
+        vertices: [],
+      };
+    }
     const source = index < closedPolylines.length ? closedPolylines[index] : null;
     const vertices =
       source && Array.isArray(source.points) && source.points.length >= 3
@@ -4674,7 +6014,11 @@ async function handleApplyBuildingCount() {
     const result = await applyBuildingCountFromClusters(count, true);
     if (result) {
       setPhase("ready", 100);
-      setUploadStatus(`동 ${result.generated.length}개 개수 적용되었습니다.`);
+      if (hasAnyAutoBuildingOutlineFromClusters()) {
+        setUploadStatus(`동 ${result.generated.length}개 반영했습니다. (자동생성 켠 동은 클러스터 윤곽 적용)`);
+      } else {
+        setUploadStatus("동 개수·이름 목록을 반영했습니다. 자동생성을 켠 동이 없으면 「생성」으로 윤곽을 지정하세요.");
+      }
       setTimeout(() => setPhase("idle"), 600);
     }
   } catch (error) {
@@ -4722,8 +6066,44 @@ async function handleApplyParkingCount() {
   }
 }
 
+async function handleApplyTowerCraneCount() {
+  if (applyTowerCraneCountBtn && applyTowerCraneCountBtn.disabled) return;
+  if (!state.hasDataset || !state.circles.length) {
+    setUploadStatus("DXF 데이터가 필요합니다.", true);
+    return;
+  }
+  if (applyTowerCraneCountBtn) {
+    applyTowerCraneCountBtn.disabled = true;
+    applyTowerCraneCountBtn.textContent = "적용 중...";
+  }
+  try {
+    const count = getConfiguredAreaCount(AREA_KIND_TOWER_CRANE);
+    ensurePendingNameCount(AREA_KIND_TOWER_CRANE, count);
+    renderPendingNameEditor();
+    renderBuildingTabs();
+    populateBuildingSelect();
+    requestRedraw();
+    setPhase("ready", 100);
+    setUploadStatus(`타워크레인 목록 ${count}개를 준비했습니다. 각 행의 네모 생성으로 위치를 직접 지정하세요.`);
+    setTimeout(() => setPhase("idle"), 600);
+  } catch (error) {
+    console.error(error);
+    setPhase("error");
+    setUploadStatus(parseErrorMessage(error), true);
+  } finally {
+    if (applyTowerCraneCountBtn) {
+      applyTowerCraneCountBtn.disabled = false;
+      applyTowerCraneCountBtn.textContent = "타워크레인 개수 적용";
+    }
+  }
+}
+
 async function handleGenerateBuildingOutlines() {
   if (generateBuildingOutlinesBtn && generateBuildingOutlinesBtn.disabled) return;
+  if (!hasAnyAutoBuildingOutlineFromClusters()) {
+    setUploadStatus("동 행에서 자동생성을 하나 이상 켜거나, 각 동 「생성」으로 폴리라인을 지정하세요.", true);
+    return;
+  }
   if (!state.hasDataset || !state.circles.length) {
     setUploadStatus("DXF 데이터가 필요합니다.", true);
     return;
@@ -4757,6 +6137,10 @@ async function handleGenerateBuildingOutlines() {
  */
 async function handleGenerateBuildings() {
   if (generateBuildingsBtn.disabled) return;
+  if (!hasAnyAutoBuildingOutlineFromClusters()) {
+    setUploadStatus("동 행에서 자동생성을 켜거나 각 동 윤곽을 만든 뒤 「동 정보 적용」을 사용하세요.", true);
+    return;
+  }
   if (!state.hasDataset || !state.circles.length) {
     setUploadStatus("DXF 데이터가 필요합니다.", true);
     return;
@@ -4780,8 +6164,9 @@ async function handleGenerateBuildings() {
     setUploadStatus("동 정보 적용 중...");
     try {
       const parkingAreas = getAreasByKind(AREA_KIND_PARKING).map((entry) => entry.building);
+      const towerAreas = getAreasByKind(AREA_KIND_TOWER_CRANE).map((entry) => entry.building);
       const applyPayload = {
-        buildings: serializeBuildingDefinitions([...generated, ...parkingAreas]),
+        buildings: serializeBuildingDefinitions([...generated, ...parkingAreas, ...towerAreas]),
       };
       const applyResponse = await fetch(`${API_BASE_URL}/api/assign-buildings`, {
         method: "POST",
@@ -4833,21 +6218,37 @@ async function handleApplyParkings() {
   await applyAreaDefinitions(AREA_KIND_PARKING);
 }
 
+async function handleApplyTowerCranes() {
+  await applyAreaDefinitions(AREA_KIND_TOWER_CRANE);
+}
+
 async function applyAreaDefinitions(kind) {
   const normalizedKind = normalizeAreaKind(kind);
   if (normalizedKind === AREA_KIND_BUILDING) {
     ensureBuildingsInitialized();
   }
 
-  const label = normalizedKind === AREA_KIND_PARKING ? "지하주차장" : "동";
-  const button = normalizedKind === AREA_KIND_PARKING ? applyParkingsBtn : applyBuildingsBtn;
+  const label =
+    normalizedKind === AREA_KIND_PARKING
+      ? "지하주차장"
+      : normalizedKind === AREA_KIND_TOWER_CRANE
+        ? "타워크레인"
+        : "동";
+  const button =
+    normalizedKind === AREA_KIND_PARKING
+      ? applyParkingsBtn
+      : normalizedKind === AREA_KIND_TOWER_CRANE
+        ? applyTowerCranesBtn
+        : applyBuildingsBtn;
   const serializedBuildings = serializeBuildingDefinitions(state.buildings);
   const targetAreas = serializedBuildings.filter((area) => normalizeAreaKind(area.kind) === normalizedKind);
   if (!targetAreas.length) {
     const message =
       normalizedKind === AREA_KIND_PARKING
         ? "지하주차장 폴리라인을 먼저 생성하세요."
-        : "적용할 동 정의가 없습니다.";
+        : normalizedKind === AREA_KIND_TOWER_CRANE
+          ? "타워크레인 폴리라인을 먼저 생성하세요."
+          : "적용할 동 정의가 없습니다.";
     setUploadStatus(message, true);
     return;
   }
@@ -4936,6 +6337,25 @@ function focusOnText(textId) {
   requestRedraw();
 }
 
+/** 기초 패널: 근접한 서로 다른 P/F 표기 쌍으로 뷰 이동·텍스트 강조 */
+function focusPfLabelMismatchPair(ax, ay, bx, by, textIdA, textIdB) {
+  const aX = Number(ax);
+  const aY = Number(ay);
+  const bX = Number(bx);
+  const bY = Number(by);
+  if (![aX, aY, bX, bY].every((v) => Number.isFinite(v))) return;
+  const sep = Math.hypot(bX - aX, bY - aY);
+  const pad = Math.max(2, sep * 0.35, 5);
+  fitViewToBounds({
+    minX: Math.min(aX, bX) - pad,
+    maxX: Math.max(aX, bX) + pad,
+    minY: Math.min(aY, bY) - pad,
+    maxY: Math.max(aY, bY) + pad,
+  });
+  state.highlightedTextIds = new Set([String(textIdA || ""), String(textIdB || "")].filter((id) => id.length));
+  requestRedraw();
+}
+
 function computeBounds(targets = null) {
   const circles = targets || state.circles;
   if (!circles.length) return null;
@@ -4988,7 +6408,7 @@ function fitViewToBounds(bounds) {
 /** 동 윤곽선(해치) 영역 클릭 시 해당 동 인덱스 반환. 캔버스 좌표 사용. */
 function hitTestBuildingFill(canvasX, canvasY) {
   const world = canvasToWorld(canvasX, canvasY);
-  const kindPriority = [AREA_KIND_BUILDING, AREA_KIND_PARKING];
+  const kindPriority = [AREA_KIND_BUILDING, AREA_KIND_PARKING, AREA_KIND_TOWER_CRANE];
   for (const kind of kindPriority) {
     for (let i = state.buildings.length - 1; i >= 0; i--) {
       const building = state.buildings[i];
@@ -5022,7 +6442,8 @@ function scrollToBuildingInList(buildingIndex) {
   state.highlightedBuildingNameIndex = buildingIndex;
   const row =
     buildingNameEditor?.querySelector(`[data-building-index="${buildingIndex}"]`) ||
-    parkingNameEditor?.querySelector(`[data-building-index="${buildingIndex}"]`);
+    parkingNameEditor?.querySelector(`[data-building-index="${buildingIndex}"]`) ||
+    towerCraneNameEditor?.querySelector(`[data-building-index="${buildingIndex}"]`);
   if (row) {
     row.scrollIntoView({ block: "nearest", behavior: "smooth" });
     document.querySelectorAll(".building-name-editor .name-editor-row").forEach((r) => r.classList.remove("name-editor-row--selected"));
@@ -5056,6 +6477,46 @@ function canvasToWorld(x, y) {
   };
 }
 
+/** 현재 캔버스에 보이는 월드 축정렬 영역(팬·줌 반영) — 가시성 컬링용 */
+function getViewportWorldRect() {
+  const { width, height } = getCanvasSize();
+  const c1 = canvasToWorld(0, 0);
+  const c2 = canvasToWorld(width, 0);
+  const c3 = canvasToWorld(width, height);
+  const c4 = canvasToWorld(0, height);
+  const xs = [c1.x, c2.x, c3.x, c4.x];
+  const ys = [c1.y, c2.y, c3.y, c4.y];
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+}
+
+/**
+ * 동일 circle id 가 배열에 두 번 들어오면 circleMap 과 달리 그리기 루프에서 말뚝·라벨이 겹쳐 그려진다.
+ * (설정 병합·재계산 등으로 중복이 생길 수 있음) — 화면용 목록에서는 id 기준 첫 항목만 유지한다.
+ */
+function dedupeCirclesById(circles) {
+  if (!Array.isArray(circles) || circles.length <= 1) return circles || [];
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < circles.length; i += 1) {
+    const c = circles[i];
+    const id = c && c.id;
+    if (id == null || id === "") {
+      out.push(c);
+      continue;
+    }
+    const key = String(id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
+}
+
 /**
  * 필터 조건에 맞는 파일 목록 반환
  * 
@@ -5066,22 +6527,29 @@ function getVisibleCircles() {
     console.debug("[getVisibleCircles] state.circles가 없거나 배열이 아닙니다:", state.circles);
     return [];
   }
-  
+
+  let list;
   if (state.activeBuildingFilter === "ALL") {
-    return state.circles;
+    list = state.circles;
+  } else if (state.activeBuildingFilter === "ERRORS") {
+    list = state.circles.filter((circle) => circle.has_error);
+  } else if (state.activeBuildingFilter === "UNASSIGNED") {
+    list = state.circles.filter((circle) => !circle.building_name || circle.building_name === "");
+  } else {
+    // 특정 동 필터
+    list = state.circles.filter(
+      (circle) => circle.building_name === state.activeBuildingFilter,
+    );
   }
-  if (state.activeBuildingFilter === "ERRORS") {
-    return state.circles.filter((circle) => circle.has_error);
+  const out = dedupeCirclesById(list);
+  if (
+    state.activeBuildingFilter !== "ALL"
+    && state.activeBuildingFilter !== "ERRORS"
+    && state.activeBuildingFilter !== "UNASSIGNED"
+  ) {
+    console.debug(`[getVisibleCircles] 필터 "${state.activeBuildingFilter}": ${out.length}개 Circle`);
   }
-  if (state.activeBuildingFilter === "UNASSIGNED") {
-    return state.circles.filter((circle) => !circle.building_name || circle.building_name === "");
-  }
-  // 특정 동 필터
-  const filtered = state.circles.filter(
-    (circle) => circle.building_name === state.activeBuildingFilter,
-  );
-  console.debug(`[getVisibleCircles] 필터 "${state.activeBuildingFilter}": ${filtered.length}개 Circle`);
-  return filtered;
+  return out;
 }
 
 function getVisibleTexts() {
@@ -5118,6 +6586,86 @@ function getVisibleTexts() {
       allowedCircleTextIds.has(text.id),
   );
 }
+
+/** 기초 글자·기초 수치 오버레이 표시 (construction.js 의 isFoundationLabelVizEnabled 와 동일) */
+function isFoundationGlyphLayerEnabled() {
+  return state.showFoundationLabelViz !== false;
+}
+
+/** 매칭된 번호 텍스트 월드 좌표 — matched_text 또는 textMap 보강 */
+function resolveCircleMatchedTextWorldPoint(circle) {
+  const mt = circle.matched_text;
+  if (mt != null) {
+    const x = Number(mt.text_center_x);
+    const y = Number(mt.text_center_y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      return { x, y };
+    }
+  }
+  const tid = circle.matched_text_id;
+  if (tid != null && tid !== "" && state.textMap?.has(String(tid))) {
+    const t = state.textMap.get(String(tid));
+    const x = Number(t?.text_center_x ?? t?.center_x);
+    const y = Number(t?.text_center_y ?? t?.center_y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      return { x, y };
+    }
+  }
+  return null;
+}
+
+/** 말뚝(원) 중심 ↔ 매칭 번호 텍스트 — 가시 영역 근처만, 스타일별 배치 스트로크 */
+function drawCircleToNumberMatchLines(circles) {
+  const vp = getViewportWorldRect();
+  const pad = 56 / view.scale;
+  const near = (wx, wy) =>
+    Number.isFinite(wx)
+    && Number.isFinite(wy)
+    && wx >= vp.minX - pad
+    && wx <= vp.maxX + pad
+    && wy >= vp.minY - pad
+    && wy <= vp.maxY + pad;
+  const okSegs = [];
+  const errSegs = [];
+  circles.forEach((circle) => {
+    const endW = resolveCircleMatchedTextWorldPoint(circle);
+    if (!endW) return;
+    const cx = Number(circle.center_x);
+    const cy = Number(circle.center_y);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+    if (!near(cx, cy) && !near(endW.x, endW.y)) return;
+    const start = worldToCanvas(cx, cy);
+    const end = worldToCanvas(endW.x, endW.y);
+    if (circle.has_error === true) errSegs.push([start, end]);
+    else okSegs.push([start, end]);
+  });
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  if (okSegs.length) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(147, 197, 253, 0.95)";
+    ctx.beginPath();
+    okSegs.forEach(([s, e]) => {
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+    });
+    ctx.stroke();
+  }
+  if (errSegs.length) {
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "rgba(251, 146, 60, 0.98)";
+    ctx.beginPath();
+    errSegs.forEach(([s, e]) => {
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+    });
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawCanvas() {
   const { width, height } = getCanvasSize();
   ctx.clearRect(0, 0, width, height);
@@ -5134,19 +6682,6 @@ function drawCanvas() {
   drawBuildings();
   drawAreaCreationPreview();
   const circles = getVisibleCircles();
-  if (state.showMatchLines) {
-    ctx.lineWidth = 1;
-    circles.forEach((circle) => {
-      if (!circle.matched_text) return;
-      const start = worldToCanvas(circle.center_x, circle.center_y);
-      const end = worldToCanvas(circle.matched_text.text_center_x, circle.matched_text.text_center_y);
-      ctx.strokeStyle = circle.has_error ? "rgba(249, 115, 22, 0.9)" : "rgba(255,255,255,0.35)";
-      ctx.beginPath();
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.stroke();
-    });
-  }
   const duplicateCircleIds = getDuplicateCircleIds();
   if (state.showCircles) {
     circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
@@ -5158,12 +6693,16 @@ function drawCanvas() {
   if (state.showTextLabels) {
     drawTextLabels();
   }
+  if (state.showMatchLines) {
+    drawCircleToNumberMatchLines(circles);
+  }
   drawTooltip();
 }
 
 function drawPolylineHints() {
   const raw = Array.isArray(state.rawPolylines) ? state.rawPolylines : [];
   const cluster = Array.isArray(state.clusterPolylines) ? state.clusterPolylines : [];
+  const pickIds = state.buildingOutlinePickMode?.selectedIds;
 
   function drawPolylineList(polylines, strokeStyle, lineWidth, lineDash, globalAlpha) {
     if (!polylines.length) return;
@@ -5187,10 +6726,63 @@ function drawPolylineHints() {
     ctx.restore();
   }
 
+  function drawOpenPolylineStroke(polyline, strokeStyle, lineWidth, lineDash) {
+    if (!Array.isArray(polyline.points) || polyline.points.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = strokeStyle;
+    ctx.setLineDash(lineDash || []);
+    ctx.lineWidth = lineWidth ?? 1.2;
+    ctx.beginPath();
+    polyline.points.forEach((point, index) => {
+      const { x, y } = worldToCanvas(point.x, point.y);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // 1) 원이 아닌 기본 폴리라인: 참고용으로만 뒤에 연하게 표시 (선택 불가)
   drawPolylineList(raw, "rgba(148, 163, 184, 0.35)", 1, [8, 6], 0.9);
   // 2) 클러스터(동) 폴리라인: 기존처럼 선만 표시 (실제 선택/편집은 drawBuildings의 동으로)
   drawPolylineList(cluster, "rgba(148, 163, 184, 0.9)", 1.5, [6, 4], 1);
+
+  if (state.buildingOutlinePickMode && raw.length) {
+    raw.forEach((polyline, index) => {
+      if (polyline.closed !== false) return;
+      if (!Array.isArray(polyline.points) || polyline.points.length < 2) return;
+      const id = String(polyline?.id ?? polyline?.cluster_id ?? `polyline-${index}`);
+      const sel = pickIds && pickIds.has(id);
+      drawOpenPolylineStroke(
+        polyline,
+        sel ? "rgba(250, 204, 21, 0.95)" : "rgba(148, 163, 184, 0.55)",
+        sel ? 2.4 : 1.1,
+        sel ? [] : [6, 4],
+      );
+    });
+  }
+
+  if (state.buildingOutlinePickMode && pickIds && pickIds.size && raw.length) {
+    raw.forEach((polyline, index) => {
+      if (polyline.closed === false) return;
+      const id = String(polyline?.id ?? polyline?.cluster_id ?? `polyline-${index}`);
+      if (!pickIds.has(id)) return;
+      if (!Array.isArray(polyline.points) || polyline.points.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = "rgba(250, 204, 21, 0.95)";
+      ctx.lineWidth = 2.4;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      polyline.points.forEach((point, i) => {
+        const { x, y } = worldToCanvas(point.x, point.y);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
 }
 
 function drawBuildings() {
@@ -5206,14 +6798,19 @@ function drawBuildings() {
       else ctx.lineTo(point.x, point.y);
     });
     ctx.closePath();
-    ctx.setLineDash(kind === AREA_KIND_PARKING ? [10, 5] : []);
+    ctx.setLineDash(kind === AREA_KIND_BUILDING ? [] : [10, 5]);
     ctx.strokeStyle = color;
     ctx.lineWidth = state.buildingEditMode ? 2.4 : 1;
     ctx.globalAlpha = 0.8;
     ctx.stroke();
-    const shouldFill = kind === AREA_KIND_PARKING ? state.showParkingHatch : state.showBuildingHatch;
+    const shouldFill =
+      kind === AREA_KIND_BUILDING
+        ? state.showBuildingHatch
+        : kind === AREA_KIND_PARKING
+          ? state.showParkingHatch
+          : state.showTowerCraneHatch;
     if (shouldFill) {
-      ctx.globalAlpha = kind === AREA_KIND_PARKING ? 0.05 : 0.08;
+      ctx.globalAlpha = kind === AREA_KIND_BUILDING ? 0.08 : 0.05;
       ctx.fillStyle = color;
       ctx.fill();
     }
@@ -5226,7 +6823,8 @@ function drawBuildings() {
     centroid.x /= building.vertices.length;
     centroid.y /= building.vertices.length;
     const screen = worldToCanvas(centroid.x, centroid.y);
-    ctx.fillStyle = kind === AREA_KIND_PARKING ? "#7c2d12" : "#ff5252";
+    ctx.fillStyle =
+      kind === AREA_KIND_PARKING ? "#7c2d12" : kind === AREA_KIND_TOWER_CRANE ? "#5b21b6" : "#ff5252";
     ctx.font = "20px 'Segoe UI'";
     ctx.textAlign = "center";
     ctx.fillText(building.name || getDefaultAreaName(kind, index), screen.x, screen.y);
@@ -5353,11 +6951,38 @@ function drawTextLabels() {
   ctx.textBaseline = "middle";
   const texts = getVisibleTexts();
   texts.forEach((text) => {
-    const { x, y } = worldToCanvas(text.text_center_x, text.text_center_y);
     const isHighlighted = state.highlightedTextIds.has(text.id);
     const isUnmatched = text.has_error;
-    const labelY = y - 12;
-    if (isUnmatched) {
+    const isPfFoundation = text.foundation_pf_only === true;
+    if (isPfFoundation) {
+      if (!isFoundationGlyphLayerEnabled()) {
+        return;
+      }
+      const ix = Number(text.insert_x);
+      const iy = Number(text.insert_y);
+      const cx = Number(text.text_center_x ?? text.center_x);
+      const cy = Number(text.text_center_y ?? text.center_y);
+      const useInsert = Number.isFinite(ix) && Number.isFinite(iy);
+      const { x, y } = worldToCanvas(useInsert ? ix : cx, useInsert ? iy : cy);
+      const h = Number(text.height);
+      const fontPx = Math.max(4, (Number.isFinite(h) && h > 0 ? h : 1) * view.scale);
+      const rotDeg = Number(text.rotation_deg);
+      const rad = (Number.isFinite(rotDeg) ? rotDeg : 0) * (Math.PI / 180);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-rad);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.font = `bold ${fontPx}px ui-monospace, Consolas, "Segoe UI", sans-serif`;
+      ctx.lineWidth = Math.max(1, fontPx * 0.18);
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.strokeText(text.text, 0, 0);
+      ctx.fillStyle = isHighlighted ? "#facc15" : "#a7f3d0";
+      ctx.fillText(text.text, 0, 0);
+      ctx.restore();
+    } else if (isUnmatched) {
+      const { x, y } = worldToCanvas(text.text_center_x, text.text_center_y);
+      const labelY = y - 12;
       ctx.font = "bold 13px 'Segoe UI'";
       ctx.strokeStyle = "rgba(194, 65, 12, 0.9)";
       ctx.lineWidth = 2.5;
@@ -5365,6 +6990,8 @@ function drawTextLabels() {
       ctx.fillStyle = isHighlighted ? "#facc15" : "#f97316";
       ctx.fillText(text.text, x, labelY);
     } else {
+      const { x, y } = worldToCanvas(text.text_center_x, text.text_center_y);
+      const labelY = y - 12;
       ctx.font = "12px 'Segoe UI'";
       ctx.fillStyle = isHighlighted ? "#facc15" : "#cbd5f5";
       ctx.fillText(text.text, x, labelY);
@@ -5425,6 +7052,10 @@ function handleCanvasMouseDown(event) {
     requestRedraw();
     return;
   }
+  if (state.buildingOutlinePickMode && (button === 0 || button === undefined)) {
+    state.buildingOutlinePickClick = { x: offsetX, y: offsetY, moved: false };
+    return;
+  }
   if (state.buildingEditMode) {
     const hit = hitTestVertex(offsetX, offsetY);
     if (hit) {
@@ -5458,6 +7089,12 @@ function handleCanvasMouseDown(event) {
 
 function handleCanvasMouseMove(event) {
   const { x: offsetX, y: offsetY } = getCanvasCoordsFromEvent(event);
+  if (state.buildingOutlinePickClick) {
+    const s = state.buildingOutlinePickClick;
+    const dx = offsetX - s.x;
+    const dy = offsetY - s.y;
+    if (dx * dx + dy * dy > 25) s.moved = true;
+  }
   if (state.areaRectCreate?.startWorld) {
     state.areaRectCreate.currentWorld = canvasToWorld(offsetX, offsetY);
     requestRedraw();
@@ -5496,6 +7133,35 @@ function handleCanvasMouseUp(event) {
   isPanning = false;
   state.draggingVertex = null;
   if (state.areaRectCreate) {
+    mouseDownPos = null;
+    return;
+  }
+  if (
+    state.buildingOutlinePickMode
+    && state.buildingOutlinePickClick
+    && (event?.button === 0 || event?.button === undefined)
+  ) {
+    const start = state.buildingOutlinePickClick;
+    state.buildingOutlinePickClick = null;
+    if (!start.moved) {
+      const { x: upX, y: upY } = getCanvasCoordsFromEvent(event);
+      const id = pickBuildingOutlinePolylineIdAtCanvas(upX, upY);
+      if (id && state.buildingOutlinePickMode) {
+        if (state.buildingOutlinePickMode.selectedIds.has(id)) {
+          state.buildingOutlinePickMode.selectedIds.delete(id);
+        } else {
+          state.buildingOutlinePickMode.selectedIds.add(id);
+        }
+        const n = state.buildingOutlinePickMode.selectedIds.size;
+        setUploadStatus(
+          n ? `폴리라인 ${n}개 선택됨. Enter로 확정하세요.` : "폴리라인을 선택해 주세요.",
+        );
+        updateCanvasModeHint();
+      } else {
+        setUploadStatus("선에 가깝게 클릭해 폴리라인을 선택하세요.", true);
+      }
+      requestRedraw();
+    }
     mouseDownPos = null;
     return;
   }
@@ -5588,6 +7254,7 @@ function handleCanvasWheel(event) {
 
 function handleCanvasDoubleClick(event) {
   if (state.areaRectCreate) return;
+  if (state.buildingOutlinePickMode) return;
   if (!state.buildingEditMode) return;
   const { x: offsetX, y: offsetY } = getCanvasCoordsFromEvent(event);
   const hit = hitTestVertex(offsetX, offsetY);
@@ -5698,6 +7365,27 @@ function pickCircle(offsetX, offsetY, pixelTolerance = 20) {
 function pickText(offsetX, offsetY, pixelTolerance = 20) {
   for (let index = state.texts.length - 1; index >= 0; index -= 1) {
     const text = state.texts[index];
+    if (text.foundation_pf_only === true) {
+      const ix = Number(text.insert_x);
+      const iy = Number(text.insert_y);
+      const cx = Number(text.text_center_x ?? text.center_x);
+      const cy = Number(text.text_center_y ?? text.center_y);
+      const wx = Number.isFinite(ix) ? ix : cx;
+      const wy = Number.isFinite(iy) ? iy : cy;
+      const h = Number(text.height) || 1;
+      const wlen = String(text.text || "").length;
+      const lenWorld = Math.max(h * Math.max(wlen, 1) * 0.62, h * 1.2);
+      const rotDeg = Number(text.rotation_deg);
+      const wr = (Number.isFinite(rotDeg) ? rotDeg : 0) * (Math.PI / 180);
+      const start = worldToCanvas(wx, wy);
+      const end = worldToCanvas(wx + lenWorld * Math.cos(wr), wy + lenWorld * Math.sin(wr));
+      const dSeg = pointToSegmentDistance({ x: offsetX, y: offsetY }, start, end);
+      const tol = Math.max(pixelTolerance, h * view.scale * 0.55);
+      if (dSeg <= tol) {
+        return text;
+      }
+      continue;
+    }
     const screen = worldToCanvas(text.text_center_x, text.text_center_y);
     const distance = Math.hypot(screen.x - offsetX, screen.y - offsetY);
     if (distance <= pixelTolerance) {
@@ -6143,6 +7831,12 @@ function getClusteringSetting(key, defaultValue) {
   }
 }
 
+function syncBuildingOutlineAutoUi() {
+  if (generateBuildingOutlinesBtn) {
+    generateBuildingOutlinesBtn.style.display = hasAnyAutoBuildingOutlineFromClusters() ? "" : "none";
+  }
+}
+
 /**
  * 클러스터링 설정 패널 토글
  */
@@ -6388,6 +8082,9 @@ function collectCurrentStateForSave() {
         textHeightMax: filterValues.textHeightMax,
         maxMatchDistance: filterValues.maxMatchDistance,
         textReferencePoint: filterValues.textReferencePoint,
+        pileNumberHyphenFormat: !!filterValues.pileNumberHyphenFormat,
+        towerCraneNumberFormat: !!filterValues.towerCraneNumberFormat,
+        excludeIdenticalGeometryDuplicates: !!filterValues.excludeIdenticalGeometryDuplicates,
       }
     : { ...state.filter };
 
@@ -6404,7 +8101,9 @@ function collectCurrentStateForSave() {
     clustering: {
       maxDistanceFromSeed: getClusteringSetting("maxDistanceFromSeed", 30),
       mergeSeedDistance: getClusteringSetting("mergeSeedDistance", 20),
+      autoBuildingOutlineByOrder: [...(state.autoBuildingOutlineByOrder || [])],
     },
+    autoBuildingOutlineByOrder: [...(state.autoBuildingOutlineByOrder || [])],
     summary: state.summary,
     buildingSummary: state.buildingSummary || [],
     circles: state.circles,
@@ -6417,14 +8116,20 @@ function collectCurrentStateForSave() {
     buildings: serializeBuildingDefinitions(state.buildings || []),
     pendingNames: [...(state.pendingNames || [])],
     pendingParkingNames: [...(state.pendingParkingNames || [])],
+    pendingTowerCraneNames: [...(state.pendingTowerCraneNames || [])],
     pendingDrillingElevationsBuilding: [...(state.pendingDrillingElevationsBuilding || [])],
     pendingDrillingElevationsParking: [...(state.pendingDrillingElevationsParking || [])],
+    pendingDrillingElevationsTowerCrane: [...(state.pendingDrillingElevationsTowerCrane || [])],
     pendingFoundationTopBuilding: [...(state.pendingFoundationTopBuilding || [])],
     pendingFoundationTopParking: [...(state.pendingFoundationTopParking || [])],
+    pendingFoundationTopTowerCrane: [...(state.pendingFoundationTopTowerCrane || [])],
     foundationThicknessByPileId: { ...(state.foundationThicknessByPileId || {}) },
     foundationPitOffsetByPileId: { ...(state.foundationPitOffsetByPileId || {}) },
+    drillingStartByPileId: { ...(state.drillingStartByPileId || {}) },
+    foundationTopByPileId: { ...(state.foundationTopByPileId || {}) },
     buildingCount: getConfiguredAreaCount(AREA_KIND_BUILDING),
     parkingAreaCount: getConfiguredAreaCount(AREA_KIND_PARKING),
+    towerAreaCount: getConfiguredAreaCount(AREA_KIND_TOWER_CRANE),
     manualOverrides,
     matchCorrections: state.matchCorrections || [],
   };
@@ -6923,6 +8628,11 @@ async function handleLoadWork(id, loadBtn) {
           v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v),
         )
       : [];
+    state.pendingDrillingElevationsTowerCrane = Array.isArray(data.pendingDrillingElevationsTowerCrane)
+      ? data.pendingDrillingElevationsTowerCrane.map((v) =>
+          v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v),
+        )
+      : [];
     state.pendingFoundationTopBuilding = Array.isArray(data.pendingFoundationTopBuilding)
       ? data.pendingFoundationTopBuilding.map((v) =>
           v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v),
@@ -6930,6 +8640,11 @@ async function handleLoadWork(id, loadBtn) {
       : [];
     state.pendingFoundationTopParking = Array.isArray(data.pendingFoundationTopParking)
       ? data.pendingFoundationTopParking.map((v) =>
+          v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v),
+        )
+      : [];
+    state.pendingFoundationTopTowerCrane = Array.isArray(data.pendingFoundationTopTowerCrane)
+      ? data.pendingFoundationTopTowerCrane.map((v) =>
           v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v),
         )
       : [];
@@ -6947,11 +8662,31 @@ async function handleLoadWork(id, loadBtn) {
           ).map(([circleId, value]) => [circleId, Number(value)]),
         )
       : {};
+    state.drillingStartByPileId = data.drillingStartByPileId && typeof data.drillingStartByPileId === "object"
+      ? Object.fromEntries(
+          Object.entries(data.drillingStartByPileId).filter(
+            ([circleId, value]) => circleId && Number.isFinite(Number(value)),
+          ).map(([circleId, value]) => [circleId, Number(value)]),
+        )
+      : {};
+    state.foundationTopByPileId = data.foundationTopByPileId && typeof data.foundationTopByPileId === "object"
+      ? Object.fromEntries(
+          Object.entries(data.foundationTopByPileId).filter(
+            ([circleId, value]) => circleId && Number.isFinite(Number(value)),
+          ).map(([circleId, value]) => [circleId, Number(value)]),
+        )
+      : {};
     setAreaNames(
       AREA_KIND_PARKING,
       Array.isArray(data.pendingParkingNames) && data.pendingParkingNames.length
         ? [...data.pendingParkingNames]
         : buildAreaNameListFromEntries(AREA_KIND_PARKING, getAreasByKind(AREA_KIND_PARKING, state.buildings)),
+    );
+    setAreaNames(
+      AREA_KIND_TOWER_CRANE,
+      Array.isArray(data.pendingTowerCraneNames) && data.pendingTowerCraneNames.length
+        ? [...data.pendingTowerCraneNames]
+        : buildAreaNameListFromEntries(AREA_KIND_TOWER_CRANE, getAreasByKind(AREA_KIND_TOWER_CRANE, state.buildings)),
     );
     state.filter = normalizeFilter(data.filter || {});
     state.circleMap = new Map(state.circles.map((c) => [c.id, c]));
@@ -6971,9 +8706,7 @@ async function handleLoadWork(id, loadBtn) {
     if (state.circles.length > 0) {
       // 저장된 errors는 circles/texts와 불일치할 수 있음(수동 매칭 후 PATCH로 errors만 비운 경우 등) → 항상 현재 데이터 기준으로 재계산
       state.errors = buildErrorsFromCirclesAndTexts(state.circles, state.texts);
-      if (!state.duplicates || !state.duplicates.length) {
-        state.duplicates = buildDuplicatesFromCircles(state.circles);
-      }
+      refreshMatchDerivedUIState();
       if (!state.summary || typeof state.summary.matched_pairs !== "number") {
         if (!state.summary) state.summary = {};
         state.summary.total_circles = state.summary.total_circles ?? state.circles.length;
@@ -7011,7 +8744,14 @@ async function handleLoadWork(id, loadBtn) {
       parkingCountInput.value =
         data.parkingAreaCount || getAreasByKind(AREA_KIND_PARKING).length || 0;
     }
+    if (towerCraneCountInput) {
+      towerCraneCountInput.value =
+        data.towerAreaCount || getAreasByKind(AREA_KIND_TOWER_CRANE).length || 0;
+    }
+    applyLoadedAutoBuildingOutlineOrderPayload(data.clustering, data.autoBuildingOutlineByOrder);
+    syncBuildingOutlineAutoUi();
     ensurePendingNameCount(AREA_KIND_PARKING, getConfiguredAreaCount(AREA_KIND_PARKING));
+    ensurePendingNameCount(AREA_KIND_TOWER_CRANE, getConfiguredAreaCount(AREA_KIND_TOWER_CRANE));
     syncPendingNamesWithBuildings();
 
     updateSummaryCards();
@@ -9215,6 +10955,7 @@ async function handleSaveProject() {
     clusterPolylines: clusterPolylinesForSave,
     pendingNames: [...state.pendingNames],
     pendingParkingNames: [...(state.pendingParkingNames || [])],
+    pendingTowerCraneNames: [...(state.pendingTowerCraneNames || [])],
     filter: {
       minDiameter: currentFilterValues.minDiameter,
       maxDiameter: currentFilterValues.maxDiameter,
@@ -9222,9 +10963,13 @@ async function handleSaveProject() {
       textHeightMax: currentFilterValues.textHeightMax,
       maxMatchDistance: currentFilterValues.maxMatchDistance,
       textReferencePoint: currentFilterValues.textReferencePoint,
+      pileNumberHyphenFormat: !!currentFilterValues.pileNumberHyphenFormat,
+      towerCraneNumberFormat: !!currentFilterValues.towerCraneNumberFormat,
+      excludeIdenticalGeometryDuplicates: !!currentFilterValues.excludeIdenticalGeometryDuplicates,
     },
     buildingCount: getAreasByKind(AREA_KIND_BUILDING).length,
     parkingAreaCount: getAreasByKind(AREA_KIND_PARKING).length,
+    towerAreaCount: getAreasByKind(AREA_KIND_TOWER_CRANE).length,
   };
 
   const btn = saveProjectBtn;
@@ -9332,6 +11077,7 @@ async function handleUpdateProject() {
     clusterPolylines: clusterPolylinesForUpdate,
     pendingNames: [...state.pendingNames],
     pendingParkingNames: [...(state.pendingParkingNames || [])],
+    pendingTowerCraneNames: [...(state.pendingTowerCraneNames || [])],
     filter: {
       minDiameter: currentFilterValues.minDiameter,
       maxDiameter: currentFilterValues.maxDiameter,
@@ -9339,9 +11085,13 @@ async function handleUpdateProject() {
       textHeightMax: currentFilterValues.textHeightMax,
       maxMatchDistance: currentFilterValues.maxMatchDistance,
       textReferencePoint: currentFilterValues.textReferencePoint,
+      pileNumberHyphenFormat: !!currentFilterValues.pileNumberHyphenFormat,
+      towerCraneNumberFormat: !!currentFilterValues.towerCraneNumberFormat,
+      excludeIdenticalGeometryDuplicates: !!currentFilterValues.excludeIdenticalGeometryDuplicates,
     },
     buildingCount: getAreasByKind(AREA_KIND_BUILDING).length,
     parkingAreaCount: getAreasByKind(AREA_KIND_PARKING).length,
+    towerAreaCount: getAreasByKind(AREA_KIND_TOWER_CRANE).length,
   };
   const btn = updateProjectBtn;
   if (btn) btn.disabled = true;
@@ -9473,10 +11223,25 @@ function handleLoadProject(projectName, versionId) {
         ? [...projectData.pendingParkingNames]
         : buildAreaNameListFromEntries(AREA_KIND_PARKING, getAreasByKind(AREA_KIND_PARKING, state.buildings)),
     );
+    setAreaNames(
+      AREA_KIND_TOWER_CRANE,
+      projectData.pendingTowerCraneNames && Array.isArray(projectData.pendingTowerCraneNames)
+        ? [...projectData.pendingTowerCraneNames]
+        : buildAreaNameListFromEntries(AREA_KIND_TOWER_CRANE, getAreasByKind(AREA_KIND_TOWER_CRANE, state.buildings)),
+    );
 
     if (projectData.filter) {
       state.filter = normalizeFilter(projectData.filter);
       updateFilterInputs(state.filter);
+    }
+
+    if (projectData.clustering) {
+      if (maxDistanceSeedInput) {
+        maxDistanceSeedInput.value = projectData.clustering.maxDistanceFromSeed ?? 30;
+      }
+      if (mergeSeedDistanceInput) {
+        mergeSeedDistanceInput.value = projectData.clustering.mergeSeedDistance ?? 20;
+      }
     }
 
     if (projectData.buildingCount) {
@@ -9492,6 +11257,22 @@ function handleLoadProject(projectName, versionId) {
       }
       ensurePendingNameCount(AREA_KIND_PARKING, getConfiguredAreaCount(AREA_KIND_PARKING));
     }
+    if (towerCraneCountInput) {
+      const savedTowerCount = Number(projectData.towerAreaCount);
+      if (Number.isFinite(savedTowerCount)) {
+        towerCraneCountInput.value = Math.max(0, savedTowerCount);
+      } else {
+        towerCraneCountInput.value =
+          getAreasByKind(AREA_KIND_TOWER_CRANE).length || getAreaNames(AREA_KIND_TOWER_CRANE).length || 0;
+      }
+      ensurePendingNameCount(AREA_KIND_TOWER_CRANE, getConfiguredAreaCount(AREA_KIND_TOWER_CRANE));
+    }
+
+    applyLoadedAutoBuildingOutlineOrderPayload(
+      projectData.clustering,
+      projectData.autoBuildingOutlineByOrder,
+    );
+    syncBuildingOutlineAutoUi();
 
     syncPendingNamesWithBuildings();
     renderPendingNameEditor();

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import ezdxf
 _WARNED_NUMPY = False
@@ -25,6 +25,64 @@ except ImportError:
 
 NUMERIC_TEXT_PATTERN = re.compile(r"^[0-9.\-]+$")
 CHAR_WIDTH_FACTOR = 0.6
+
+
+def _normalize_label_hyphens(s: str) -> str:
+    return (
+        s.replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+
+
+def _is_foundation_pf_style_compact(compact: str) -> bool:
+    """P/F 기초 표기로 보이는 경우만( PHC·PART 등 잡문자열 제외 )."""
+    if not compact:
+        return False
+    c0 = compact[0].upper()
+    if c0 not in ("P", "F"):
+        return False
+    if len(compact) == 1:
+        return True
+    c1 = compact[1]
+    if c1 in "-\u2212\u2013\u2014." or c1.isdigit():
+        return True
+    return False
+
+
+def foundation_pf_only_flag(raw: str) -> bool:
+    """말뚝 번호가 아닌 기초 P/F 표기 — 뷰어·기초 탭용으로만 수집, 자동 매칭 후보에서는 제외."""
+    s = _normalize_label_hyphens((raw or "").strip())
+    compact = re.sub(r"\s+", "", s)
+    if not compact:
+        return False
+    if NUMERIC_TEXT_PATTERN.fullmatch(compact):
+        return False
+    if re.match(r"^([Tt])(\d+)-(\d+)$", compact):
+        return False
+    return _is_foundation_pf_style_compact(compact)
+
+
+def pile_label_for_collection(raw: str) -> Optional[str]:
+    """
+    DXF에서 말뚝 매칭 후보로 넣을 TEXT 본문.
+    - 숫자·소수점·마이너스·하이픈만 (기존)
+    - 또는 T(호기)-파일 번호 (예: T4-1). 앞에 T가 없는 4-1은 동-번호로 숫자 패턴만으로 수집.
+    - 또는 기초골조용 P/F로 시작하는 표기(공백 제거 후 첫 글자) — 캔버스 표시·기초 탭 P/F 짝지음용.
+    공백은 T형식에서만 제거해 T4-1과 동일하게 취급.
+    """
+    s = _normalize_label_hyphens((raw or "").strip())
+    if not s:
+        return None
+    if NUMERIC_TEXT_PATTERN.fullmatch(s):
+        return s
+    compact = re.sub(r"\s+", "", s)
+    m = re.match(r"^([Tt])(\d+)-(\d+)$", compact)
+    if m:
+        return f"T{m.group(2)}-{m.group(3)}"
+    if _is_foundation_pf_style_compact(compact):
+        return s if len(s) <= 120 else f"{s[:117]}..."
+    return None
 # 원형 폴리라인 인식: 절대 오차(단위), 상대 오차(반지름 대비), 최소 꼭짓점 수
 POLYLINE_CIRCLE_TOLERANCE = 0.01
 POLYLINE_CIRCLE_RELATIVE_TOLERANCE = 0.02  # 반지름의 2% 이내면 원으로 인정
@@ -428,6 +486,30 @@ def compute_world_text_center(
     return transform.apply(local_center.x, local_center.y)
 
 
+def _world_text_baseline_deg(
+    entity: Union[Text, MText],
+    current_transform: Transform2D,
+) -> float:
+    """월드 좌표계에서 +X 기준 반시계 방향 각도(도) — INSERT 블록 회전과 로컬 회전을 합성."""
+    try:
+        dxftype = entity.dxftype()
+        if dxftype == "MTEXT":
+            td = getattr(entity.dxf, "text_direction", None)
+            if td is not None:
+                lx = float(td.x)
+                ly = float(td.y)
+                n = math.hypot(lx, ly)
+                if n > 1e-9:
+                    vx, vy = current_transform.apply_vector(lx / n, ly / n)
+                    return math.degrees(math.atan2(vy, vx))
+    except Exception:
+        pass
+    rot_local = float(entity.dxf.get("rotation", 0.0) or 0.0)
+    lr = math.radians(rot_local)
+    vx, vy = current_transform.apply_vector(math.cos(lr), math.sin(lr))
+    return math.degrees(math.atan2(vy, vx))
+
+
 def _mtext_plain_content(entity: MText) -> str:
     try:
         return (entity.plain_text() or "").strip()
@@ -505,33 +587,36 @@ def parse_dxf_entities(
                     insert.x, insert.y
                 )
                 world_height = base_height * current_transform.scale_factor()
-                if not (text_height_min <= world_height <= text_height_max):
+                label = pile_label_for_collection(raw_content)
+                if not label:
+                    continue
+                pf_only = foundation_pf_only_flag(raw_content)
+                height_ok = text_height_min <= world_height <= text_height_max
+                if not height_ok and not pf_only:
                     continue
                 world_center_x, world_center_y = compute_world_text_center(
                     text_entity, base_height, current_transform
                 )
-                # 말뚝 매칭용: 본문 전체가 숫자·소수점·마이너스만인 경우만 수집.
-                # 거리·각도·증분 등 한글·기호가 섞인 MTEXT/TEXT는 건너뜀.
-                s = raw_content.strip()
-                if s and NUMERIC_TEXT_PATTERN.fullmatch(s):
-                    texts.append(
-                        {
-                            "id": f"T{text_seq}",
-                            "type": dxftype,
-                            "text": s,
-                            "insert_x": world_insert_x,
-                            "insert_y": world_insert_y,
-                            "insert_z": insert.z,
-                            "text_center_x": world_center_x,
-                            "text_center_y": world_center_y,
-                            "center_x": world_center_x,
-                            "center_y": world_center_y,
-                            "height": world_height,
-                            "layer": text_entity.dxf.layer or "0",
-                            "block_name": active_block_name,
-                        }
-                    )
-                    text_seq += 1
+                row: Dict[str, Any] = {
+                    "id": f"T{text_seq}",
+                    "type": dxftype,
+                    "text": label,
+                    "insert_x": world_insert_x,
+                    "insert_y": world_insert_y,
+                    "insert_z": insert.z,
+                    "text_center_x": world_center_x,
+                    "text_center_y": world_center_y,
+                    "center_x": world_center_x,
+                    "center_y": world_center_y,
+                    "height": world_height,
+                    "rotation_deg": _world_text_baseline_deg(text_entity, current_transform),
+                    "layer": text_entity.dxf.layer or "0",
+                    "block_name": active_block_name,
+                }
+                if pf_only:
+                    row["foundation_pf_only"] = True
+                texts.append(row)
+                text_seq += 1
             elif dxftype in ("LWPOLYLINE", "POLYLINE"):
                 points: List[Dict[str, float]] = []
                 if dxftype == "LWPOLYLINE":

@@ -2084,8 +2084,7 @@
     const res = await fetch(`${API_BASE_URL}/api/construction/datasets?project_context=${pc}`, {
       signal: pilexyUnloadAbort.signal,
     });
-    if (!res.ok) throw new Error((await res.text()) || "데이터셋 목록 실패");
-    const list = await res.json();
+    const list = await pilexyParseFetchJson(res);
     const arr = Array.isArray(list) ? list : [];
     els.dataset.innerHTML = "";
     const ph = document.createElement("option");
@@ -2113,9 +2112,7 @@
     );
     const cfMsg = httpCloudflareOriginErrorMessage(res.status);
     if (cfMsg) throw new Error(cfMsg);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.detail || "대시보드 요청 실패");
-    return data;
+    return pilexyParseFetchJson(res);
   }
 
   function fillDatePresets(dates) {
@@ -2143,8 +2140,7 @@
     const res = await fetch(`${API_BASE_URL}/api/saved-works/${encodeURIComponent(id)}`, {
       signal: pilexyUnloadAbort.signal,
     });
-    if (!res.ok) throw new Error("저장 작업을 불러오지 못했습니다.");
-    const data = await res.json();
+    const data = await pilexyParseFetchJson(res);
     state.circles = Array.isArray(data.circles) ? data.circles : [];
     renderMeissa2dPointsOverlay();
   }
@@ -2379,17 +2375,30 @@
 
   /**
    * 대시보드 매핑 행이 시공으로 Meissa Z 조회할지.
-   * status가 pending이면 명시 미시공. status 누락·기타일 때만 시공일+잔량으로 완화 판단.
+   * status가 pending이면 명시 미시공.
+   * 그 외: installed 이거나, 시공일·관입·천공·잔량 중 하나라도 있으면 시공(PDAM에 잔량만 비어 있는 경우 포함).
    */
   function isPdamCircleMappingInstalled(row) {
     if (!row || typeof row !== "object") return false;
-    const st = String(row.status || "").trim().toLowerCase();
-    if (st === "installed") return true;
+    const st = String(row.status ?? row.mappingStatus ?? "").trim().toLowerCase();
+    if (st === "installed" || st === "complete" || st === "done") return true;
     if (st === "pending") return false;
-    const hasDate = row.constructionDate != null && String(row.constructionDate).trim() !== "";
-    const remRaw = row.pileRemaining;
+    const dateStr =
+      row.constructionDate != null
+        ? String(row.constructionDate).trim()
+        : row.construction_date != null
+          ? String(row.construction_date).trim()
+          : "";
+    const hasDate = dateStr !== "";
+    const remRaw = row.pileRemaining ?? row.pile_remaining;
     const hasRem = remRaw != null && String(remRaw).trim() !== "";
-    return hasDate && hasRem;
+    const penRaw = row.penetrationDepth ?? row.penetration_depth;
+    const hasPen = penRaw != null && String(penRaw).trim() !== "" && Number.isFinite(Number(penRaw));
+    const boreRaw = row.boringDepth ?? row.boring_depth;
+    const hasBore = boreRaw != null && String(boreRaw).trim() !== "" && Number.isFinite(Number(boreRaw));
+    if (hasDate) return true;
+    if (hasPen || hasBore) return true;
+    return hasRem;
   }
 
   function pointNeedsMeissaZFetch(p, circleByPile, pdamMap, circleById) {

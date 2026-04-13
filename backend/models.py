@@ -67,11 +67,19 @@ class TextRecord(BaseModel):
     text_center_x: float
     text_center_y: float
     height: float
+    rotation_deg: float = Field(
+        0.0,
+        description="월드 +X 기준 기준선 방향(도), 반시계 — 뷰어 P/F 원본 각도",
+    )
     layer: str
     block_name: Optional[str] = None
     matched_circle_ids: List[str] = Field(default_factory=list)
     has_error: bool = Field(False)
     building_name: Optional[str] = None
+    foundation_pf_only: bool = Field(
+        False,
+        description="기초 P/F 표기 — 말뚝 자동매칭 제외, 뷰어 표시용",
+    )
 
 
 class SummaryStats(BaseModel):
@@ -129,7 +137,7 @@ class BuildingVertex(BaseModel):
 
 class BuildingDefinition(BaseModel):
     name: str
-    kind: Literal["building", "parking"] = "building"
+    kind: Literal["building", "parking", "tower_crane"] = "building"
     slot: Optional[int] = None
     vertices: List[BuildingVertex]
     drilling_start_elevation: Optional[float] = Field(
@@ -366,6 +374,11 @@ class ConstructionDashboardRequest(BaseModel):
     settlement_month: Optional[str] = Field(None, alias="settlementMonth")
     settlement_start_day: Optional[int] = Field(25, alias="settlementStartDay")
     settlement_end_day: Optional[int] = Field(20, alias="settlementEndDay")
+    exclude_identical_geometry_duplicates: bool = Field(
+        False,
+        alias="excludeIdenticalGeometryDuplicates",
+        description="캔버스 「동일 좌표·크기 원 중복 제외」와 동일하게 느슨 기하로 원 병합 후 PDAM 매칭",
+    )
 
 
 class MeissaLoginRequest(BaseModel):

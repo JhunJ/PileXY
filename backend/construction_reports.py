@@ -207,6 +207,55 @@ NORMALIZED_HEADER_ALIASES = {
     for key, aliases in HEADER_ALIASES.items()
 }
 
+_HEADER_ALIAS_TOKENS_BY_FIELD = {
+    field: frozenset(_normalize_alias_token(a) for a in aliases)
+    for field, aliases in HEADER_ALIASES.items()
+}
+
+
+def _cell_matches_column_header_echo(value: Any, field: str) -> bool:
+    """셀 값이 해당 열의 표준 한글/영문 열명과 동일하면(헤더가 데이터로 밀린 행)."""
+    token = _normalize_alias_token(value)
+    if not token:
+        return False
+    return token in _HEADER_ALIAS_TOKENS_BY_FIELD.get(field, frozenset())
+
+
+def _excel_data_row_matches_column_header_echo(mapping: Dict[str, str], row: Any) -> bool:
+    """파싱 중: 파일번호·시공장비·시공일 등 열 이름이 그대로 값으로 들어온 행은 스킵."""
+    for key in ("pile_number", "equipment", "construction_date"):
+        col = mapping.get(key)
+        if not col:
+            continue
+        try:
+            if hasattr(row, "index") and col not in row.index:
+                continue
+            raw = row[col]
+        except (KeyError, TypeError, ValueError):
+            raw = row.get(col) if hasattr(row, "get") else None
+        if _cell_matches_column_header_echo(raw, key):
+            return True
+    return False
+
+
+def _record_looks_like_imported_column_header_echo(record: Dict[str, Any]) -> bool:
+    """DB에 이미 들어간 동일 패턴 행(재가공·진단에서 제외)."""
+    if _cell_matches_column_header_echo(record.get("pile_number"), "pile_number"):
+        return True
+    if _cell_matches_column_header_echo(record.get("equipment"), "equipment"):
+        return True
+    if _cell_matches_column_header_echo(record.get("construction_date"), "construction_date"):
+        return True
+    if _cell_matches_column_header_echo(record.get("construction_method"), "construction_method"):
+        return True
+    if _cell_matches_column_header_echo(record.get("location"), "location"):
+        return True
+    return False
+
+
+def _without_header_echo_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [r for r in records if not _record_looks_like_imported_column_header_echo(r)]
+
 
 def _dedupe_headers(headers: Sequence[str]) -> List[str]:
     counts: Dict[str, int] = defaultdict(int)
@@ -231,14 +280,50 @@ def _ffill_header_cells(values: Sequence[Any]) -> List[str]:
     return result
 
 
+def _header_subrow_placeholder(value: str) -> bool:
+    """2행째 헤더가 구분선·빈칸만 있으면 위 행 가로 전파(병합 추정)에서 제외."""
+    t = _cell_text(value)
+    if not t:
+        return True
+    if len(t) == 1 and t in {"-", "－", "—", "…", "*"}:
+        return True
+    if t in {"-", "－", "—", "…", "N/A", "NA", "#"}:
+        return True
+    return False
+
+
+def _pair_hfill_top_header_row(top: List[str], bottom: List[str]) -> List[str]:
+    """2행 헤더에서만: 윗행 빈 칸이 아래 행에 실제 부제(단본·합계 등)가 있을 때만 옆 열 값을 전파.
+
+    예전에는 행마다 무조건 가로 ffill 해서 '파일번호'가 빈 칸까지 밀려
+    '파일번호 -', '시공장비 -' 같은 가짜 열이 생겼고, 항타가 아닌 표가 고득점을 받을 수 있었다."""
+    width = max(len(top), len(bottom))
+    out = list(top) + [""] * max(0, width - len(top))
+    bot = list(bottom) + [""] * max(0, width - len(bottom))
+    for i in range(width):
+        if out[i]:
+            continue
+        prev = out[i - 1] if i > 0 else ""
+        sub = bot[i]
+        if _header_subrow_placeholder(sub):
+            continue
+        if prev:
+            out[i] = prev
+    return out
+
+
 def _flatten_header_rows(raw_df: pd.DataFrame, start_row: int, levels: int) -> List[str]:
     rows: List[List[str]] = []
     for offset in range(levels):
         if start_row + offset >= len(raw_df.index):
             break
-        rows.append(_ffill_header_cells(raw_df.iloc[start_row + offset].tolist()))
+        rows.append([_cell_text(x) for x in raw_df.iloc[start_row + offset].tolist()])
     if not rows:
         return []
+    if len(rows) == 2:
+        rows[0] = _pair_hfill_top_header_row(rows[0], rows[1])
+    elif len(rows) == 1:
+        rows[0] = _ffill_header_cells(rows[0])
     width = max(len(row) for row in rows)
     flattened: List[str] = []
     for col_idx in range(width):
@@ -255,18 +340,24 @@ def _resolve_field_mapping(headers: Sequence[str]) -> Dict[str, str]:
     normalized_headers = {_normalize_alias_token(header): header for header in headers}
     resolved: Dict[str, str] = {}
 
-    def best_header_for_aliases(aliases: Sequence[str]) -> Optional[str]:
+    def best_header_for_aliases(field: str, aliases: Sequence[str]) -> Optional[str]:
         for alias in aliases:
             if alias in normalized_headers:
                 return normalized_headers[alias]
         for alias in aliases:
             for normalized, header in normalized_headers.items():
                 if normalized.startswith(alias) or alias in normalized:
+                    if (
+                        field == "sequence_no"
+                        and alias == "번호"
+                        and "파일" in normalized
+                    ):
+                        continue
                     return header
         return None
 
     for field, aliases in NORMALIZED_HEADER_ALIASES.items():
-        header = best_header_for_aliases(aliases)
+        header = best_header_for_aliases(field, aliases)
         if header:
             resolved[field] = header
     return resolved
@@ -277,6 +368,19 @@ def _header_match_score(headers: Sequence[str]) -> Tuple[int, Dict[str, str]]:
     required = sum(1 for key in REQUIRED_IMPORT_FIELDS if mapping.get(key))
     optional = sum(1 for key in OPTIONAL_IMPORT_FIELDS if mapping.get(key))
     return required * 100 + optional * 10, mapping
+
+
+def _reject_bad_pdam_header_mapping(mapping: Dict[str, str]) -> bool:
+    """가로 ffill·행 병합 오류로 '시공일 미지정', '파일번호 -' 같은 비정상 열이 잡히면 제외."""
+    cd = mapping.get("construction_date")
+    if cd and "미지정" in _cell_text(cd):
+        return True
+    pn = mapping.get("pile_number")
+    if pn:
+        raw = _cell_text(pn)
+        if "파일번호" in raw and " -" in raw:
+            return True
+    return False
 
 
 def _detect_sheet_layout(excel_file: pd.ExcelFile, sheet_name: str) -> Optional[Dict[str, Any]]:
@@ -293,6 +397,8 @@ def _detect_sheet_layout(excel_file: pd.ExcelFile, sheet_name: str) -> Optional[
             headers = _flatten_header_rows(preview, start_row, levels)
             score, mapping = _header_match_score(headers)
             if score < 200 or "pile_number" not in mapping:
+                continue
+            if _reject_bad_pdam_header_mapping(mapping):
                 continue
             candidate = {
                 "header_row": start_row,
@@ -405,11 +511,15 @@ def _pile_sort_value(pile_number: str) -> Optional[int]:
 
 
 def _record_installed(record: Dict[str, Any]) -> bool:
+    """PDAM 행에 시공이 실제로 찍혔는지(일자·관입·천공·잔량 등). 좌표 매칭 '시공완료'와 동일 기준."""
     return bool(
         record.get("construction_date")
         or record.get("penetration_depth") is not None
         or record.get("total_penetration") is not None
         or record.get("average_penetration") is not None
+        or record.get("boring_depth") is not None
+        or record.get("excavation_depth") is not None
+        or record.get("pile_remaining") is not None
     )
 
 
@@ -445,6 +555,8 @@ def parse_construction_workbook(file_bytes: bytes, *, filename: Optional[str] = 
         for row_idx, row in df.iterrows():
             pile_number = _normalize_pile_number(row.get(mapping["pile_number"]))
             if not pile_number:
+                continue
+            if _excel_data_row_matches_column_header_echo(mapping, row):
                 continue
             construction_date = (
                 _parse_excel_date(row.get(mapping["construction_date"]))
@@ -875,10 +987,30 @@ def _record_key(record: Dict[str, Any]) -> Tuple[str, str]:
     return (_normalize_location(record.get("location")), _normalize_pile_number(record.get("pile_number")))
 
 
-def _latest_records_by_pile(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _record_dedupe_key_for_latest(
+    record: Dict[str, Any],
+    *,
+    parking_unified_location: Optional[str] = None,
+) -> Tuple[str, str]:
+    """pile당 최신 1행을 고를 때 쓰는 키.
+
+    `parking_unified_location`이 있으면 `_record_location_for_pdam_match`와 동일하게 묶는다.
+    그렇지 않으면 PDAM에 같은 말뚝이 '주차장' / 'B2주차장' 등으로만 다르게 적혀도
+    서로 다른 키로 남아, 매칭 인덱스(B2)와 불일치·후보 중복으로 일부 좌표만 안 맞는 현상이 난다."""
+    pile = _normalize_pile_number(record.get("pile_number"))
+    if parking_unified_location is None:
+        return (_normalize_location(record.get("location")), pile)
+    return (_record_location_for_pdam_match(record, parking_unified_location), pile)
+
+
+def _latest_records_by_pile(
+    records: Iterable[Dict[str, Any]],
+    *,
+    parking_unified_location: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     best: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for record in records:
-        key = _record_key(record)
+        key = _record_dedupe_key_for_latest(record, parking_unified_location=parking_unified_location)
         existing = best.get(key)
         current_rank = (record.get("construction_date") or "", int(record.get("row_number") or 0))
         existing_rank = (
@@ -889,21 +1021,6 @@ def _latest_records_by_pile(records: Iterable[Dict[str, Any]]) -> List[Dict[str,
         if existing is None or current_rank >= existing_rank:
             best[key] = record
     return list(best.values())
-
-
-def _build_filter_options(records: Iterable[Dict[str, Any]]) -> Dict[str, List[str]]:
-    dates = sorted({record.get("construction_date") for record in records if record.get("construction_date")}, reverse=True)
-    months = sorted({record.get("construction_month") for record in records if record.get("construction_month")}, reverse=True)
-    equipments = sorted({record.get("equipment") for record in records if record.get("equipment")})
-    methods = sorted({record.get("construction_method") for record in records if record.get("construction_method")})
-    locations = sorted({record.get("location") for record in records if record.get("location")})
-    return {
-        "dates": dates,
-        "months": months,
-        "equipments": equipments,
-        "methods": methods,
-        "locations": locations,
-    }
 
 
 def _group_summary(records: Iterable[Dict[str, Any]], key_name: str) -> List[Dict[str, Any]]:
@@ -998,6 +1115,164 @@ def _load_saved_work_circles(work_id: str) -> Optional[List[Dict[str, Any]]]:
     return circles if isinstance(circles, list) else None
 
 
+def _load_saved_work_buildings(work_id: str) -> Optional[List[Dict[str, Any]]]:
+    safe_id = re.sub(r"[^\w\-]", "", work_id)
+    path = os.path.join(SAVED_WORKS_DIR, f"{safe_id}.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+    buildings = data.get("buildings")
+    return buildings if isinstance(buildings, list) else None
+
+
+def _point_in_polygon_xy(x: float, y: float, vertices: Sequence[Tuple[float, float]]) -> bool:
+    """classify_entities / main.point_in_polygon 과 동일한 포함 판정."""
+    inside = False
+    n = len(vertices)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = vertices[i]
+        xj, yj = vertices[j]
+        intersects = ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _building_outline_vertices_xy(building: Dict[str, Any]) -> List[Tuple[float, float]]:
+    verts = building.get("vertices")
+    if not isinstance(verts, list) or len(verts) < 3:
+        return []
+    out: List[Tuple[float, float]] = []
+    for v in verts:
+        if not isinstance(v, dict) or "x" not in v or "y" not in v:
+            return []
+        try:
+            out.append((float(v["x"]), float(v["y"])))
+        except (TypeError, ValueError):
+            return []
+    return out
+
+
+def _outline_priority_for_hit_test(kind_raw: Any) -> int:
+    """main.classify_entities 와 동일: 타워(0) < 일반동(1) < 주차(2)."""
+    k = _normalize_building_outline_kind(kind_raw)
+    if k == "tower_crane":
+        return 0
+    if k == "parking":
+        return 2
+    return 1
+
+
+def _resolve_circle_building_name_from_outlines(
+    circle: Dict[str, Any],
+    buildings: Optional[Sequence[Dict[str, Any]]],
+) -> Optional[str]:
+    """원 중심이 들어간 저장 윤곽의 이름을 쓴다(동→지하주차장 변경 후 circle.building_name 이 남은 경우)."""
+    if not buildings:
+        return None
+    try:
+        x = float(circle.get("center_x"))
+        y = float(circle.get("center_y"))
+    except (TypeError, ValueError):
+        return None
+    indexed = list(enumerate(buildings))
+    indexed.sort(key=lambda it: (_outline_priority_for_hit_test(it[1].get("kind")), it[0]))
+    for _, building in indexed:
+        poly = _building_outline_vertices_xy(building)
+        if len(poly) < 3:
+            continue
+        if _point_in_polygon_xy(x, y, poly):
+            raw = _cell_text(building.get("name"))
+            return raw if raw else None
+    return None
+
+
+def _circle_effective_building_label(
+    circle: Dict[str, Any],
+    outline_buildings: Optional[Sequence[Dict[str, Any]]],
+) -> Any:
+    resolved = _resolve_circle_building_name_from_outlines(circle, outline_buildings)
+    if resolved is not None:
+        return resolved
+    return circle.get("building_name")
+
+
+def _normalize_building_outline_kind(value: Any) -> str:
+    return str(value or "building").strip().lower()
+
+
+def _saved_work_parking_unify_context(
+    buildings: Optional[Sequence[Dict[str, Any]]],
+) -> Tuple[Optional[str], bool]:
+    """저장 작업 좌표에 지하주차장(parking) 윤곽이 정확히 1개일 때만 (Bn 등 정규화값, True).
+
+    층(윤곽)이 2개 이상이면 PDAM·좌표를 Bn 하나로 묶지 않는다."""
+    if not buildings:
+        return None, False
+    parking_only = [b for b in buildings if _normalize_building_outline_kind(b.get("kind")) == "parking"]
+    if len(parking_only) != 1:
+        return None, False
+    return _normalize_location(parking_only[0].get("name")), True
+
+
+def _single_parking_outline_normalized(buildings: Optional[Sequence[Dict[str, Any]]]) -> Optional[str]:
+    """지하주차장 윤곽이 정확히 1개일 때만 그 동명 정규화값(B2 등)."""
+    loc, _ = _saved_work_parking_unify_context(buildings)
+    return loc
+
+
+def _pdam_location_text_mentions_parking(value: Any) -> bool:
+    """PDAM 위치에 주차·지하 관련 표기가 있으면 True. 단일 지하주차장 윤곽 통합 시 Bn으로 묶는 데 쓴다."""
+    raw = _cell_text(value)
+    if not raw:
+        return False
+    compact = re.sub(r"[\s_\-()/]+", "", raw)
+    if "주차장" in compact:
+        return True
+    if "주차" in compact:
+        return True
+    if "지하" in compact:
+        return True
+    return False
+
+
+def _record_location_for_pdam_match(record: Dict[str, Any], parking_unified: Optional[str]) -> str:
+    if not parking_unified:
+        return _normalize_location(record.get("location"))
+    if _pdam_location_text_mentions_parking(record.get("location")):
+        return parking_unified
+    norm = _normalize_location(record.get("location"))
+    # 저장 윤곽 이름이 '주차장'뿐일 때(_normalize_location → '주차장') PDAM은 'B2'만 적는 경우가 있어
+    # 도면 쪽 '주차장'·'B2'와 키가 어긋난다. 단일 주차 윤곽 맥락에서는 Bn도 그 구역으로 묶는다.
+    if _normalize_location(parking_unified) == "주차장":
+        loc_kind, _ = _location_kind_and_number(norm)
+        if loc_kind == "basement":
+            return parking_unified
+    return norm
+
+
+def _circle_location_for_pdam_match(
+    circle: Dict[str, Any],
+    parking_unified: Optional[str],
+    *,
+    unify_parking_circle_location: bool = False,
+) -> str:
+    """도면 `building_name`을 PDAM `location`과 **같은 규칙**으로 맞춘다.
+
+    저장 작업에 지하주차장 윤곽이 1개일 때만 `parking_unified`(Bn)가 넘어오며,
+    그때는 `_record_location_for_pdam_match`와 동일하게 '주차장'·'B2주차장' 등을 Bn으로 통일한다.
+    (예전에는 `unify_parking_circle_location`만 켤 때만 묶어 PDAM과 키가 어긋나는 경우가 있었다.)
+    `unify_parking_circle_location`은 호환용으로만 남기며 위치 계산에는 쓰지 않는다."""
+    if parking_unified is None:
+        return _normalize_location(circle.get("building_name"))
+    return _record_location_for_pdam_match({"location": circle.get("building_name")}, parking_unified)
+
+
 def _circle_number(circle: Dict[str, Any]) -> str:
     matched = circle.get("matched_text")
     if isinstance(matched, dict):
@@ -1005,90 +1280,162 @@ def _circle_number(circle: Dict[str, Any]) -> str:
     return ""
 
 
-def _location_score(circle_location: str, record_location: str) -> int:
-    if not circle_location or not record_location:
-        return 0
-    if circle_location == record_location:
-        return 3
-    if circle_location in record_location or record_location in circle_location:
-        return 2
-    circle_digits = re.sub(r"\D", "", circle_location)
-    record_digits = re.sub(r"\D", "", record_location)
-    if circle_digits and circle_digits == record_digits:
-        return 1
-    return 0
+def _circle_center_radius_xy(circle: Dict[str, Any]) -> Tuple[float, float, float]:
+    try:
+        cx = float(circle.get("center_x") or 0)
+        cy = float(circle.get("center_y") or 0)
+        r = float(circle.get("radius") or (float(circle.get("diameter") or 0) / 2.0))
+    except (TypeError, ValueError):
+        return (0.0, 0.0, 0.0)
+    return (cx, cy, r)
 
 
-def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    latest_records = _latest_records_by_pile(records)
-    exact_lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    by_number: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for record in latest_records:
-        key = _record_key(record)
-        exact_lookup[key] = record
-        if record.get("pile_number"):
-            by_number[record["pile_number"]].append(record)
+def _circles_strict_same_file_geometry(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """frontend `sameFileCircleGeometry` 와 동일(엄격, EPS=1e-4). DXF 이중 엔티티 병합용."""
+    ax, ay, ra = _circle_center_radius_xy(a)
+    bx, by, rb = _circle_center_radius_xy(b)
+    eps = 1e-4
+    return abs(ax - bx) <= eps and abs(ay - by) <= eps and abs(ra - rb) <= eps
 
-    overlays: List[Dict[str, Any]] = []
-    matched_record_keys: set[Tuple[str, str]] = set()
-    installed_count = 0
-    pending_count = 0
 
-    for circle in circles:
-        pile_number = _circle_number(circle)
-        circle_location = _normalize_location(circle.get("building_name"))
-        matched_record: Optional[Dict[str, Any]] = None
-        if pile_number:
-            matched_record = exact_lookup.get((circle_location, pile_number))
-            if matched_record is None:
-                candidates = by_number.get(pile_number, [])
-                if len(candidates) == 1:
-                    matched_record = candidates[0]
-                elif candidates:
-                    ranked = sorted(
-                        candidates,
-                        key=lambda record: (
-                            _location_score(circle_location, _normalize_location(record.get("location"))),
-                            record.get("construction_date") or "",
-                            int(record.get("row_number") or 0),
-                        ),
-                        reverse=True,
-                    )
-                    if ranked and _location_score(circle_location, _normalize_location(ranked[0].get("location"))) > 0:
-                        matched_record = ranked[0]
+def _circles_loose_same_file_geometry(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """frontend `sameFileCircleGeometryLoose` 와 동일. 「동일 좌표·크기 원 중복 제외」 켠 경우와 맞춤."""
+    ax, ay, ra = _circle_center_radius_xy(a)
+    bx, by, rb = _circle_center_radius_xy(b)
+    if ra <= 0 or rb <= 0:
+        return False
+    eps = 1e-4
+    dcx = abs(ax - bx)
+    dcy = abs(ay - by)
+    dr = abs(ra - rb)
+    mn = min(ra, rb)
+    center_tol = max(eps * 8, mn * 0.0035)
+    r_tol = max(eps * 5, mn * 0.0025)
+    return dcx <= center_tol and dcy <= center_tol and dr <= r_tol
 
-        status = "installed" if matched_record else "pending"
-        if matched_record:
-            installed_count += 1
-            matched_record_keys.add(_record_key(matched_record))
-        else:
-            pending_count += 1
 
-        overlays.append(
-            {
-                "circleId": circle.get("id"),
-                "status": status,
-                "pileNumber": pile_number or None,
-                "constructionDate": matched_record.get("construction_date") if matched_record else None,
-                "constructionMonth": matched_record.get("construction_month") if matched_record else None,
-                "equipment": matched_record.get("equipment") if matched_record else None,
-                "pileType": matched_record.get("pile_type") if matched_record else None,
-                "constructionMethod": matched_record.get("construction_method") if matched_record else None,
-                "location": matched_record.get("location") if matched_record else None,
-                "pileRemaining": matched_record.get("pile_remaining") if matched_record else None,
-                "penetrationDepth": matched_record.get("penetration_depth") if matched_record else None,
-                "boringDepth": matched_record.get("boring_depth") if matched_record else None,
-                "excavationDepth": matched_record.get("excavation_depth") if matched_record else None,
-                "recordRowNumber": matched_record.get("row_number") if matched_record else None,
-            }
+def _circle_mapping_priority_score(circle: Dict[str, Any]) -> int:
+    s = 0
+    mt = circle.get("matched_text")
+    if isinstance(mt, dict) and _cell_text(mt.get("text")):
+        s += 4
+    mtid = circle.get("matched_text_id")
+    if mtid is not None and str(mtid).strip():
+        s += 2
+    if _cell_text(circle.get("building_name")):
+        s += 1
+    return s
+
+
+def _pile_key_for_geom_dedup(circle: Dict[str, Any]) -> str:
+    return _circle_number(circle) or ""
+
+
+def _should_merge_geometry_duplicate_pair(
+    a: Dict[str, Any],
+    b: Dict[str, Any],
+    *,
+    exclude_identical_geometry_duplicates: bool,
+) -> bool:
+    """캔버스 옵션과 동일: 끄면 엄격 기하, 켜면 느슨 기하로 동일 말둑 심볼로 본다."""
+    same_geom = (
+        _circles_loose_same_file_geometry(a, b)
+        if exclude_identical_geometry_duplicates
+        else _circles_strict_same_file_geometry(a, b)
+    )
+    if not same_geom:
+        return False
+    ka = _pile_key_for_geom_dedup(a)
+    kb = _pile_key_for_geom_dedup(b)
+    if ka and kb and ka != kb:
+        return False
+    return True
+
+
+def _fan_out_circle_mappings_for_geometry_clusters(
+    overlays: List[Dict[str, Any]],
+    rep_to_cluster: Dict[str, List[str]],
+) -> List[Dict[str, Any]]:
+    """대표 원에만 매핑된 PDAM 오버레이를, 기하 병합으로 빠진 동일 위치 형제 원 id에도 복제한다."""
+    if not rep_to_cluster:
+        return overlays
+    out: List[Dict[str, Any]] = []
+    for ov in overlays:
+        cid = str(ov.get("circleId") or "")
+        cluster = rep_to_cluster.get(cid)
+        if not cluster or len(cluster) <= 1:
+            out.append(ov)
+            continue
+        rep_id = cid
+        for sid in cluster:
+            dup = dict(ov)
+            dup["circleId"] = sid
+            if sid != rep_id:
+                dup["pdamMappingSourceCircleId"] = rep_id
+            else:
+                dup.pop("pdamMappingSourceCircleId", None)
+            out.append(dup)
+    return out
+
+
+def dedupe_circles_for_construction_mapping(
+    circles: Sequence[Dict[str, Any]],
+    *,
+    exclude_identical_geometry_duplicates: bool = False,
+) -> Tuple[List[Dict[str, Any]], Dict[str, List[str]]]:
+    """동일 기하(옵션에 따라 엄격/느슨)이고 말뚝 키가 같거나 한쪽만 비어 있으면 하나로 합친다.
+
+    반환 두 번째 값: 대표 원 id → 병합에 포함된 모든 원 id(정렬, 대표 포함).
+    시공 매칭은 대표 원 하나로만 수행하고, 응답 오버레이는 `_fan_out_circle_mappings_for_geometry_clusters`로 형제에 복제한다.
+    """
+    if len(circles) < 2:
+        return list(circles), {}
+    n = len(circles)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        pi, pj = find(i), find(j)
+        if pi != pj:
+            parent[pj] = pi
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _should_merge_geometry_duplicate_pair(
+                circles[i],
+                circles[j],
+                exclude_identical_geometry_duplicates=exclude_identical_geometry_duplicates,
+            ):
+                union(i, j)
+
+    groups: Dict[int, List[int]] = {}
+    for i in range(n):
+        r = find(i)
+        groups.setdefault(r, []).append(i)
+
+    clusters: Dict[str, List[str]] = {}
+    out: List[Dict[str, Any]] = []
+    for root in sorted(groups.keys()):
+        idxs = groups[root]
+        best_idx = min(
+            idxs,
+            key=lambda ii: (
+                -_circle_mapping_priority_score(circles[ii]),
+                str(circles[ii].get("id") or ""),
+            ),
         )
-
-    return {
-        "circleMappings": overlays,
-        "matchedCircleCount": installed_count,
-        "pendingCircleCount": pending_count,
-        "unmatchedRecordCount": len(latest_records) - len(matched_record_keys),
-    }
+        rep = circles[best_idx]
+        member_ids = sorted({str(circles[i].get("id") or "") for i in idxs} - {""})
+        rep_id = str(rep.get("id") or "")
+        out.append(rep)
+        if rep_id and len(member_ids) > 1:
+            clusters[rep_id] = sorted(member_ids)
+    return out, clusters
 
 
 def build_dashboard(
@@ -1103,6 +1450,7 @@ def build_dashboard(
     method: Optional[str] = None,
     location: Optional[str] = None,
     remaining_threshold: Optional[float] = None,
+    exclude_identical_geometry_duplicates: bool = False,
 ) -> Dict[str, Any]:
     dataset = _get_dataset(dataset_id)
     if not dataset:
@@ -1118,10 +1466,22 @@ def build_dashboard(
         method=method,
         location=location,
     )
-    latest_records = _latest_records_by_pile(filtered_records)
+    parking_unified_location: Optional[str] = None
+    unify_parking_circle_location = False
+    saved_buildings: Optional[List[Dict[str, Any]]] = None
+    if work_id:
+        saved_buildings = _load_saved_work_buildings(work_id)
+        parking_unified_location, unify_parking_circle_location = _saved_work_parking_unify_context(saved_buildings)
+
+    latest_records = _without_header_echo_records(
+        _latest_records_by_pile(filtered_records, parking_unified_location=parking_unified_location)
+    )
     if circles is None and work_id:
         circles = _load_saved_work_circles(work_id)
-    circles = list(circles or [])
+    circles, geom_clusters = dedupe_circles_for_construction_mapping(
+        list(circles or []),
+        exclude_identical_geometry_duplicates=exclude_identical_geometry_duplicates,
+    )
 
     remaining_values = [record["pile_remaining"] for record in latest_records if record.get("pile_remaining") is not None]
     over_threshold_count = 0
@@ -1132,12 +1492,27 @@ def build_dashboard(
             if record.get("pile_remaining") is not None and float(record["pile_remaining"]) >= remaining_threshold
         )
 
-    mapping = map_records_to_circles(latest_records, circles) if circles else {
-        "circleMappings": [],
-        "matchedCircleCount": None,
-        "pendingCircleCount": None,
-        "unmatchedRecordCount": None,
-    }
+    mapping = (
+        map_records_to_circles(
+            latest_records,
+            circles,
+            parking_unified_location=parking_unified_location,
+            unify_parking_circle_location=unify_parking_circle_location,
+            outline_buildings=saved_buildings,
+        )
+        if circles
+        else {
+            "circleMappings": [],
+            "matchedCircleCount": None,
+            "pendingCircleCount": None,
+            "unmatchedRecordCount": None,
+        }
+    )
+    if mapping.get("circleMappings") is not None:
+        mapping["circleMappings"] = _fan_out_circle_mappings_for_geometry_clusters(
+            list(mapping["circleMappings"]),
+            geom_clusters,
+        )
 
     records_for_grid = sorted(
         latest_records,
@@ -1212,6 +1587,16 @@ def _normalize_location(value: Any) -> str:
         return "B"
     if compact == "B" or compact.startswith("B"):
         return "B"
+
+    tower_plain = re.fullmatch(r"T(\d+)", compact, flags=re.IGNORECASE)
+    if tower_plain:
+        return f"T{int(tower_plain.group(1))}"
+    tw_ko = re.search(r"(?:타워크레인|타워)\s*(\d+)", text, flags=re.IGNORECASE)
+    if tw_ko:
+        return f"T{int(tw_ko.group(1))}"
+    tower_embed = re.search(r"(?i)T\s*(\d+)", compact)
+    if tower_embed:
+        return f"T{int(tower_embed.group(1))}"
 
     dong_match = re.match(r"^(\d+)(?:동)?$", compact)
     if dong_match:
@@ -1349,6 +1734,7 @@ def _apply_filters(
     equipments: Optional[Sequence[str]] = None,
     methods: Optional[Sequence[str]] = None,
     locations: Optional[Sequence[str]] = None,
+    parking_unified_location: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     equipment_values = set(_merge_filter_values(equipment, equipments))
     method_values = set(_merge_filter_values(method, methods, normalizer=_normalize_construction_method))
@@ -1368,10 +1754,23 @@ def _apply_filters(
             continue
         if method_values and (_normalize_construction_method(record.get("construction_method")) or "") not in method_values:
             continue
-        if location_values and _normalize_location(record.get("location")) not in location_values:
-            continue
+        if location_values:
+            nl = _normalize_location(record.get("location"))
+            ok_loc = nl in location_values
+            if not ok_loc and parking_unified_location:
+                mapped = _record_location_for_pdam_match(record, parking_unified_location)
+                ok_loc = mapped in location_values
+            if not ok_loc:
+                continue
         filtered.append(record)
     return filtered
+
+
+_OPTION_HEADER_ECHO_FIELD = {
+    "equipment": "equipment",
+    "construction_method": "construction_method",
+    "location": "location",
+}
 
 
 def _option_items(
@@ -1382,9 +1781,12 @@ def _option_items(
     sort_key=None,
 ) -> List[Dict[str, Any]]:
     grouped: Dict[str, Dict[str, Any]] = {}
+    echo_field = _OPTION_HEADER_ECHO_FIELD.get(key_name)
     for record in records:
         raw_value = _cell_text(record.get(key_name))
         if not raw_value:
+            continue
+        if echo_field and _cell_matches_column_header_echo(raw_value, echo_field):
             continue
         value = normalizer(raw_value) if normalizer else raw_value
         if not value:
@@ -1412,23 +1814,26 @@ def _option_items(
 
 def _location_option_sort(item: Dict[str, Any]) -> Tuple[int, Any, str]:
     value = item["value"]
-    basement_match = re.fullmatch(r"B(\d+)", value)
-    if basement_match:
-        return (1, int(basement_match.group(1)), value)
-    if value == "B":
-        return (1, 9999, value)
     dong_match = re.fullmatch(r"(\d+)동", value)
     if dong_match:
         return (0, int(dong_match.group(1)), value)
+    tower_match = re.fullmatch(r"T(\d+)", value, flags=re.IGNORECASE)
+    if tower_match:
+        return (2, int(tower_match.group(1)), value)
+    basement_match = re.fullmatch(r"B(\d+)", value)
+    if basement_match:
+        return (3, int(basement_match.group(1)), value)
+    if value == "B":
+        return (3, 9999, value)
     if value == "주차장":
-        return (2, 0, value)
+        return (4, 0, value)
     if value == "미지정":
         return (9, 0, value)
-    return (3, 0, value)
+    return (5, 0, value)
 
 
 def _build_filter_options(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    record_list = list(records)
+    record_list = _without_header_echo_records(list(records))
     min_date, max_date = _date_bounds(record_list)
     dates = sorted({record.get("construction_date") for record in record_list if record.get("construction_date")})
     months = sorted({record.get("construction_month") for record in record_list if record.get("construction_month")})
@@ -1651,102 +2056,6 @@ def _dedupe_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique_records
 
 
-def _select_circle_record(circle_location: str, candidates: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    unique_candidates = _dedupe_records(candidates)
-    if not unique_candidates:
-        return None
-
-    ranked = sorted(
-        unique_candidates,
-        key=lambda record: (
-            _location_score(circle_location, _normalize_location(record.get("location"))),
-            1 if _normalize_location(record.get("location")) == circle_location else 0,
-            1 if _normalize_location(record.get("location")) == "미지정" else 0,
-            record.get("construction_date") or "",
-            int(record.get("row_number") or 0),
-        ),
-        reverse=True,
-    )
-    top = ranked[0]
-    top_location = _normalize_location(top.get("location"))
-
-    if circle_location == "미지정":
-        candidate_locations = {_normalize_location(record.get("location")) for record in ranked}
-        if len(ranked) == 1 or len(candidate_locations) == 1:
-            return top
-        return None
-
-    if _location_score(circle_location, top_location) > 0 or top_location == "미지정":
-        return top
-    return None
-
-
-def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    latest_records = _latest_records_by_pile(records)
-    exact_lookup: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
-    for record in latest_records:
-        record_location = _normalize_location(record.get("location"))
-        for alias in _pile_number_aliases(record.get("pile_number"), location=record_location):
-            exact_lookup[(record_location, alias)].append(record)
-
-    overlays: List[Dict[str, Any]] = []
-    matched_record_keys: set[Tuple[str, str]] = set()
-    installed_count = 0
-    pending_count = 0
-
-    for circle in circles:
-        pile_number = _circle_number(circle)
-        circle_location = _normalize_location(circle.get("building_name"))
-        matched_record: Optional[Dict[str, Any]] = None
-
-        if pile_number:
-            circle_aliases = _pile_number_aliases(pile_number, location=circle_location)
-            exact_candidates: List[Dict[str, Any]] = []
-            for alias in circle_aliases:
-                exact_candidates.extend(exact_lookup.get((circle_location, alias), []))
-            matched_record = _select_circle_record(circle_location, exact_candidates)
-            if matched_record is None:
-                candidates: List[Dict[str, Any]] = []
-                for alias in circle_aliases:
-                    candidates.extend(by_number.get(alias, []))
-                matched_record = _select_circle_record(circle_location, candidates)
-
-        status = "installed" if matched_record else "pending"
-        if matched_record:
-            installed_count += 1
-            matched_record_keys.add(_record_key(matched_record))
-        else:
-            pending_count += 1
-
-        overlays.append(
-            {
-                "circleId": circle.get("id"),
-                "status": status,
-                "pileNumber": pile_number or None,
-                "circleLocation": circle_location,
-                "constructionDate": matched_record.get("construction_date") if matched_record else None,
-                "constructionMonth": matched_record.get("construction_month") if matched_record else None,
-                "equipment": matched_record.get("equipment") if matched_record else None,
-                "pileType": matched_record.get("pile_type") if matched_record else None,
-                "constructionMethod": _normalize_construction_method(matched_record.get("construction_method")) if matched_record else None,
-                "location": matched_record.get("location") if matched_record else None,
-                "locationNormalized": _normalize_location(matched_record.get("location")) if matched_record else circle_location,
-                "pileRemaining": matched_record.get("pile_remaining") if matched_record else None,
-                "penetrationDepth": matched_record.get("penetration_depth") if matched_record else None,
-                "boringDepth": matched_record.get("boring_depth") if matched_record else None,
-                "excavationDepth": matched_record.get("excavation_depth") if matched_record else None,
-                "recordRowNumber": matched_record.get("row_number") if matched_record else None,
-            }
-        )
-
-    return {
-        "circleMappings": overlays,
-        "matchedCircleCount": installed_count,
-        "pendingCircleCount": pending_count,
-        "unmatchedRecordCount": len(latest_records) - len(matched_record_keys),
-    }
-
-
 GENERIC_LOCATION_INFERENCE_TARGETS = {UNSPECIFIED_LOCATION, "주차장", "B"}
 PARKING_INFERENCE_MAX_DAY_GAP = 5
 PARKING_INFERENCE_DAY_SCORE = {
@@ -1768,6 +2077,26 @@ def _is_parking_like_placeholder_location(value: Any) -> bool:
         return False
     compact = re.sub(r"[\s_\-()/]+", "", raw_text)
     return "주차장" in compact or "지하" in compact
+
+
+def _allow_globally_unique_pile_alias_fallback(
+    *,
+    circle_location_display: Any,
+    circle_kind: str,
+    parking_unified_location: Optional[str],
+) -> bool:
+    """PDAM 시공위치 키가 어긋날 때만 전역 유일 파일번호로 한 번 더 연결한다.
+
+    `N동` 도면은 동 구분이 필수라서(같은 파일번호가 여러 동에 존재할 수 있음) 전역 유일 폴백을 쓰지 않는다.
+    지하주차(Bn)·주차장 추론 경로는 건드리지 않는다.
+    """
+    if circle_kind == "dong":
+        return False
+    if circle_kind == "basement":
+        return False
+    if parking_unified_location is None and _is_parking_like_placeholder_location(circle_location_display):
+        return False
+    return True
 
 
 def _candidate_match_location(
@@ -1894,13 +2223,41 @@ def _build_location_inference(
     return inference
 
 
+def _scoring_match_location(
+    record: Dict[str, Any],
+    location_inference: Optional[Dict[Tuple[str, str], Dict[str, Any]]],
+    circle_location: str,
+    parking_unified_location: Optional[str],
+) -> str:
+    raw_location = _normalize_location(record.get("location"))
+    pdam_key = (
+        _record_location_for_pdam_match(record, parking_unified_location)
+        if parking_unified_location
+        else raw_location
+    )
+    if not location_inference:
+        return pdam_key
+    inferred = location_inference.get(_record_key(record))
+    if inferred and inferred.get("matchLocation"):
+        inferred_norm = _normalize_location(inferred.get("matchLocation"))
+        if (
+            circle_location
+            and _location_score(circle_location, inferred_norm) <= 0
+            and raw_location in GENERIC_LOCATION_INFERENCE_TARGETS
+        ):
+            return pdam_key
+        return inferred_norm
+    return pdam_key
+
+
 def _candidate_rank(
     circle_location: str,
     record: Dict[str, Any],
     location_inference: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+    parking_unified_location: Optional[str] = None,
 ) -> Tuple[int, int, int, int, str, int]:
-    match_location = _candidate_match_location(
-        record, location_inference, circle_location=circle_location
+    match_location = _scoring_match_location(
+        record, location_inference, circle_location, parking_unified_location
     )
     raw_location = _normalize_location(record.get("location"))
     inferred = location_inference.get(_record_key(record)) if location_inference else None
@@ -1918,23 +2275,26 @@ def _has_clear_best_candidate(
     circle_location: str,
     candidates: Iterable[Dict[str, Any]],
     location_inference: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+    parking_unified_location: Optional[str] = None,
 ) -> bool:
     ranked = sorted(
         _dedupe_records(candidates),
-        key=lambda record: _candidate_rank(circle_location, record, location_inference),
+        key=lambda record: _candidate_rank(
+            circle_location, record, location_inference, parking_unified_location
+        ),
         reverse=True,
     )
     if not ranked:
         return False
 
     top = ranked[0]
-    top_location = _candidate_match_location(
-        top, location_inference, circle_location=circle_location
+    top_location = _scoring_match_location(
+        top, location_inference, circle_location, parking_unified_location
     )
     circle_kind, _circle_number = _location_kind_and_number(circle_location)
     if circle_location == UNSPECIFIED_LOCATION:
         candidate_locations = {
-            _candidate_match_location(record, location_inference, circle_location=circle_location)
+            _scoring_match_location(record, location_inference, circle_location, parking_unified_location)
             for record in ranked
         }
         return len(ranked) == 1 or len(candidate_locations) == 1
@@ -1942,7 +2302,9 @@ def _has_clear_best_candidate(
         return False
     if len(ranked) == 1:
         return True
-    return _candidate_rank(circle_location, ranked[0], location_inference) > _candidate_rank(circle_location, ranked[1], location_inference)
+    return _candidate_rank(circle_location, ranked[0], location_inference, parking_unified_location) > _candidate_rank(
+        circle_location, ranked[1], location_inference, parking_unified_location
+    )
 
 
 def _display_pile_number(value: Any, *, location: Any = None) -> str:
@@ -1999,9 +2361,11 @@ def _mapping_overlay_payload(
         else _normalize_location(matched_record.get("location")) if matched_record else circle_location
     )
     source_location = _normalize_location(matched_record.get("location")) if matched_record else None
+    pdam_complete = bool(matched_record and _record_installed(matched_record))
     return {
         "circleId": circle.get("id"),
-        "status": "installed" if matched_record else "pending",
+        "status": "installed" if pdam_complete else "pending",
+        "pdamRecordComplete": pdam_complete,
         "matchType": match_type,
         "autoMatched": auto_matched,
         "pileNumber": _display_pile_number(pile_number, location=circle_location) or None,
@@ -2066,6 +2430,7 @@ def _select_circle_record(
     circle_location: str,
     candidates: Iterable[Dict[str, Any]],
     location_inference: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+    parking_unified_location: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     unique_candidates = _dedupe_records(candidates)
     if not unique_candidates:
@@ -2073,18 +2438,20 @@ def _select_circle_record(
 
     ranked = sorted(
         unique_candidates,
-        key=lambda record: _candidate_rank(circle_location, record, location_inference),
+        key=lambda record: _candidate_rank(
+            circle_location, record, location_inference, parking_unified_location
+        ),
         reverse=True,
     )
     top = ranked[0]
-    top_location = _candidate_match_location(
-        top, location_inference, circle_location=circle_location
+    top_location = _scoring_match_location(
+        top, location_inference, circle_location, parking_unified_location
     )
     circle_kind, _circle_number = _location_kind_and_number(circle_location)
 
     if circle_location == UNSPECIFIED_LOCATION:
         candidate_locations = {
-            _candidate_match_location(record, location_inference, circle_location=circle_location)
+            _scoring_match_location(record, location_inference, circle_location, parking_unified_location)
             for record in ranked
         }
         if len(ranked) == 1 or len(candidate_locations) == 1:
@@ -2098,13 +2465,20 @@ def _select_circle_record(
     return None
 
 
-def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    latest_records = _latest_records_by_pile(records)
+def map_records_to_circles(
+    records: Iterable[Dict[str, Any]],
+    circles: Sequence[Dict[str, Any]],
+    *,
+    parking_unified_location: Optional[str] = None,
+    unify_parking_circle_location: bool = False,
+    outline_buildings: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    latest_records = _latest_records_by_pile(records, parking_unified_location=parking_unified_location)
     location_inference = _build_location_inference(latest_records)
     exact_lookup: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
     by_number: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for record in latest_records:
-        record_location = _normalize_location(record.get("location"))
+        record_location = _record_location_for_pdam_match(record, parking_unified_location)
         for alias in _pile_number_aliases(record.get("pile_number"), location=record_location):
             exact_lookup[(record_location, alias)].append(record)
             by_number[alias].append(record)
@@ -2116,24 +2490,90 @@ def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[
     unresolved_circles: List[Dict[str, Any]] = []
 
     for circle in circles:
+        effective_label = _circle_effective_building_label(circle, outline_buildings)
+        circle_for_match = dict(circle)
+        circle_for_match["building_name"] = effective_label
         pile_number = _circle_number(circle)
-        circle_location = _normalize_location(circle.get("building_name"))
+        circle_location_display = _normalize_location(
+            effective_label if effective_label is not None else circle.get("building_name")
+        )
+        circle_location = _circle_location_for_pdam_match(
+            circle_for_match,
+            parking_unified_location,
+            unify_parking_circle_location=unify_parking_circle_location,
+        )
         circle_kind, _circle_number_value = _location_kind_and_number(circle_location)
         matched_record: Optional[Dict[str, Any]] = None
         match_type = "pending"
-        circle_aliases = _pile_number_aliases(pile_number, location=circle_location) if pile_number else []
+        circle_aliases = (
+            _pile_number_aliases(pile_number, location=circle_location_display) if pile_number else []
+        )
+        scoring_circle_location = circle_location
 
         if pile_number:
             exact_candidates: List[Dict[str, Any]] = []
             for alias in circle_aliases:
                 exact_candidates.extend(exact_lookup.get((circle_location, alias), []))
-            if _has_clear_best_candidate(circle_location, exact_candidates, location_inference):
-                matched_record = _select_circle_record(circle_location, exact_candidates, location_inference)
+            exact_candidates = _dedupe_records(exact_candidates)
+            # 타워크레인 윤곽이 주차장보다 우선(classify_entities)되어, 겹치는 좌표는
+            # building_name이 타워로 잡히고 PDAM(주차장→Bn) 인덱스 키와 어긋날 수 있다.
+            # 단일 주차 통합이 있을 때만: 부위 불일치로 후보가 없으면 통합 부위+파일번호로 한 번 더 본다.
+            # N동 도면은 주차 PDAM과 키가 달라도 여기서 엮지 않는다(주차 번호가 동에 붙는 오류 방지).
+            if (
+                not exact_candidates
+                and parking_unified_location
+                and circle_kind != "dong"
+                and _normalize_location(parking_unified_location) != circle_location
+            ):
+                parking_loc = _normalize_location(parking_unified_location)
+                fallback: List[Dict[str, Any]] = []
+                for alias in circle_aliases:
+                    fallback.extend(exact_lookup.get((parking_loc, alias), []))
+                fallback = _dedupe_records(fallback)
+                if len(fallback) == 1:
+                    exact_candidates = fallback
+                    scoring_circle_location = parking_loc
+            if _has_clear_best_candidate(
+                scoring_circle_location, exact_candidates, location_inference, parking_unified_location
+            ):
+                matched_record = _select_circle_record(
+                    scoring_circle_location, exact_candidates, location_inference, parking_unified_location
+                )
                 if matched_record:
                     match_type = "exact"
+        # 부위 문자열이 도면·PDAM에서 어긋나 exact 가 비어도, 최신 PDAM 행 중 해당 번호가
+        # 전체에서 단 하나뿐이면 연결한다(예: 단일 479 행이 있는데 위치 키만 불일치).
+        if (
+            not matched_record
+            and pile_number
+            and circle_aliases
+            and _allow_globally_unique_pile_alias_fallback(
+                circle_location_display=circle_location_display,
+                circle_kind=circle_kind,
+                parking_unified_location=parking_unified_location,
+            )
+        ):
+            for alias in circle_aliases:
+                alias_hits: List[Dict[str, Any]] = []
+                for record in latest_records:
+                    ploc = _record_location_for_pdam_match(record, parking_unified_location)
+                    for a in _pile_number_aliases(record.get("pile_number"), location=ploc):
+                        if a == alias:
+                            alias_hits.append(record)
+                            break
+                alias_hits = _dedupe_records(alias_hits)
+                if len(alias_hits) == 1:
+                    matched_record = alias_hits[0]
+                    match_type = "globally_unique_pile_alias"
+                    break
         if matched_record:
-            installed_count += 1
-            matched_record_keys.add(_record_key(matched_record))
+            matched_record_keys.add(
+                _record_dedupe_key_for_latest(matched_record, parking_unified_location=parking_unified_location)
+            )
+            if _record_installed(matched_record):
+                installed_count += 1
+            else:
+                pending_count += 1
         else:
             pending_count += 1
             unresolved_circles.append(
@@ -2149,7 +2589,7 @@ def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[
         overlays.append(
             _mapping_overlay_payload(
                 circle,
-                circle_location,
+                circle_location_display,
                 pile_number,
                 matched_record,
                 match_type=match_type,
@@ -2161,11 +2601,14 @@ def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[
     inferable_records: List[Dict[str, Any]] = [
         record
         for record in latest_records
-        if _record_key(record) not in matched_record_keys and _location_kind_and_number(record.get("location"))[0] != "dong"
+        if _record_dedupe_key_for_latest(record, parking_unified_location=parking_unified_location)
+        not in matched_record_keys
+        and _location_kind_and_number(record.get("location"))[0] != "dong"
     ]
     inferable_lookup: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for record in inferable_records:
-        for alias in _pile_number_aliases(record.get("pile_number"), location=record.get("location")):
+        ploc = _record_location_for_pdam_match(record, parking_unified_location)
+        for alias in _pile_number_aliases(record.get("pile_number"), location=ploc):
             inferable_lookup[alias].append(record)
 
     overlay_index = {item.get("circleId"): index for index, item in enumerate(overlays)}
@@ -2185,23 +2628,33 @@ def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[
             candidate_records.extend(
                 record
                 for record in inferable_lookup.get(alias, [])
-                if _record_key(record) not in consumed_inferred_keys
+                if _record_dedupe_key_for_latest(record, parking_unified_location=parking_unified_location)
+                not in consumed_inferred_keys
             )
-        if not _has_clear_best_candidate(item["circleLocation"], candidate_records, location_inference):
+        if not _has_clear_best_candidate(
+            item["circleLocation"], candidate_records, location_inference, parking_unified_location
+        ):
             continue
-        matched_record = _select_circle_record(item["circleLocation"], candidate_records, location_inference)
+        matched_record = _select_circle_record(
+            item["circleLocation"], candidate_records, location_inference, parking_unified_location
+        )
         if not matched_record:
             continue
-        consumed_inferred_keys.add(_record_key(matched_record))
-        matched_record_keys.add(_record_key(matched_record))
-        installed_count += 1
-        pending_count = max(0, pending_count - 1)
+        _inf_key = _record_dedupe_key_for_latest(
+            matched_record, parking_unified_location=parking_unified_location
+        )
+        consumed_inferred_keys.add(_inf_key)
+        matched_record_keys.add(_inf_key)
+        if _record_installed(matched_record):
+            installed_count += 1
+            pending_count = max(0, pending_count - 1)
         overlay_position = overlay_index.get(item["circle"].get("id"))
         if overlay_position is not None:
             inference_info = location_inference.get(_record_key(matched_record))
+            circle_display = _normalize_location(item["circle"].get("building_name"))
             overlays[overlay_position] = _mapping_overlay_payload(
                 item["circle"],
-                item["circleLocation"],
+                circle_display,
                 item["pileNumber"],
                 matched_record,
                 match_type="inferred_equipment_context" if inference_info else "inferred_remaining",
@@ -2214,8 +2667,23 @@ def map_records_to_circles(records: Iterable[Dict[str, Any]], circles: Sequence[
         "matchedCircleCount": installed_count,
         "pendingCircleCount": pending_count,
         "unmatchedRecordCount": len(latest_records) - len(matched_record_keys),
-        "autoMatchedCount": sum(1 for item in overlays if item.get("autoMatched")),
+        "autoMatchedCount": sum(
+            1 for item in overlays if item.get("autoMatched") and item.get("status") == "installed"
+        ),
     }
+
+
+def _parking_location_dong_hyphen_pile_format_issue(record: Dict[str, Any]) -> bool:
+    """시공위치가 '주차장'으로만 적혀 있는데 파일번호가 동-번호 형식(예: 8-12)인 경우 오입력 의심."""
+    if _normalize_location(record.get("location")) != "주차장":
+        return False
+    raw = _cell_text(record.get("pile_number"))
+    if not raw:
+        return False
+    t = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw.strip())
+    if re.match(r"(?i)^[BbT]", t):
+        return False
+    return bool(re.match(r"^\d{1,3}\s*-\s*\d+$", t))
 
 
 def _build_mapping_diagnostics(
@@ -2241,7 +2709,7 @@ def _build_mapping_diagnostics(
             "inferenceReason": item.get("inferenceReason"),
         }
         for item in overlays
-        if item.get("autoMatched")
+        if item.get("autoMatched") and item.get("status") == "installed"
     ]
     auto_matched.sort(
         key=lambda item: (
@@ -2257,6 +2725,8 @@ def _build_mapping_diagnostics(
     for circle in circles:
         overlay = overlay_by_circle_id.get(circle.get("id")) or {}
         if overlay.get("status") == "installed":
+            continue
+        if overlay.get("recordRowNumber") is not None or overlay.get("matchedRecordPileNumber") is not None:
             continue
         project_only.append(
             {
@@ -2374,6 +2844,33 @@ def _build_mapping_diagnostics(
         )
     )
 
+    parking_pile_format_issues: List[Dict[str, Any]] = []
+    for record in records_for_pdam_duplicates:
+        if not _parking_location_dong_hyphen_pile_format_issue(record):
+            continue
+        pile_raw = _cell_text(record.get("pile_number"))
+        parking_pile_format_issues.append(
+            {
+                "rawLocation": _cell_text(record.get("location")),
+                "locationNormalized": _normalize_location(record.get("location")),
+                "pileNumber": pile_raw,
+                "rawPileNumber": pile_raw,
+                "constructionDate": record.get("construction_date"),
+                "equipment": record.get("equipment"),
+                "constructionMethod": _normalize_construction_method(record.get("construction_method")),
+                "recordRowNumber": record.get("row_number"),
+                "issueType": "숫자 오류",
+                "issueDetail": "시공위치가 주차장인데 파일번호가 동-번호(예: 8-12) 형식입니다. 지하구역은 B2-번호, B2--번호 등으로 맞추는지 확인하세요.",
+            }
+        )
+    parking_pile_format_issues.sort(
+        key=lambda item: (
+            item.get("constructionDate") or "",
+            int(item.get("recordRowNumber") or 0),
+            item.get("pileNumber") or "",
+        )
+    )
+
     return {
         "summary": {
             "autoMatchedCount": len(auto_matched),
@@ -2381,12 +2878,14 @@ def _build_mapping_diagnostics(
             "pdamOnlyCount": len(pdam_only),
             "projectDuplicateCount": len(project_duplicates),
             "pdamDuplicateCount": len(pdam_duplicates),
+            "parkingPileFormatIssueCount": len(parking_pile_format_issues),
         },
         "autoMatched": auto_matched[:MAX_DIAGNOSTIC_ITEMS],
         "projectOnly": project_only[:MAX_DIAGNOSTIC_ITEMS],
         "pdamOnly": pdam_only[:MAX_DIAGNOSTIC_ITEMS],
         "projectDuplicates": project_duplicates[:MAX_DIAGNOSTIC_ITEMS],
         "pdamDuplicates": pdam_duplicates[:MAX_DIAGNOSTIC_ITEMS],
+        "parkingPileFormatIssues": parking_pile_format_issues[:MAX_DIAGNOSTIC_ITEMS],
     }
 
 
@@ -2398,11 +2897,21 @@ def _circle_location_totals(circles: Sequence[Dict[str, Any]]) -> Dict[str, int]
 
 
 def _location_progress_bucket(value: Any) -> str:
+    """부위별 진행: 동·지하(B)·타워(Tn) 단위로 묶음. 타워는 호기별 T1, T2 …"""
     normalized = _normalize_location(value)
     if re.fullmatch(r"\d+동", normalized):
         return normalized
     if re.fullmatch(r"B\d*", normalized):
         return normalized
+    tower_full = re.fullmatch(r"T(\d+)", normalized, flags=re.IGNORECASE)
+    if tower_full:
+        return f"T{int(tower_full.group(1))}"
+    tower_sub = re.search(r"(?i)T\s*(\d+)", normalized)
+    if tower_sub:
+        return f"T{int(tower_sub.group(1))}"
+    tw_ko = re.search(r"(?:타워크레인|타워)\s*(\d+)", str(normalized), flags=re.IGNORECASE)
+    if tw_ko:
+        return f"T{int(tw_ko.group(1))}"
     return "미지정"
 
 
@@ -2536,6 +3045,7 @@ def build_dashboard(
     settlement_month: Optional[str] = None,
     settlement_start_day: Optional[int] = 25,
     settlement_end_day: Optional[int] = 20,
+    exclude_identical_geometry_duplicates: bool = False,
 ) -> Dict[str, Any]:
     dataset = _get_dataset(dataset_id)
     if not dataset:
@@ -2545,6 +3055,13 @@ def build_dashboard(
     filter_options = _build_filter_options(all_records)
     resolved_date_from = date_from or filter_options["dateBounds"]["min"]
     resolved_date_to = date_to or filter_options["dateBounds"]["max"]
+
+    parking_unified_location: Optional[str] = None
+    unify_parking_circle_location = False
+    saved_buildings: Optional[List[Dict[str, Any]]] = None
+    if work_id:
+        saved_buildings = _load_saved_work_buildings(work_id)
+        parking_unified_location, unify_parking_circle_location = _saved_work_parking_unify_context(saved_buildings)
 
     category_filtered_records = _apply_filters(
         all_records,
@@ -2557,6 +3074,7 @@ def build_dashboard(
         equipments=equipments,
         methods=methods,
         locations=locations,
+        parking_unified_location=parking_unified_location,
     )
     filtered_records = _apply_filters(
         category_filtered_records,
@@ -2564,11 +3082,22 @@ def build_dashboard(
         date_to=resolved_date_to,
         month=month,
     )
-    latest_records = _latest_records_by_pile(filtered_records)
+
+    latest_records = _without_header_echo_records(
+        _latest_records_by_pile(filtered_records, parking_unified_location=parking_unified_location)
+    )
+    # 원↔PDAM 매칭은 날짜·월 필터를 적용하지 않은 최신 행 풀을 쓴다.
+    # (기간을 좁혔을 때 시공 기록이 필터 밖으로 빠져 미시공으로만 보이는 문제 방지)
+    latest_records_for_mapping = _without_header_echo_records(
+        _latest_records_by_pile(category_filtered_records, parking_unified_location=parking_unified_location)
+    )
 
     if circles is None and work_id:
         circles = _load_saved_work_circles(work_id)
-    circles = list(circles or [])
+    circles, geom_clusters = dedupe_circles_for_construction_mapping(
+        list(circles or []),
+        exclude_identical_geometry_duplicates=exclude_identical_geometry_duplicates,
+    )
 
     remaining_values = [record["pile_remaining"] for record in latest_records if record.get("pile_remaining") is not None]
     over_threshold_count = 0
@@ -2579,12 +3108,27 @@ def build_dashboard(
             if record.get("pile_remaining") is not None and float(record["pile_remaining"]) >= remaining_threshold
         )
 
-    mapping = map_records_to_circles(latest_records, circles) if circles else {
-        "circleMappings": [],
-        "matchedCircleCount": None,
-        "pendingCircleCount": None,
-        "unmatchedRecordCount": None,
-    }
+    mapping = (
+        map_records_to_circles(
+            latest_records_for_mapping,
+            circles,
+            parking_unified_location=parking_unified_location,
+            unify_parking_circle_location=unify_parking_circle_location,
+            outline_buildings=saved_buildings,
+        )
+        if circles
+        else {
+            "circleMappings": [],
+            "matchedCircleCount": None,
+            "pendingCircleCount": None,
+            "unmatchedRecordCount": None,
+        }
+    )
+    if mapping.get("circleMappings") is not None:
+        mapping["circleMappings"] = _fan_out_circle_mappings_for_geometry_clusters(
+            list(mapping["circleMappings"]),
+            geom_clusters,
+        )
 
     records_for_grid = sorted(
         latest_records,
@@ -2622,6 +3166,7 @@ def build_dashboard(
                 "settlementMonth": settlement["period"]["month"],
                 "settlementStartDay": settlement["period"]["startDay"],
                 "settlementEndDay": settlement["period"]["endDay"],
+                "excludeIdenticalGeometryDuplicates": exclude_identical_geometry_duplicates,
             },
             "options": filter_options,
         },
@@ -2654,7 +3199,7 @@ def build_dashboard(
         "mapping": mapping,
         "diagnostics": _build_mapping_diagnostics(
             circles,
-            latest_records,
+            latest_records_for_mapping,
             mapping,
             records_for_pdam_duplicates=filtered_records,
         ),

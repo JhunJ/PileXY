@@ -110,7 +110,7 @@ logger = logging.getLogger(__name__)
 # 직경 기본값: 도면 단위(m 등)에 맞춰 원형 폴리라인(예: Φ0.6)도 포함되도록 설정. 면적 필터와 연동.
 DEFAULT_MIN_DIAMETER = 0.5
 DEFAULT_MAX_DIAMETER = 0.65
-DEFAULT_TEXT_HEIGHT_MIN = 0.5
+DEFAULT_TEXT_HEIGHT_MIN = 0.4
 DEFAULT_TEXT_HEIGHT_MAX = 1.1
 DEFAULT_MAX_MATCH_DISTANCE = 2.0
 COORD_PRECISION = 6
@@ -566,6 +566,7 @@ def filter_texts(
         text.copy()
         for text in texts
         if min_height <= text["height"] <= max_height
+        or text.get("foundation_pf_only")
     ]
 
 
@@ -975,7 +976,13 @@ def classify_entities(
     for index, building in enumerate(buildings):
         if len(building.vertices) >= 3:
             kind = str(getattr(building, "kind", "building") or "building").strip().lower()
-            priority = 1 if kind == "parking" else 0
+            # 낮은 숫자가 먼저 검사되어 할당됨. 타워크레인은 지하주차장·일반 동보다 우선(겹침 시 타워 윤곽).
+            if kind == "tower_crane":
+                priority = 0
+            elif kind == "parking":
+                priority = 2
+            else:
+                priority = 1
             polygons.append(
                 (
                     priority,
@@ -1323,8 +1330,10 @@ def match_texts_to_circles(
     overrides: Optional[Dict[str, str]] = None,
     text_reference_point: str = "center",
 ) -> tuple[int, Dict[str, List[str]]]:
-    if not texts or not circles:
+    if not circles:
         return 0, {}
+    texts = list(texts or [])
+    pile_match_texts = [t for t in texts if not t.get("foundation_pf_only")]
 
     overrides = overrides or {}
     # 클라이언트/이전 단계에서 남은 matched_text·manual_match가 자동 매칭을 오염시키지 않도록 초기화
@@ -1386,9 +1395,9 @@ def match_texts_to_circles(
         locked_texts.add(text_id)
         matched_count += 1
 
-    available_texts = [text for text in texts if text["id"] not in locked_texts]
+    available_texts = [text for text in pile_match_texts if text["id"] not in locked_texts]
     if not available_texts:
-        return matched_count, dict(final_links), []
+        return matched_count, dict(final_links)
 
     spatial_index = build_text_spatial_index(available_texts, GRID_CELL_SIZE, text_reference_point)
     circle_states: Dict[str, Dict[str, Optional[object]]] = {}
@@ -1473,6 +1482,10 @@ def build_match_errors(
     errors: List[MatchError] = []
 
     for text in texts:
+        if text.get("foundation_pf_only"):
+            text["matched_circle_ids"] = []
+            text["has_error"] = False
+            continue
         circle_ids = text_links.get(text["id"], [])
         text["matched_circle_ids"] = circle_ids
         if len(circle_ids) > 1:
@@ -1742,11 +1755,13 @@ def to_text_model(text: Dict) -> TextRecord:
         text_center_x=float(cx),
         text_center_y=float(cy),
         height=float(text.get("height", 0)),
+        rotation_deg=float(text.get("rotation_deg", 0) or 0),
         layer=str(text.get("layer", "0")),
         block_name=text.get("block_name"),
         matched_circle_ids=text.get("matched_circle_ids", []) or [],
         has_error=text.get("has_error", False),
         building_name=text.get("building_name"),
+        foundation_pf_only=bool(text.get("foundation_pf_only")),
     )
 
 
@@ -3201,6 +3216,23 @@ def _serialize_filter_for_saved_work(filters: FilterSettings) -> Dict[str, Any]:
     return payload
 
 
+def _merge_client_only_saved_work_filter_fields(
+    merged: Dict[str, Any], original_filter: Any
+) -> None:
+    """저장 작업 재수화 시 FilterSettings에 없는 UI 전용 플래그를 원본 JSON에서 복원."""
+    if not isinstance(original_filter, dict):
+        return
+    for camel, snake in (
+        ("pileNumberHyphenFormat", "pile_number_hyphen_format"),
+        ("towerCraneNumberFormat", "tower_crane_number_format"),
+        ("excludeIdenticalGeometryDuplicates", "exclude_identical_geometry_duplicates"),
+    ):
+        if camel in original_filter:
+            merged[camel] = original_filter[camel]
+        elif snake in original_filter:
+            merged[camel] = original_filter[snake]
+
+
 def _normalize_saved_work_buildings(items: Any) -> List[BuildingDefinition]:
     result: List[BuildingDefinition] = []
     if not isinstance(items, list):
@@ -3272,7 +3304,9 @@ def _rehydrate_saved_work_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     payload["texts"] = [item.model_dump() for item in response.texts]
     payload["duplicates"] = [item.model_dump() for item in response.duplicates]
     payload["errors"] = [item.model_dump() for item in response.errors]
-    payload["filter"] = _serialize_filter_for_saved_work(response.filter)
+    _serialized_filter = _serialize_filter_for_saved_work(response.filter)
+    _merge_client_only_saved_work_filter_fields(_serialized_filter, payload.get("filter"))
+    payload["filter"] = _serialized_filter
     payload["buildings"] = [item.model_dump() for item in response.buildings]
     payload["pileClusters"] = [item.model_dump() for item in response.pile_clusters]
     payload["clusterPolylines"] = [item.model_dump() for item in response.cluster_polylines]
@@ -4030,6 +4064,7 @@ async def get_construction_dashboard(payload: ConstructionDashboardRequest) -> D
             settlement_month=payload.settlement_month,
             settlement_start_day=payload.settlement_start_day,
             settlement_end_day=payload.settlement_end_day,
+            exclude_identical_geometry_duplicates=payload.exclude_identical_geometry_duplicates,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -4581,12 +4616,17 @@ async def export_circles_from_client(
                     verts.append(BuildingVertex(x=float(v["x"]), y=float(v["y"])))
             if not verts:
                 verts = [BuildingVertex(x=0.0, y=0.0)]
+            raw_kind = str(b.get("kind") or "").strip().lower()
+            if raw_kind == "parking":
+                bd_kind = "parking"
+            elif raw_kind in ("tower_crane", "tower-crane", "tower"):
+                bd_kind = "tower_crane"
+            else:
+                bd_kind = "building"
             building_defs.append(
                 BuildingDefinition(
                     name=name,
-                    kind="parking"
-                    if str(b.get("kind") or "").strip().lower() == "parking"
-                    else "building",
+                    kind=bd_kind,
                     slot=int(b["slot"]) if isinstance(b, dict) and b.get("slot") is not None else None,
                     vertices=verts,
                 )

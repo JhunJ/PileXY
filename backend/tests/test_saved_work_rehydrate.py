@@ -107,6 +107,50 @@ class SavedWorkRehydrateTest(unittest.TestCase):
         self.assertEqual(rehydrated["buildings"][0].get("drilling_start_elevation"), 12.345)
         self.assertEqual(rehydrated["buildings"][0].get("foundation_top_elevation"), 8.5)
 
+    def test_rehydrate_preserves_client_only_filter_flags(self) -> None:
+        payload = {
+            "id": "work_flags",
+            "title": "flags",
+            "project": "기본",
+            "sourceType": "contractor_original",
+            "filter": {
+                "minDiameter": 0.5,
+                "maxDiameter": 0.65,
+                "textHeightMin": 0.4,
+                "textHeightMax": 1.1,
+                "maxMatchDistance": 2.0,
+                "textReferencePoint": "center",
+                "pileNumberHyphenFormat": True,
+                "towerCraneNumberFormat": True,
+                "excludeIdenticalGeometryDuplicates": False,
+            },
+            "buildingCount": 1,
+            "circles": [
+                _circle("C1", 100.0, 200.0, "T1", "1-1"),
+            ],
+            "texts": [
+                _text("T1", "1-1", 100.0, 200.0),
+            ],
+            "buildings": [
+                {
+                    "name": "101동",
+                    "kind": "building",
+                    "vertices": [
+                        {"x": 99.0, "y": 199.0},
+                        {"x": 101.0, "y": 199.0},
+                        {"x": 101.0, "y": 201.0},
+                        {"x": 99.0, "y": 201.0},
+                    ],
+                }
+            ],
+            "matchCorrections": [],
+        }
+        rehydrated = _rehydrate_saved_work_payload(payload)
+        f = rehydrated["filter"]
+        self.assertTrue(f.get("pileNumberHyphenFormat"))
+        self.assertTrue(f.get("towerCraneNumberFormat"))
+        self.assertFalse(f.get("excludeIdenticalGeometryDuplicates"))
+
 
 if __name__ == "__main__":
     unittest.main()

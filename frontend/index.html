@@ -310,9 +310,20 @@
               <input type="checkbox" id="toggle-texts" checked />
               텍스트 라벨
             </label>
-            <label>
+            <label title="말뚝(원) 중심과 매칭된 번호 텍스트(중심)를 잇는 전체 길이 선">
               <input type="checkbox" id="toggle-match-lines" checked />
-              매칭 선
+              번호–파일 연결선
+            </label>
+          </div>
+          <div class="viewer-toolbar-group viewer-toolbar-group--visibility">
+            <span class="viewer-toolbar-group-title">가시성</span>
+            <label title="P/F 도면 글자·말뚝 주변 기초 수치(두께·천공 등) 표시">
+              <input type="checkbox" id="toggle-foundation-label-viz" checked />
+              기초 글자
+            </label>
+            <label title="P/F 삽입점에서 짝지은 닫힌 윤곽(중심) 및 그 안 파일(원)까지 연결선 표시">
+              <input type="checkbox" id="toggle-pf-poly-link-viz" checked />
+              P/F·윤곽 연결선
             </label>
           </div>
           <div class="viewer-toolbar-group viewer-toolbar-group--secondary">
@@ -324,6 +335,10 @@
             <label>
               <input type="checkbox" id="toggle-parking-hatch" checked />
               지하층 윤곽선
+            </label>
+            <label>
+              <input type="checkbox" id="toggle-tower-crane-hatch" checked />
+              타워크레인 윤곽선
             </label>
           </div>
         </div>
@@ -427,7 +442,7 @@
                 <div class="size-filter-row">
                   <label>
                     글자 크기 최소
-                    <input type="number" id="filter-height-min" step="0.01" value="0.5" />
+                    <input type="number" id="filter-height-min" step="0.01" value="0.4" />
                   </label>
                   <label>
                     글자 크기 최대
@@ -455,6 +470,33 @@
                 <label class="text-reference-match-dist" for="filter-match-distance">
                   <span class="text-reference-point-block-label">좌표점과 텍스트의 거리</span>
                   <input type="number" id="filter-match-distance" step="0.1" value="2" />
+                </label>
+              </div>
+              <div class="text-reference-point-block-divider" role="presentation"></div>
+              <div class="text-reference-point-section">
+                <label
+                  class="text-reference-pile-format-label"
+                  for="filter-pile-number-hyphen"
+                  title="예: 1-12 — 하이픈 앞은 동키, 뒤는 파일 번호만 사용합니다."
+                >
+                  <input type="checkbox" id="filter-pile-number-hyphen" />
+                  <span>동-번호 형식</span>
+                </label>
+                <label
+                  class="text-reference-pile-format-label"
+                  for="filter-exclude-identical-geometry-duplicates"
+                  title="중심·직경이 파일상 완전히 같은 원(엔티티 중복)은 겹침 중복으로 보지 않습니다."
+                >
+                  <input type="checkbox" id="filter-exclude-identical-geometry-duplicates" checked />
+                  <span>동일 좌표·크기 원은 중복 제외</span>
+                </label>
+                <label
+                  class="text-reference-pile-format-label"
+                  for="filter-tower-crane-number-format"
+                  title="T4-1만 타워(앞 T=타워, 4=호기, −뒤=파일). 4-1처럼 T 없으면 동-번호(앞=동키)입니다. 동-번호 옵션과 함께 켜면 T형식은 호기 집계, 나머지는 동-번호 집계."
+                >
+                  <input type="checkbox" id="filter-tower-crane-number-format" />
+                  <span>타워크레인 번호 (T호기-번호)</span>
                 </label>
               </div>
             </div>
@@ -531,8 +573,9 @@
             </label>
             <button type="button" class="ghost" id="apply-building-count">동 개수 적용</button>
             <div class="building-names-panel">
-              <div class="names-header">
-                <span>동 이름 목록</span>
+              <div class="names-header names-header--building-outline-auto">
+                <span class="building-cluster-auto-heading" title="아래 각 동 행에서 클러스터 자동생성 여부를 선택합니다.">자동생성</span>
+                <span class="names-header-title">동 이름 목록</span>
                 <div class="names-header-actions">
                   <button type="button" class="ghost" id="toggle-building-name-list-expand" title="전체 행을 한꺼번에 보고 수정합니다">목록 펼치기</button>
                   <button type="button" class="ghost" id="add-building-name" title="동 개수 숫자를 1 올리는 것과 같습니다. 13개인 상태에서 누르면 14개(줄)가 됩니다.">이름 추가</button>
@@ -544,7 +587,7 @@
           </div>
           <div class="building-actions building-actions--primary">
             <button class="ghost" id="toggle-edit-buildings">편집 모드 OFF</button>
-            <button class="ghost" id="generate-building-outlines">동 윤곽선 생성</button>
+            <button type="button" class="ghost" id="generate-building-outlines">동 윤곽선 생성</button>
             <button id="apply-buildings">동 정보 적용</button>
             <button type="button" id="save-building-drilling-btn" class="building-drilling-save-btn" title="목록의 천공시작·기초골조 상단레벨을 반영합니다. 불러온 작업이 있으면 서버에도 저장합니다.">
               천공·기초 상단 저장
@@ -573,6 +616,44 @@
                 <button type="button" id="apply-parking-names">지하주차장 이름 적용</button>
               </div>
             </div>
+            <div class="parking-actions">
+              <button class="ghost" id="toggle-edit-parkings">편집 모드 OFF</button>
+              <button id="apply-parkings">지하주차장 정보 적용</button>
+              <button type="button" id="save-parking-drilling-btn" class="building-drilling-save-btn" title="목록의 천공시작·기초골조 상단레벨을 반영합니다. 불러온 작업이 있으면 서버에도 저장합니다.">
+                천공·기초 상단 저장
+              </button>
+            </div>
+            <div class="tower-crane-settings-panel">
+              <div class="parking-settings-header">
+                <h3>타워크레인 설정</h3>
+                <p>호기별로 겹치는 영역은 T1/T2처럼 별도 윤곽으로 지정합니다 (지하주차장 Bn과 동일 형식).</p>
+              </div>
+              <div class="building-inputs building-inputs--parking">
+                <label>
+                  타워크레인 개수
+                  <input type="number" id="tower-crane-count" min="0" value="0" />
+                </label>
+                <button type="button" class="ghost" id="apply-tower-crane-count">타워크레인 개수 적용</button>
+                <div class="building-names-panel">
+                  <div class="names-header">
+                    <span>타워크레인 호기 목록</span>
+                    <div class="names-header-actions">
+                      <button type="button" class="ghost" id="toggle-tower-crane-name-list-expand" title="전체 행을 한꺼번에 보고 수정합니다">목록 펼치기</button>
+                      <button type="button" class="ghost" id="add-tower-crane-name">이름 추가</button>
+                    </div>
+                  </div>
+                  <div id="tower-crane-name-editor" class="building-name-editor"></div>
+                  <button type="button" id="apply-tower-crane-names">타워크레인 이름 적용</button>
+                </div>
+              </div>
+              <div class="parking-actions">
+                <button class="ghost" id="toggle-edit-tower-cranes">편집 모드 OFF</button>
+                <button type="button" id="apply-tower-cranes">타워크레인 정보 적용</button>
+                <button type="button" id="save-tower-crane-drilling-btn" class="building-drilling-save-btn" title="목록의 천공시작·기초골조 상단레벨을 반영합니다. 불러온 작업이 있으면 서버에도 저장합니다.">
+                  천공·기초 상단 저장
+                </button>
+              </div>
+            </div>
             <div class="clustering-settings" id="clustering-settings">
               <div class="settings-header">
                 <span>동 클러스터링 설정</span>
@@ -596,7 +677,7 @@
             <div class="project-panel project-panel--in-building" aria-label="동 및 지하층 윤곽 설정 저장">
               <h2>동·지하층 윤곽 설정 저장</h2>
               <p class="outline-settings-scope-hint">
-                필터·동·지하주차장 윤곽·클러스터 폴리라인만 저장합니다. 전체 작업(좌표·매칭) 버전은 상단 <strong>작업 버전</strong>의 신규 저장·불러오기·수정 저장을 사용하세요.
+                필터·동·지하주차장·타워크레인 윤곽·클러스터 폴리라인만 저장합니다. 전체 작업(좌표·매칭) 버전은 상단 <strong>작업 버전</strong>의 신규 저장·불러오기·수정 저장을 사용하세요.
               </p>
               <div class="project-save-section">
                 <label>
@@ -627,13 +708,6 @@
                 </div>
                 <div id="project-list" class="project-list"></div>
               </div>
-            </div>
-            <div class="parking-actions">
-              <button class="ghost" id="toggle-edit-parkings">편집 모드 OFF</button>
-              <button id="apply-parkings">지하주차장 정보 적용</button>
-              <button type="button" id="save-parking-drilling-btn" class="building-drilling-save-btn" title="목록의 천공시작·기초골조 상단레벨을 반영합니다. 불러온 작업이 있으면 서버에도 저장합니다.">
-                천공·기초 상단 저장
-              </button>
             </div>
           </div>
 
@@ -742,18 +816,22 @@
 
           <div class="building-seq-summary-block" style="margin-top: 1.2rem;">
             <h3 style="font-size: 1rem; margin-bottom: 0.6rem; color: var(--text-primary);">동별 번호 현황</h3>
+            <p id="building-seq-summary-hint" class="building-seq-summary-hint" style="display: none; font-size: 0.85rem; color: var(--text-muted, #888); margin: 0 0 0.5rem 0;">
+              <strong>동-번호</strong> 옵션 사용 중: 범위·빠짐·본수는 하이픈(<strong>−</strong>) <strong>뒤</strong> 숫자만 반영합니다. 동 구분은 윤곽선과 동명을 따릅니다.
+            </p>
             <div class="table-wrapper building-seq-summary-table">
               <table>
-                <thead>
+                <thead id="building-seq-summary-head">
                   <tr>
                     <th>Building</th>
+                    <th>본수</th>
                     <th>범위 (1 ~ 최대값)</th>
                     <th>빠진 숫자</th>
                   </tr>
                 </thead>
                 <tbody id="building-seq-summary-body">
                   <tr>
-                    <td colspan="3" class="empty-row">DXF를 업로드하면 동별 번호 현황이 표시됩니다.</td>
+                    <td colspan="4" class="empty-row">DXF를 업로드하면 동별 번호 현황이 표시됩니다.</td>
                   </tr>
                 </tbody>
               </table>
@@ -1408,10 +1486,11 @@
       </div>
     </aside>
 
+    <script src="/frontend/api-json-helpers.js?v=1"></script>
     <script src="/frontend/app.js?v=202603680"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="/frontend/construction.js?v=202604011"></script>
+    <script src="/frontend/construction.js?v=202604132"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/meissa-compare.js?v=202603698"></script>
   </body>

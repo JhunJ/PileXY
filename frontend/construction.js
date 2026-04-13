@@ -8,7 +8,9 @@
     return;
   }
 
-  const FOUNDATION_AREA_MAX_LIMIT = 100;
+  /** 슬라이더(0–FOUNDATION_AREA_SLIDER_MAX)는 boundMin~boundMax 면적에 선형 매핑. `polygonArea`(도면 좌표²)와 동일 스케일이어야 함. */
+  const FOUNDATION_AREA_ABS_MAX = Number.MAX_SAFE_INTEGER;
+  const FOUNDATION_AREA_SLIDER_MAX = 100;
 
   constructionDrawer.innerHTML = `
     <div class="construction-drawer-header">
@@ -141,7 +143,8 @@
           <article class="construction-summary-card"><span>자동 매칭</span><strong id="construction-summary-auto-matched">-</strong></article>
           <article class="construction-summary-card"><span>시공 기록</span><strong id="construction-summary-records">-</strong></article>
           <article class="construction-summary-card"><span>고유 파일</span><strong id="construction-summary-unique">-</strong></article>
-          <article class="construction-summary-card"><span>좌표 매칭</span><strong id="construction-summary-matched">-</strong></article>
+          <article class="construction-summary-card"><span>PDAM 시공 파일</span><strong id="construction-summary-installed-piles">-</strong></article>
+          <article class="construction-summary-card"><span>시공완료 좌표</span><strong id="construction-summary-matched">-</strong></article>
           <article class="construction-summary-card"><span>미시공 좌표</span><strong id="construction-summary-pending">-</strong></article>
           <article class="construction-summary-card"><span>총 잔량 (m)</span><strong id="construction-summary-remaining">-</strong></article>
           <article class="construction-summary-card"><span>기준 초과</span><strong id="construction-summary-threshold">-</strong></article>
@@ -264,8 +267,8 @@
               <span id="construction-foundation-area-min-label" class="construction-foundation-area-end">최소 -</span>
               <div class="construction-foundation-area-range">
                 <span id="construction-foundation-area-active" class="construction-foundation-area-active" aria-hidden="true"></span>
-                <input type="range" id="construction-foundation-area-min" class="construction-foundation-area-range-input construction-foundation-area-range-input--min" min="0" max="1000" step="1" value="150" />
-                <input type="range" id="construction-foundation-area-max" class="construction-foundation-area-range-input construction-foundation-area-range-input--max" min="0" max="1000" step="1" value="850" />
+                <input type="range" id="construction-foundation-area-min" class="construction-foundation-area-range-input construction-foundation-area-range-input--min" min="0" max="100" step="1" value="15" />
+                <input type="range" id="construction-foundation-area-max" class="construction-foundation-area-range-input construction-foundation-area-range-input--max" min="0" max="100" step="1" value="85" />
               </div>
               <span id="construction-foundation-area-max-label" class="construction-foundation-area-end">최대 -</span>
             </div>
@@ -275,11 +278,49 @@
             <label><input type="checkbox" id="construction-foundation-multi-select" checked /> 다중선택</label>
             <label><input type="checkbox" id="construction-foundation-window-select" /> 윈도우선택 <small class="construction-foundation-mode-hint">휠 이동</small></label>
             <label><input type="checkbox" id="construction-foundation-polyline-auto-select" checked /> 폴리라인 클릭 시 내부 자동선택</label>
-            <label><input type="checkbox" id="construction-foundation-show-overlay" checked /> 두께 색상/숫자 표시</label>
           </div>
+          <div class="construction-foundation-pf-height-band">
+            <div class="construction-foundation-pf-height-title">P/F 글자 높이</div>
+            <div class="construction-foundation-pf-height-radios" role="radiogroup" aria-label="P/F 글자 높이 매칭 구간">
+              <label><input type="radio" name="construction-pf-height-band" value="large" /> 큰 글자만</label>
+              <label><input type="radio" name="construction-pf-height-band" value="small" checked /> 작은 글자만</label>
+            </div>
+          </div>
+          <div id="construction-foundation-pf-height-hint" class="construction-range-note construction-foundation-pf-height-hint"></div>
           <div class="construction-foundation-quick-actions">
             <button type="button" id="construction-foundation-clear-selection" class="ghost">선택 해제</button>
+            <button type="button" id="construction-foundation-undo" class="ghost" title="Ctrl+Z">실행 취소</button>
+            <button type="button" id="construction-foundation-redo" class="ghost" title="Ctrl+Y">다시 실행</button>
             <button type="button" id="construction-foundation-reset-all" class="ghost">데이터 초기화</button>
+          </div>
+          <div class="construction-foundation-mode-row construction-foundation-overlay-toggles">
+            <span class="construction-foundation-area-filter-title">캔버스 숫자 표시</span>
+            <label><input type="checkbox" id="construction-foundation-overlay-thickness" checked /> 기초두께(mm)</label>
+            <label><input type="checkbox" id="construction-foundation-overlay-drill" /> 천공(m)</label>
+            <label><input type="checkbox" id="construction-foundation-overlay-top" /> 기초상단(m)</label>
+            <button type="button" id="construction-foundation-overlay-all" class="ghost construction-foundation-overlay-all-btn">가시성 전체</button>
+          </div>
+          <div class="construction-foundation-building-levels">
+            <div class="construction-foundation-area-filter-title">다른 저장 버전에서 불러오기</div>
+            <p class="muted construction-foundation-preset-hint">같은 프로젝트의 다른 저장 버전을 고른 뒤 불러오기를 누르면, 그 버전에 있던 말뚝별 두께·천공·기초상·피트 오프셋과 동·주차장 윤곽별 천공·기초상 레벨을 <strong>현재 화면에 덮어씁니다</strong>(말뚝 id·윤곽 이름이 맞는 항목만).</p>
+            <div class="construction-foundation-preset-work-row">
+              <label class="construction-foundation-preset-select-label">저장 버전
+                <select id="construction-foundation-preset-work" class="save-work-select">
+                  <option value="">저장 작업(버전) 선택</option>
+                </select>
+              </label>
+              <button type="button" id="construction-foundation-preset-load" class="ghost construction-foundation-preset-import-btn">선택 버전에서 불러오기</button>
+            </div>
+          </div>
+          <div class="construction-foundation-apply-row">
+            <label>천공시작 (m)<input type="number" id="construction-foundation-drill-m" class="save-work-input" step="any" placeholder="다른 버전·직접 입력" /></label>
+            <button type="button" id="construction-foundation-clear-drill-selection" class="ghost">선택 값 삭제</button>
+            <button type="button" id="construction-foundation-apply-drill" class="header-construction-btn">선택 항목 적용</button>
+          </div>
+          <div class="construction-foundation-apply-row">
+            <label>기초상단 (m)<input type="number" id="construction-foundation-top-m" class="save-work-input" step="any" placeholder="다른 버전·직접 입력" /></label>
+            <button type="button" id="construction-foundation-clear-top-selection" class="ghost">선택 값 삭제</button>
+            <button type="button" id="construction-foundation-apply-top" class="header-construction-btn">선택 항목 적용</button>
           </div>
           <div class="construction-foundation-apply-row">
             <label>기초골조 두께 (mm)<input type="number" id="construction-foundation-thickness-mm" class="save-work-input" min="0" step="1" placeholder="예: 700" /></label>
@@ -287,9 +328,24 @@
             <button type="button" id="construction-foundation-apply-selection" class="header-construction-btn">선택 항목 적용</button>
           </div>
           <div class="construction-foundation-apply-row">
-            <label>엘레베이터 피트 오프셋 (mm)<input type="number" id="construction-foundation-elevator-pit-offset-mm" class="save-work-input" min="0" step="1" placeholder="예: 1200" /></label>
+            <label class="construction-foundation-label-stack construction-foundation-elevator-pit-label">
+              <span class="construction-foundation-label-stack-text">엘레베이터 피트 오프셋 (mm)</span>
+              <input type="number" id="construction-foundation-elevator-pit-offset-mm" class="save-work-input" min="0" step="1" placeholder="예: 1200" title="엘레베이터 피트 오프셋 (mm)" />
+            </label>
             <button type="button" id="construction-foundation-clear-elevator-pit" class="ghost">피트 값 삭제</button>
             <button type="button" id="construction-foundation-apply-elevator-pit" class="header-construction-btn">엘레베이터 피트 설정</button>
+          </div>
+        </div>
+        <div class="construction-chart-card construction-chart-card--full construction-foundation-pf-merge-card">
+          <div class="construction-foundation-pf-merge-section">
+            <h3 class="construction-foundation-pf-merge-title">P/F 위치 텍스트 ↔ 닫힌 폴리선</h3>
+            <p class="construction-foundation-viewer-guide">위에서 큰 글자 또는 작은 글자 한쪽만 골라 매칭합니다. 같은 P/F 표기(예 F1)마다 버튼 하나로 묶입니다.</p>
+            <div id="construction-foundation-pf-list" class="construction-foundation-list"></div>
+          </div>
+          <div class="construction-foundation-pf-merge-section construction-foundation-pf-merge-section--split">
+            <h3 class="construction-foundation-pf-merge-title">근접·표기 불일치 (2M) <span class="construction-pf-mismatch-badge">검토 권장</span></h3>
+            <p class="construction-foundation-viewer-guide">각 큰 글자마다 <strong>지리상 가장 가까운 작은 글자</strong>가 다른 표기일 때만 표시합니다. 한도는 도면 단위 기준으로 m 도면≈2, mm 도면≈2000(둘 다 약 2m). 거리 열은 도면 단위 그대로입니다. 좌표는 <strong>가능하면 글자 중심</strong>(text_center), 없으면 삽입점입니다. 행을 누르면 두 위치로 이동합니다.</p>
+            <div id="construction-foundation-pf-proximity-review" class="construction-foundation-proximity-review"></div>
           </div>
         </div>
         <div id="construction-foundation-summary" class="construction-range-note">아래 목록에서 내부/외부를 선택하세요.</div>
@@ -354,6 +410,7 @@
   const constructionLegend = q("#construction-legend");
   const constructionSummaryRecords = q("#construction-summary-records");
   const constructionSummaryUnique = q("#construction-summary-unique");
+  const constructionSummaryInstalledPiles = q("#construction-summary-installed-piles");
   const constructionSummaryMatched = q("#construction-summary-matched");
   const constructionSummaryAutoMatched = q("#construction-summary-auto-matched");
   const constructionSummaryPending = q("#construction-summary-pending");
@@ -396,7 +453,15 @@
   const constructionFoundationMultiSelect = q("#construction-foundation-multi-select");
   const constructionFoundationWindowSelect = q("#construction-foundation-window-select");
   const constructionFoundationPolylineAutoSelect = q("#construction-foundation-polyline-auto-select");
-  const constructionFoundationShowOverlay = q("#construction-foundation-show-overlay");
+  const constructionFoundationOverlayThickness = q("#construction-foundation-overlay-thickness");
+  const constructionFoundationOverlayDrill = q("#construction-foundation-overlay-drill");
+  const constructionFoundationOverlayTop = q("#construction-foundation-overlay-top");
+  const constructionFoundationOverlayAll = q("#construction-foundation-overlay-all");
+  const constructionFoundationPfList = q("#construction-foundation-pf-list");
+  const constructionFoundationPfHeightHint = q("#construction-foundation-pf-height-hint");
+  const constructionFoundationPfProximityReview = q("#construction-foundation-pf-proximity-review");
+  const constructionFoundationUndo = q("#construction-foundation-undo");
+  const constructionFoundationRedo = q("#construction-foundation-redo");
   const constructionFoundationAreaMin = q("#construction-foundation-area-min");
   const constructionFoundationAreaMax = q("#construction-foundation-area-max");
   const constructionFoundationAreaActive = q("#construction-foundation-area-active");
@@ -404,9 +469,17 @@
   const constructionFoundationAreaMaxLabel = q("#construction-foundation-area-max-label");
   const constructionFoundationAreaValues = q("#construction-foundation-area-values");
   const constructionFoundationThicknessMm = q("#construction-foundation-thickness-mm");
+  const constructionFoundationDrillM = q("#construction-foundation-drill-m");
+  const constructionFoundationTopM = q("#construction-foundation-top-m");
+  const constructionFoundationPresetWork = q("#construction-foundation-preset-work");
+  const constructionFoundationPresetLoad = q("#construction-foundation-preset-load");
   const constructionFoundationElevatorPitOffsetMm = q("#construction-foundation-elevator-pit-offset-mm");
   const constructionFoundationApplySelection = q("#construction-foundation-apply-selection");
   const constructionFoundationClearSelectionValues = q("#construction-foundation-clear-selection-values");
+  const constructionFoundationApplyDrill = q("#construction-foundation-apply-drill");
+  const constructionFoundationClearDrillSelection = q("#construction-foundation-clear-drill-selection");
+  const constructionFoundationApplyTop = q("#construction-foundation-apply-top");
+  const constructionFoundationClearTopSelection = q("#construction-foundation-clear-top-selection");
   const constructionFoundationApplyElevatorPit = q("#construction-foundation-apply-elevator-pit");
   const constructionFoundationClearElevatorPit = q("#construction-foundation-clear-elevator-pit");
   const constructionFoundationClearSelection = q("#construction-foundation-clear-selection");
@@ -466,6 +539,12 @@
     foundationPitOffsetByPileId: state.foundationPitOffsetByPileId && typeof state.foundationPitOffsetByPileId === "object"
       ? { ...state.foundationPitOffsetByPileId }
       : {},
+    drillingStartByPileId: state.drillingStartByPileId && typeof state.drillingStartByPileId === "object"
+      ? { ...state.drillingStartByPileId }
+      : {},
+    foundationTopByPileId: state.foundationTopByPileId && typeof state.foundationTopByPileId === "object"
+      ? { ...state.foundationTopByPileId }
+      : {},
     foundationSelectedCircleIds: new Set(),
     foundationSelectedPolylineIds: new Set(),
     foundationFilteredPolylineIds: new Set(),
@@ -478,14 +557,29 @@
     foundationAreaMaxValue: null,
     foundationAreaBoundMin: 0,
     foundationAreaBoundMax: 0,
-    foundationAreaMinPos: 150,
-    foundationAreaMaxPos: 850,
+    foundationAreaMinPos: 15,
+    foundationAreaMaxPos: 85,
     foundationAreaRefreshRaf: null,
     foundationMultiSelect: true,
     foundationWindowSelect: false,
     foundationPolylineAutoSelect: true,
-    foundationShowOverlay: true,
+    foundationOverlayShowThickness: true,
+    foundationOverlayShowDrill: false,
+    foundationOverlayShowFoundationTop: false,
     foundationExcludeWithThickness: false,
+    foundationSelectedPfKeys: new Set(),
+    foundationHistoryPast: [],
+    foundationHistoryFuture: [],
+    foundationPfMatchCacheKey: "",
+    foundationPfMatchCache: [],
+    foundationPfConsensusMismatchCount: 0,
+    foundationPfLabelCandidatesRef: null,
+    foundationPfLabelCandidates: null,
+    /** 1 = text_center 우선 좌표로 후보 캐시 */
+    foundationPfLabelXYMode: 0,
+    pfHeightBandMode: "small",
+    foundationPolylineIdLookupKey: "",
+    foundationPolylineIdLookup: null,
     foundationWindowRect: null,
     foundationDragStart: null,
     foundationDragging: false,
@@ -521,11 +615,35 @@
   if (!constructionState.foundationPitOffsetByPileId || typeof constructionState.foundationPitOffsetByPileId !== "object") {
     constructionState.foundationPitOffsetByPileId = {};
   }
+  if (!constructionState.drillingStartByPileId || typeof constructionState.drillingStartByPileId !== "object") {
+    constructionState.drillingStartByPileId = {};
+  }
+  if (!constructionState.foundationTopByPileId || typeof constructionState.foundationTopByPileId !== "object") {
+    constructionState.foundationTopByPileId = {};
+  }
   constructionState.foundationMultiSelect = constructionState.foundationMultiSelect !== false;
   constructionState.foundationWindowSelect = Boolean(constructionState.foundationWindowSelect);
   constructionState.foundationPolylineAutoSelect = constructionState.foundationPolylineAutoSelect !== false;
-  constructionState.foundationShowOverlay = constructionState.foundationShowOverlay !== false;
+  if (typeof constructionState.foundationOverlayShowThickness !== "boolean") {
+    const legacy = constructionState.foundationShowOverlay;
+    constructionState.foundationOverlayShowThickness = legacy !== false;
+  }
+  constructionState.foundationOverlayShowThickness = constructionState.foundationOverlayShowThickness !== false;
+  constructionState.foundationOverlayShowDrill = Boolean(constructionState.foundationOverlayShowDrill);
+  constructionState.foundationOverlayShowFoundationTop = Boolean(constructionState.foundationOverlayShowFoundationTop);
   constructionState.foundationExcludeWithThickness = Boolean(constructionState.foundationExcludeWithThickness);
+  if (constructionState.pfHeightBandMode !== "large" && constructionState.pfHeightBandMode !== "small") {
+    constructionState.pfHeightBandMode = "small";
+  }
+  if (!(constructionState.foundationSelectedPfKeys instanceof Set)) {
+    constructionState.foundationSelectedPfKeys = new Set();
+  }
+  if (!Array.isArray(constructionState.foundationHistoryPast)) {
+    constructionState.foundationHistoryPast = [];
+  }
+  if (!Array.isArray(constructionState.foundationHistoryFuture)) {
+    constructionState.foundationHistoryFuture = [];
+  }
   if (!(constructionState.foundationSelectedCircleIds instanceof Set)) {
     constructionState.foundationSelectedCircleIds = new Set();
   }
@@ -553,16 +671,22 @@
     : null;
   constructionState.foundationAreaMinPos = Number.isFinite(Number(constructionState.foundationAreaMinPos))
     ? Number(constructionState.foundationAreaMinPos)
-    : 150;
+    : 15;
   constructionState.foundationAreaMaxPos = Number.isFinite(Number(constructionState.foundationAreaMaxPos))
     ? Number(constructionState.foundationAreaMaxPos)
-    : 850;
-  constructionState.foundationAreaMinPos = Math.max(0, Math.min(1000, constructionState.foundationAreaMinPos));
-  constructionState.foundationAreaMaxPos = Math.max(0, Math.min(1000, constructionState.foundationAreaMaxPos));
-  if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < 20) {
-    constructionState.foundationAreaMaxPos = Math.min(1000, constructionState.foundationAreaMinPos + 20);
-    if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < 20) {
-      constructionState.foundationAreaMinPos = Math.max(0, constructionState.foundationAreaMaxPos - 20);
+    : 85;
+  if (constructionState.foundationAreaMinPos > FOUNDATION_AREA_SLIDER_MAX) {
+    constructionState.foundationAreaMinPos = Math.round(constructionState.foundationAreaMinPos / 10);
+  }
+  if (constructionState.foundationAreaMaxPos > FOUNDATION_AREA_SLIDER_MAX) {
+    constructionState.foundationAreaMaxPos = Math.round(constructionState.foundationAreaMaxPos / 10);
+  }
+  constructionState.foundationAreaMinPos = Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, constructionState.foundationAreaMinPos));
+  constructionState.foundationAreaMaxPos = Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, constructionState.foundationAreaMaxPos));
+  if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < 2) {
+    constructionState.foundationAreaMaxPos = Math.min(FOUNDATION_AREA_SLIDER_MAX, constructionState.foundationAreaMinPos + 2);
+    if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < 2) {
+      constructionState.foundationAreaMinPos = Math.max(0, constructionState.foundationAreaMaxPos - 2);
     }
   }
   if (!(constructionState.foundationPreviewCircleIds instanceof Set)) {
@@ -1034,7 +1158,9 @@
   }
 
   function overlayStatusLabel(status) {
-    return status === "installed" ? "시공완료" : "미시공";
+    const s = String(status ?? "").trim().toLowerCase();
+    if (s === "installed") return "시공완료";
+    return "미시공";
   }
 
   function normalizeOverlayCategory(category) {
@@ -1281,11 +1407,245 @@
     `).join("");
   }
 
+  function isFoundationLabelVizEnabled() {
+    return state.showFoundationLabelViz !== false;
+  }
+
+  function isPfPolyLinkVizEnabled() {
+    return state.showPfPolyLinkViz !== false;
+  }
+
+  function polylineVerticesCentroid(vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3) return null;
+    let sx = 0;
+    let sy = 0;
+    vertices.forEach((v) => {
+      sx += Number(v.x);
+      sy += Number(v.y);
+    });
+    const n = vertices.length;
+    return { x: sx / n, y: sy / n };
+  }
+
+  /** 매칭·연결선: 삽입점보다 글자 중심(text_center) 우선 */
+  function getPfTextWorldXYFromTextRecord(t) {
+    const tx = Number(t?.text_center_x ?? t?.insert_x ?? t?.center_x);
+    const ty = Number(t?.text_center_y ?? t?.insert_y ?? t?.center_y);
+    return { x: tx, y: ty };
+  }
+
+  /** 폴리 밖에 있는 P/F일 때 이 거리(월드) 이상이면 연결선 미표시 — 원거리 허브 연결 완화(mm 도면 가정) */
+  const PF_LINK_MAX_DIST_WHEN_OUTSIDE_POLY = 680;
+
+  /**
+   * P/F 좌표계 추정: 글자 높이 중앙값이 작으면 m 단위, 크면 mm 단위로 본다.
+   * (m 도면에서 2000을 쓰면 2000m 한도가 되어 근접 표가 쏟아짐)
+   */
+  function getPfSpatialUnitsLikelyMeters() {
+    const cands = getPfTextCandidatesCached();
+    if (!cands?.length) return false;
+    const hs = cands.map((c) => Number(c.textHeight) || 0).filter((h) => h > 0);
+    if (!hs.length) return false;
+    hs.sort((a, b) => a - b);
+    const med = hs[Math.floor(hs.length / 2)];
+    return med < 45;
+  }
+
+  /** 큰↔작 짝·근접 검토 거리 상한(월드 단위: m 도면≈2, mm 도면≈2000≈2m) */
+  function getPfLargeSmallPairDistanceCapWorld() {
+    return getPfSpatialUnitsLikelyMeters() ? 2 : 2000;
+  }
+
+  /** P/F 텍스트 기준점 ↔ 윤곽 무게중심(점선) · 파일(실선) — 뷰포트·파일 필터·배치 스트로크로 부하 최소화 */
+  function drawPfPolyAndFileLinkLines() {
+    if (!isPfPolyLinkVizEnabled()) return;
+    if (typeof view !== "undefined" && view.scale < 0.028) return;
+    const rows = getPfPolylineMatchGroups();
+    if (!rows.length) return;
+    const polyById = new Map(
+      getBackgroundPolylinesForClick().map((p) => [String(p.id), p]),
+    );
+    const visibleIds =
+      typeof getVisibleCircles === "function"
+        ? new Set(getVisibleCircles().map((c) => String(c.id)))
+        : null;
+    const vp = typeof getViewportWorldRect === "function" ? getViewportWorldRect() : null;
+    const padWorld = vp && typeof view !== "undefined" && Number.isFinite(view.scale) ? 72 / view.scale : 0;
+    const nearVp = (wx, wy) => {
+      if (!vp || !Number.isFinite(wx) || !Number.isFinite(wy)) return true;
+      return (
+        wx >= vp.minX - padWorld
+        && wx <= vp.maxX + padWorld
+        && wy >= vp.minY - padWorld
+        && wy <= vp.maxY + padWorld
+      );
+    };
+
+    const dashedCanvas = [];
+    const solidCanvas = [];
+
+    rows.forEach((row) => {
+      const t = state.textMap?.get(String(row.textId));
+      if (!t) return;
+      const { x: ix, y: iy } = getPfTextWorldXYFromTextRecord(t);
+      if (!Number.isFinite(ix) || !Number.isFinite(iy)) return;
+      const cnx = row.outlineCentroidX;
+      const cny = row.outlineCentroidY;
+      const filteredCircles = (row.circleIds || []).filter((cid) => !visibleIds || visibleIds.has(String(cid)));
+
+      let show = nearVp(ix, iy);
+      if (!show && Number.isFinite(cnx) && Number.isFinite(cny)) show = nearVp(cnx, cny);
+      if (!show) {
+        for (let fi = 0; fi < filteredCircles.length; fi += 1) {
+          const c = state.circleMap?.get(filteredCircles[fi]);
+          if (c && nearVp(Number(c.center_x), Number(c.center_y))) {
+            show = true;
+            break;
+          }
+        }
+      }
+      if (!show) return;
+
+      const rowPoly = polyById.get(String(row.polylineId));
+      const verts = rowPoly?.vertices;
+      const textInsidePoly =
+        verts
+        && verts.length >= 3
+        && typeof pointInPolygon === "function"
+        && pointInPolygon({ x: ix, y: iy }, verts);
+
+      function linkAllowed(wx, wy) {
+        if (!Number.isFinite(wx) || !Number.isFinite(wy)) return false;
+        if (textInsidePoly) return true;
+        return Math.hypot(ix - wx, iy - wy) < PF_LINK_MAX_DIST_WHEN_OUTSIDE_POLY;
+      }
+
+      const start = worldToCanvas(ix, iy);
+      if (Number.isFinite(cnx) && Number.isFinite(cny) && linkAllowed(cnx, cny)) {
+        dashedCanvas.push([start, worldToCanvas(cnx, cny)]);
+      }
+      filteredCircles.forEach((cid) => {
+        const c = state.circleMap?.get(cid);
+        if (!c) return;
+        const wx = Number(c.center_x);
+        const wy = Number(c.center_y);
+        if (!linkAllowed(wx, wy)) return;
+        solidCanvas.push([start, worldToCanvas(wx, wy)]);
+      });
+    });
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (dashedCanvas.length) {
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.35;
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = "rgba(45, 212, 191, 0.82)";
+      ctx.beginPath();
+      dashedCanvas.forEach(([a, b]) => {
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      });
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    if (solidCanvas.length) {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(52, 211, 153, 0.9)";
+      ctx.beginPath();
+      solidCanvas.forEach(([a, b]) => {
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** 동일 center에 서로 다른 circle id가 여러 개인 도면(동일 좌표 중첩)에서 링·숫자가 겹쳐 보이는 것을 막기 위한 월드 키. */
+  function foundationOverlayWorldPosKey(circle) {
+    const x = Number(circle?.center_x);
+    const y = Number(circle?.center_y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return `${Math.round(x * 100) / 100}_${Math.round(y * 100) / 100}`;
+  }
+
+  /** slot: "ring" | "label" — 같은 좌표에서 링 한 번·라벨 한 번만. */
+  function consumeFoundationOverlaySlot(circle, slot) {
+    const posKey = foundationOverlayWorldPosKey(circle);
+    if (!posKey) return true;
+    const guard = constructionState.foundationOverlayWorldPosGuard;
+    if (!guard) return true;
+    const k = `${slot}:${posKey}`;
+    if (guard.has(k)) return false;
+    guard.add(k);
+    return true;
+  }
+
+  function pileNumericFromMap(map, circleId) {
+    if (!map || circleId == null) return null;
+    const v = map[circleId] ?? map[String(circleId)];
+    return Number.isFinite(Number(v)) ? Number(v) : null;
+  }
+
+  /** 동일 좌표 다중 말뚝일 때 누구 링/라벨을 먼저 그릴지 — 말뚝별 입력·선택이 보이게 한다. */
+  function scoreCircleForFoundationOverlayPriority(circle) {
+    const id = circle?.id;
+    if (id == null) return 0;
+    let s = 0;
+    if (pileNumericFromMap(constructionState.foundationTopByPileId, id) != null) s += 1000;
+    if (pileNumericFromMap(constructionState.drillingStartByPileId, id) != null) s += 500;
+    if (pileNumericFromMap(constructionState.foundationThicknessByPileId, id) != null) s += 300;
+    if (pileNumericFromMap(constructionState.foundationPitOffsetByPileId, id) != null) s += 100;
+    if (state.manualSelection?.circleId === id) s += 50;
+    if (typeof hoveredCircleId !== "undefined" && hoveredCircleId === id) s += 40;
+    if (state.highlightedCircleIds?.has?.(id)) s += 10;
+    return s;
+  }
+
+  function sortCirclesForFoundationOverlay(circles) {
+    if (!Array.isArray(circles) || circles.length <= 1) return circles;
+    const buckets = new Map();
+    const order = [];
+    circles.forEach((circle, i) => {
+      const pk = foundationOverlayWorldPosKey(circle);
+      const bk = pk != null ? pk : `__solo:${String(circle?.id)}:${i}`;
+      if (!buckets.has(bk)) {
+        buckets.set(bk, []);
+        order.push(bk);
+      }
+      buckets.get(bk).push(circle);
+    });
+    return order.flatMap((bk) => {
+      const arr = buckets.get(bk);
+      if (!arr || arr.length <= 1) return arr || [];
+      return [...arr].sort((a, b) => {
+        const ds = scoreCircleForFoundationOverlayPriority(b) - scoreCircleForFoundationOverlayPriority(a);
+        if (ds !== 0) return ds;
+        return String(a.id).localeCompare(String(b.id), "en");
+      });
+    });
+  }
+
   const originalDrawCanvas = drawCanvas;
   drawCanvas = function drawCanvasWithConstruction() {
     constructionState.renderFrameToken += 1;
     constructionState.playbackPathFrameToken = -1;
-    originalDrawCanvas();
+    constructionState.foundationOverlayWorldPosGuard = new Set();
+    const prevGetVisibleCircles = typeof getVisibleCircles === "function" ? getVisibleCircles : null;
+    if (prevGetVisibleCircles) {
+      getVisibleCircles = function getVisibleCirclesFoundationOverlayOrder() {
+        return sortCirclesForFoundationOverlay(prevGetVisibleCircles());
+      };
+    }
+    try {
+      originalDrawCanvas();
+    } finally {
+      if (prevGetVisibleCircles) getVisibleCircles = prevGetVisibleCircles;
+    }
+    drawPfPolyAndFileLinkLines();
     if (isFoundationTabActive()) {
       const manualPolylineIds = constructionState.foundationSelectedPolylineIds || new Set();
       const filteredPolylineIds = constructionState.foundationFilteredPolylineIds || new Set();
@@ -1294,7 +1654,7 @@
         ...Array.from(filteredPolylineIds),
       ]);
       if (highlightPolylineIds.size) {
-        const lookup = new Map(getBackgroundPolylinesForClick().map((polyline) => [polyline.id, polyline]));
+        const lookup = getFoundationPolylineIdLookup();
         ctx.save();
         ctx.lineWidth = 3;
         ctx.strokeStyle = "#22d3ee";
@@ -1364,9 +1724,9 @@
         ctx.stroke();
         ctx.restore();
       }
-      if (constructionState.foundationShowOverlay) {
+      if (isFoundationLabelVizEnabled() && constructionState.foundationOverlayShowThickness !== false) {
         const mm = getFoundationThicknessMm(circle.id);
-        if (Number.isFinite(mm)) {
+        if (Number.isFinite(mm) && consumeFoundationOverlaySlot(circle, "ring")) {
           const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
           const radius = Math.max(0.5, circle.radius * view.scale);
           const color = getFoundationThicknessColor(mm);
@@ -1439,17 +1799,11 @@
     const overlay = getConstructionOverlay(circle);
     if (!overlay || !isViewerOverlayEnabled()) {
       originalDrawCirclePoint(circle);
-      if (constructionState.foundationShowOverlay) {
-        const mm = getFoundationThicknessMm(circle.id);
-        if (Number.isFinite(mm) && view.scale >= 0.45) {
+      if (isFoundationLabelVizEnabled()) {
+        const labelParts = buildFoundationCanvasLabelParts(circle);
+        if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
           const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
-          ctx.save();
-          ctx.font = "11px sans-serif";
-          ctx.fillStyle = getFoundationThicknessColor(mm);
-          ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-          ctx.fillText(formatFoundationOverlayLabel(circle.id, mm), x, y - 7);
-          ctx.restore();
+          drawFoundationCanvasLabelStack(x, y, labelParts);
         }
       }
       return;
@@ -1483,16 +1837,10 @@
       ctx.lineWidth = 1.4;
       ctx.stroke();
     }
-    if (constructionState.foundationShowOverlay) {
-      const mm = getFoundationThicknessMm(circle.id);
-      if (Number.isFinite(mm) && view.scale >= 0.45) {
-        ctx.save();
-        ctx.font = "11px sans-serif";
-        ctx.fillStyle = getFoundationThicknessColor(mm);
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(formatFoundationOverlayLabel(circle.id, mm), x, y - 7);
-        ctx.restore();
+    if (isFoundationLabelVizEnabled()) {
+      const labelParts = buildFoundationCanvasLabelParts(circle);
+      if (labelParts.length && view.scale >= 0.45 && consumeFoundationOverlaySlot(circle, "label")) {
+        drawFoundationCanvasLabelStack(x, y, labelParts);
       }
     }
   };
@@ -1510,7 +1858,7 @@
       overlay.equipment ? `장비 ${overlay.equipment}` : null,
       overlay.constructionMethod ? `공법 ${overlay.constructionMethod}` : null,
       overlay.pileRemaining != null ? `잔량 ${formatMetric(overlay.pileRemaining, 2)} m` : null,
-      Number.isFinite(getFoundationThicknessMm(hoveredCircleId))
+      isFoundationLabelVizEnabled() && Number.isFinite(getFoundationThicknessMm(hoveredCircleId))
         ? `기초골조 두께 ${Math.round(getFoundationThicknessMm(hoveredCircleId))} mm`
         : null,
     ].filter(Boolean);
@@ -1565,7 +1913,7 @@
         .filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
         .map((point) => ({ x: Number(point.x), y: Number(point.y) }));
       const vertices = buildNormalizedPolylineVertices(polyline);
-      if (!isClosedRectangleVertices(vertices)) return;
+      if (!isFoundationOutlineVerticesUsable(vertices)) return;
       let isRawClosed = false;
       if (rawPoints.length >= 4) {
         const first = rawPoints[0];
@@ -1587,6 +1935,19 @@
     constructionState.foundationBackgroundPolylineCacheKey = cacheKey;
     constructionState.foundationBackgroundPolylineCache = rows;
     return rows;
+  }
+
+  /** draw 루프에서 매 프레임 Map 생성 방지 */
+  function getFoundationPolylineIdLookup() {
+    const polys = getBackgroundPolylinesForClick();
+    const k = constructionState.foundationBackgroundPolylineCacheKey || String(polys.length);
+    if (constructionState.foundationPolylineIdLookupKey === k && constructionState.foundationPolylineIdLookup) {
+      return constructionState.foundationPolylineIdLookup;
+    }
+    const m = new Map(polys.map((p) => [p.id, p]));
+    constructionState.foundationPolylineIdLookupKey = k;
+    constructionState.foundationPolylineIdLookup = m;
+    return m;
   }
 
   function collectAreaStats(rows) {
@@ -1817,6 +2178,7 @@
   }
 
   function pickCirclesInWindowRect(rect) {
+    beforeFoundationMutation();
     const minX = Math.min(rect.startX, rect.endX);
     const maxX = Math.max(rect.startX, rect.endX);
     const minY = Math.min(rect.startY, rect.endY);
@@ -1887,6 +2249,7 @@
   }
 
   function handleFoundationSingleClickAtCanvas(upX, upY) {
+    beforeFoundationMutation();
     const polyline = pickPolylineAtCanvasPoint(upX, upY);
     const pickedCircle = pickCircle(upX, upY);
     if (pickedCircle) {
@@ -2200,8 +2563,12 @@
     constructionTabButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.tab === tab));
     constructionTabPanels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.panel === tab));
     if (tab === "foundation-thickness") {
-      refreshFoundationPanel();
-      requestRedraw();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          refreshFoundationPanel();
+          requestRedraw();
+        });
+      });
     }
   }
 
@@ -2378,6 +2745,7 @@
           { label: "PDAM만", value: summary.pdamOnlyCount ?? 0 },
           { label: "프로젝트 중복", value: summary.projectDuplicateCount ?? 0 },
           { label: "PDAM 중복", value: summary.pdamDuplicateCount ?? 0 },
+          { label: "숫자 오류", value: summary.parkingPileFormatIssueCount ?? 0 },
         ]
         : [];
       constructionDiagnosticOverview.innerHTML = cards.length
@@ -2443,12 +2811,37 @@
         diagnostics?.pdamDuplicates || [],
         "PDAM 중복이 없습니다.",
       );
+      const parkingPileFormatIssues = renderDiagnosticTable(
+        [
+          { label: "위치(원문)", key: "rawLocation" },
+          {
+            label: "파일번호",
+            render: (row) => {
+              const raw = row?.rawPileNumber ?? row?.pileNumber;
+              const text = raw != null && String(raw).trim() !== "" ? String(raw).trim() : "";
+              return text || "-";
+            },
+          },
+          { label: "시공일", key: "constructionDate" },
+          { label: "호기", key: "equipment" },
+          { label: "공법", key: "constructionMethod" },
+          { label: "비고", key: "issueDetail" },
+        ],
+        diagnostics?.parkingPileFormatIssues || [],
+        "해당 사항이 없습니다.",
+      );
       constructionDiagnosticIssues.innerHTML = `
         <div class="construction-diagnostic-stack">
-          <section class="construction-diagnostic-section"><h4>프로젝트만 남은 좌표</h4>${projectOnly}</section>
+          <section class="construction-diagnostic-section construction-diagnostic-section--collapsible">
+            <details class="construction-diagnostic-details">
+              <summary class="construction-diagnostic-details-summary"><span class="construction-diagnostic-details-title">프로젝트만 남은 좌표</span></summary>
+              <div class="construction-diagnostic-details-panel">${projectOnly}</div>
+            </details>
+          </section>
           <section class="construction-diagnostic-section"><h4>PDAM만 남은 파일</h4>${pdamOnly}</section>
           <section class="construction-diagnostic-section"><h4>프로젝트 중복</h4>${projectDuplicates}</section>
           <section class="construction-diagnostic-section"><h4>PDAM 중복</h4>${pdamDuplicates}</section>
+          <section class="construction-diagnostic-section"><h4>숫자 오류</h4>${parkingPileFormatIssues}</section>
         </div>
       `;
     }
@@ -2458,6 +2851,57 @@
     return typeof normalizeConstructionLocationValue === "function"
       ? normalizeConstructionLocationValue(value)
       : String(value ?? "").trim() || "미지정";
+  }
+
+  /** backend construction_reports._saved_work_parking_unify_context 와 동일 */
+  function getSingleParkingOutlineNorm() {
+    const buildings = state.buildings || [];
+    const parkingOnly = buildings.filter(
+      (b) => String(b?.kind || "building").trim().toLowerCase() === "parking",
+    );
+    if (parkingOnly.length !== 1) return null;
+    return normConstructionLoc(parkingOnly[0]?.name);
+  }
+
+  function pdamLocationTextMentionsParking(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return false;
+    const compact = raw.replace(/[\s_\-()/]+/g, "");
+    if (compact.includes("주차장")) return true;
+    if (compact.includes("주차")) return true;
+    if (compact.includes("지하")) return true;
+    return false;
+  }
+
+  /** backend _location_kind_and_number 대응 (정규화된 위치 문자열 기준) */
+  function locationKindAndNumber(value) {
+    const location = normConstructionLoc(value);
+    let m = /^B(\d+)$/.exec(location);
+    if (m) return { kind: "basement", n: parseInt(m[1], 10) };
+    if (location === "B") return { kind: "basement", n: null };
+    m = /^(\d+)동$/.exec(location);
+    if (m) return { kind: "dong", n: parseInt(m[1], 10) };
+    if (location === "미지정") return { kind: "unspecified", n: null };
+    return { kind: "other", n: null };
+  }
+
+  /**
+   * backend _record_location_for_pdam_match 와 동일.
+   * 단일 지하주차장 윤곽일 때 PDAM·도면 부위 키를 Bn으로 맞춘다 (기성정리 기초골조 기본값 연동용).
+   */
+  function recordLocationForPdamMatch(locationRaw, parkingUnified) {
+    if (!parkingUnified) return normConstructionLoc(locationRaw);
+    if (pdamLocationTextMentionsParking(locationRaw)) return parkingUnified;
+    const norm = normConstructionLoc(locationRaw);
+    if (normConstructionLoc(parkingUnified) === "주차장") {
+      const { kind } = locationKindAndNumber(locationRaw);
+      if (kind === "basement") return parkingUnified;
+    }
+    return norm;
+  }
+
+  function normLocationForBuildingSettingsLookup(raw) {
+    return recordLocationForPdamMatch(raw, getSingleParkingOutlineNorm());
   }
 
   function buildAverageZByNormalizedLocation() {
@@ -2476,6 +2920,13 @@
       const cnt = count.get(loc) || 1;
       avg.set(loc, s / cnt);
     });
+    const parkingUnified = getSingleParkingOutlineNorm();
+    if (parkingUnified) {
+      const a = avg.get("주차장");
+      const b = avg.get(parkingUnified);
+      if (Number.isFinite(a) && !Number.isFinite(b)) avg.set(parkingUnified, a);
+      if (Number.isFinite(b) && !Number.isFinite(a)) avg.set("주차장", b);
+    }
     return avg;
   }
 
@@ -2501,8 +2952,8 @@
     return null;
   }
 
-  function resolveDrillingStartElevation(recordLocation, avgMap) {
-    const norm = normConstructionLoc(recordLocation);
+  function resolveDrillingStartElevation(recordLocation, avgMap, parkingUnified) {
+    const norm = recordLocationForPdamMatch(recordLocation, parkingUnified);
     const override = findDrillingOverrideForNormLocation(norm);
     if (override != null) {
       return { value: override, basis: "천공시작 입력고" };
@@ -2514,11 +2965,63 @@
     return { value: null, basis: null };
   }
 
-  function getCircleAreaKind(circle) {
+  /** 이름 매칭 후, 백엔드와 동일하게 타워 > 일반동 > 지하주차장 순으로 윤곽 안을 본다. */
+  function findBuildingOutlineContainingCircle(circle) {
     const normLoc = normConstructionLoc(circle?.building_name);
-    const matched = (state.buildings || []).find((building) => normConstructionLoc(building?.name) === normLoc);
+    let matched = (state.buildings || []).find((building) => normConstructionLoc(building?.name) === normLoc);
+    if (!matched && circle && typeof pointInPolygon === "function") {
+      const cx = Number(circle.center_x);
+      const cy = Number(circle.center_y);
+      if (Number.isFinite(cx) && Number.isFinite(cy)) {
+        const pt = { x: cx, y: cy };
+        const outlinePriority = (kindRaw) => {
+          const k = String(kindRaw || "building").trim().toLowerCase();
+          if (k === "tower_crane" || k === "tower-crane" || k === "tower") return 0;
+          if (k === "parking") return 2;
+          return 1;
+        };
+        const indexed = (state.buildings || []).map((b, i) => ({ b, i }));
+        indexed.sort((a, b) => {
+          const d = outlinePriority(a.b?.kind) - outlinePriority(b.b?.kind);
+          return d !== 0 ? d : a.i - b.i;
+        });
+        for (const { b: building } of indexed) {
+          const verts = building?.vertices;
+          if (!Array.isArray(verts) || verts.length < 3) continue;
+          const poly = verts.map((v) => ({ x: Number(v.x), y: Number(v.y) }));
+          if (pointInPolygon(pt, poly)) {
+            matched = building;
+            break;
+          }
+        }
+      }
+    }
+    return matched || null;
+  }
+
+  function getCircleAreaKind(circle) {
+    const matched = findBuildingOutlineContainingCircle(circle);
     const rawKind = String(matched?.kind || "building").trim().toLowerCase();
     return rawKind === "parking" ? "parking" : "building";
+  }
+
+  /**
+   * 기초골조 목록 묶음용: building_name만 쓰면 윤곽 안인데 미할당·불일치인 파일이 전부「미지정」으로 쌓인다.
+   * 설정된 동·주차장 이름과 일치하면 그걸 쓰고, 아니면 윤곽(중심점)으로 구역을 정한다.
+   */
+  function resolveFoundationGroupLocationNorm(circle) {
+    const nameNorm = normConstructionLoc(circle?.building_name);
+    const explicitHit = nameNorm && nameNorm !== "미지정"
+      ? (state.buildings || []).find((b) => normConstructionLoc(b?.name) === nameNorm)
+      : null;
+    if (explicitHit) {
+      return nameNorm;
+    }
+    const outlineHit = findBuildingOutlineContainingCircle(circle);
+    if (outlineHit?.name) {
+      return normConstructionLoc(outlineHit.name);
+    }
+    return nameNorm;
   }
 
   function buildNormalizedPolylineVertices(polyline) {
@@ -2665,6 +3168,13 @@ function inferOpenRectangleVertices(vertices) {
     return Math.abs(sum) / 2;
   }
 
+  /** 기초/P/F용 닫힌 외곽 — 직사각형만이 아니라 삼각형·다각형도 허용(면적>0) */
+  function isFoundationOutlineVerticesUsable(vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3) return false;
+    const area = polygonArea(vertices);
+    return Number.isFinite(area) && area > 1e-10;
+  }
+
   function getSelectablePolylines() {
     // 사용자가 말한 "배경 점선 폴리라인" = drawPolylineHints()의 rawPolylines
     const source = Array.isArray(state.rawPolylines) ? state.rawPolylines : [];
@@ -2677,7 +3187,7 @@ function inferOpenRectangleVertices(vertices) {
     const usable = [];
     effectiveSource.forEach((polyline, index) => {
       const vertices = buildNormalizedPolylineVertices(polyline);
-    if (!isClosedRectangleVertices(vertices)) return;
+      if (!isFoundationOutlineVerticesUsable(vertices)) return;
       const area = polygonArea(vertices);
       if (!Number.isFinite(area) || area <= 0) return;
       const id = String(polyline?.id || polyline?.cluster_id || `polyline-${index + 1}`);
@@ -2732,7 +3242,11 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function getFoundationGroupItems() {
-    const cacheKey = `${(state.circles || []).length}|${(state.buildings || []).length}|${(state.rawPolylines || []).length}|${(state.clusterPolylines || []).length}|${Number(constructionState.foundationAreaMinValue ?? -1)}|${Number(constructionState.foundationAreaMaxValue ?? -1)}`;
+    const buildingKindSig = (state.buildings || [])
+      .map((b) => `${String(b?.kind || "").trim()}:${normConstructionLoc(b?.name)}`)
+      .sort()
+      .join(";");
+    const cacheKey = `${(state.circles || []).length}|${(state.buildings || []).length}|${buildingKindSig}|${(state.rawPolylines || []).length}|${(state.clusterPolylines || []).length}|${Number(constructionState.foundationAreaMinValue ?? -1)}|${Number(constructionState.foundationAreaMaxValue ?? -1)}`;
     if (constructionState.foundationGroupItemsCacheKey === cacheKey) {
       return constructionState.foundationGroupItemsCache;
     }
@@ -2754,12 +3268,18 @@ function inferOpenRectangleVertices(vertices) {
       kindByNorm.set(norm, kind);
     });
     circles.forEach((circle) => {
-      const norm = normConstructionLoc(circle?.building_name);
+      const norm = resolveFoundationGroupLocationNorm(circle);
       const kind = getCircleAreaKind(circle);
       if (!targetKinds.has(kind)) return;
       if (!byNormName.has(norm)) {
         byNormName.set(norm, []);
-        displayNameByNorm.set(norm, String(circle?.building_name || "").trim() || "미지정");
+        const labelFromOutline = (state.buildings || []).find((b) => normConstructionLoc(b?.name) === norm);
+        displayNameByNorm.set(
+          norm,
+          (labelFromOutline?.name && String(labelFromOutline.name).trim())
+            || String(circle?.building_name || "").trim()
+            || "미지정",
+        );
         kindByNorm.set(norm, kind);
       }
       byNormName.get(norm).push(circle);
@@ -2776,7 +3296,7 @@ function inferOpenRectangleVertices(vertices) {
         .sort((a, b) => b.inside.length - a.inside.length);
       const band = getCurrentAreaRange(polylineScores);
       const balanced = polylineScores.filter((entry) => entry.area >= band.min && entry.area <= band.max);
-      const ranked = (balanced.length ? balanced : polylineScores).sort((a, b) => {
+      const ranked = balanced.sort((a, b) => {
         const scoreA = Math.abs(Math.log((a.area || 1) / (band.mode || a.area || 1)));
         const scoreB = Math.abs(Math.log((b.area || 1) / (band.mode || b.area || 1)));
         if (Math.abs(scoreA - scoreB) > 1e-6) return scoreA - scoreB;
@@ -2864,19 +3384,65 @@ function inferOpenRectangleVertices(vertices) {
     return Number.isFinite(Number(value)) ? Number(value) : null;
   }
 
+  /** 구역(정규화 위치명)별로 이미 지정된 두께 중 건수가 가장 많은 mm (기초골조 탭 불러오기용). */
+  function getDominantThicknessMmForNorm(normName) {
+    const groups = getFoundationGroupItems();
+    const g = groups.find((x) => x.normName === normName);
+    if (!g || !Array.isArray(g.circleIds) || !g.circleIds.length) return null;
+    const counts = new Map();
+    g.circleIds.forEach((id) => {
+      const mm = getFoundationThicknessMm(id);
+      if (!Number.isFinite(mm)) return;
+      const r = Math.round(mm);
+      counts.set(r, (counts.get(r) || 0) + 1);
+    });
+    if (!counts.size) return null;
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+  }
+
   function getFoundationPitOffsetM(circleId) {
     const value = constructionState.foundationPitOffsetByPileId?.[circleId];
     return Number.isFinite(Number(value)) ? Number(value) : null;
   }
 
-  function formatFoundationOverlayLabel(circleId, mm) {
-    if (!Number.isFinite(mm)) return "";
-    const base = `${Math.round(mm)}`;
-    const pitOffsetM = getFoundationPitOffsetM(circleId);
-    if (Number.isFinite(pitOffsetM) && pitOffsetM > 0) {
-      return `${base} (${formatMetric(pitOffsetM, 3)}m)`;
-    }
-    return base;
+  /** circleMap 키가 숫자/문자 혼용일 때 조회 실패 방지 */
+  function getCircleFromMapById(circleId) {
+    const m = state.circleMap;
+    if (!m || circleId == null) return null;
+    if (m.has(circleId)) return m.get(circleId);
+    const s = String(circleId);
+    if (m.has(s)) return m.get(s);
+    const n = Number(s);
+    if (Number.isFinite(n) && m.has(n)) return m.get(n);
+    return null;
+  }
+
+  /**
+   * 동·주차장 천공/기초상 기본값 조회용 정규 위치.
+   * building_name 만 쓰면 윤곽 안인데 이름이 안 맞는 말뚝은 주차장 설정을 못 읽는다.
+   * 기초 목록·기성표와 동일하게 resolveFoundationGroupLocationNorm(윤곽 포함) 후 단일주차장 PDAM 통합을 적용한다.
+   */
+  function normForBuildingSettingsFromCircle(circle) {
+    if (!circle) return null;
+    const locNorm = resolveFoundationGroupLocationNorm(circle);
+    return normLocationForBuildingSettingsLookup(locNorm);
+  }
+
+  /** 말뚝별 값이 있으면 우선, 없으면 동·주차장 설정(윤곽) 값. */
+  function getDrillingElevationMForCircle(circleId) {
+    const direct = constructionState.drillingStartByPileId?.[circleId];
+    if (Number.isFinite(Number(direct))) return Number(direct);
+    const circle = getCircleFromMapById(circleId);
+    const norm = normForBuildingSettingsFromCircle(circle);
+    return norm == null ? null : findDrillingOverrideForNormLocation(norm);
+  }
+
+  function getFoundationTopElevationMForCircle(circleId) {
+    const direct = constructionState.foundationTopByPileId?.[circleId];
+    if (Number.isFinite(Number(direct))) return Number(direct);
+    const circle = getCircleFromMapById(circleId);
+    const norm = normForBuildingSettingsFromCircle(circle);
+    return norm == null ? null : findFoundationTopOverrideForNormLocation(norm);
   }
 
   function getFoundationThicknessColor(mm) {
@@ -2935,6 +3501,50 @@ function inferOpenRectangleVertices(vertices) {
     requestRedraw();
   }
 
+  function applyDrillingStartToCircles(circleIds, mValue) {
+    const ids = Array.isArray(circleIds) ? circleIds : [];
+    if (!ids.length) return;
+    if (!Number.isFinite(mValue)) return;
+    ids.forEach((circleId) => {
+      constructionState.drillingStartByPileId[circleId] = Number(mValue);
+    });
+    state.drillingStartByPileId = { ...constructionState.drillingStartByPileId };
+    rerenderSettlementTableFromState();
+    requestRedraw();
+  }
+
+  function clearDrillingStartForCircles(circleIds) {
+    const ids = Array.isArray(circleIds) ? circleIds : [];
+    ids.forEach((circleId) => {
+      delete constructionState.drillingStartByPileId[circleId];
+    });
+    state.drillingStartByPileId = { ...constructionState.drillingStartByPileId };
+    rerenderSettlementTableFromState();
+    requestRedraw();
+  }
+
+  function applyFoundationTopElevationToCircles(circleIds, mValue) {
+    const ids = Array.isArray(circleIds) ? circleIds : [];
+    if (!ids.length) return;
+    if (!Number.isFinite(mValue)) return;
+    ids.forEach((circleId) => {
+      constructionState.foundationTopByPileId[circleId] = Number(mValue);
+    });
+    state.foundationTopByPileId = { ...constructionState.foundationTopByPileId };
+    rerenderSettlementTableFromState();
+    requestRedraw();
+  }
+
+  function clearFoundationTopElevationForCircles(circleIds) {
+    const ids = Array.isArray(circleIds) ? circleIds : [];
+    ids.forEach((circleId) => {
+      delete constructionState.foundationTopByPileId[circleId];
+    });
+    state.foundationTopByPileId = { ...constructionState.foundationTopByPileId };
+    rerenderSettlementTableFromState();
+    requestRedraw();
+  }
+
   function persistFoundationSettings(statusMessage) {
     if (typeof syncCurrentWorkToServer !== "function") return;
     syncCurrentWorkToServer(statusMessage)
@@ -2980,13 +3590,14 @@ function inferOpenRectangleVertices(vertices) {
 
   function renderFoundationSelectionSummary() {
     if (!constructionFoundationSummary) return;
-    const filteredCount = constructionState.foundationExcludeWithThickness
-      ? getFoundationListSelectableCircleIds().length
-      : getFilteredFoundationCircles().length;
+    const allFiltered = getFilteredFoundationCircles();
+    const thicknessSpecified = allFiltered.filter((c) => Number.isFinite(getFoundationThicknessMm(c.id))).length;
+    const thicknessUnset = allFiltered.length - thicknessSpecified;
+    const filteredCount = constructionState.foundationExcludeWithThickness ? thicknessUnset : allFiltered.length;
     const selected = constructionState.foundationSelectedCircleIds ? constructionState.foundationSelectedCircleIds.size : 0;
     const subgroupCount = constructionState.foundationSelectedSubgroupKeys ? constructionState.foundationSelectedSubgroupKeys.size : 0;
     const polylineCount = constructionState.foundationSelectedPolylineIds ? constructionState.foundationSelectedPolylineIds.size : 0;
-    constructionFoundationSummary.textContent = `선택 항목 ${subgroupCount}개 · 폴리라인 ${polylineCount}개 · 선택 대상 ${filteredCount}개 · 현재 선택 파일 ${selected}개`;
+    constructionFoundationSummary.textContent = `선택 항목 ${subgroupCount}개 · 폴리라인 ${polylineCount}개 · 선택 대상 ${filteredCount}개 · 현재 선택 파일 ${selected}개 · 두께 지정 ${thicknessSpecified} · 미지정 ${thicknessUnset}`;
   }
 
   function renderFoundationPolylineList() {
@@ -3005,8 +3616,17 @@ function inferOpenRectangleVertices(vertices) {
       const outsideKey = `${group.key}:outside`;
       const insideChecked = constructionState.foundationSelectedSubgroupKeys?.has(insideKey);
       const outsideChecked = constructionState.foundationSelectedSubgroupKeys?.has(outsideKey);
+      const ids = group.circleIds || [];
+      let thicknessSpecified = 0;
+      ids.forEach((id) => {
+        if (Number.isFinite(getFoundationThicknessMm(id))) thicknessSpecified += 1;
+      });
+      const thicknessUnset = ids.length - thicknessSpecified;
       return `<label class="construction-foundation-list-item ${kindClass}">
-        <span class="construction-foundation-group-name">${escape(group.displayName)}</span>
+        <div class="construction-foundation-group-header">
+          <span class="construction-foundation-group-name">${escape(group.displayName)}</span>
+          <span class="construction-foundation-group-thickness-stats">지정 ${thicknessSpecified} · 미지정 ${thicknessUnset}</span>
+        </div>
         <div class="construction-foundation-subgroup-row">
           <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--inside${insideChecked ? " is-active" : ""}" data-foundation-subgroup-key="${escape(insideKey)}" title="내부 선택">
             <span>내부 ${group.insideIds.length}</span>
@@ -3060,8 +3680,11 @@ function inferOpenRectangleVertices(vertices) {
       const circle = state.circleMap?.get(id);
       if (!circle) return;
       const kind = getCircleAreaKind(circle);
-      const normName = normConstructionLoc(circle?.building_name);
-      const displayName = String(circle?.building_name || "").trim() || "미지정";
+      const normName = resolveFoundationGroupLocationNorm(circle);
+      const labelFromOutline = (state.buildings || []).find((b) => normConstructionLoc(b?.name) === normName);
+      const displayName = (labelFromOutline?.name && String(labelFromOutline.name).trim())
+        || String(circle?.building_name || "").trim()
+        || "미지정";
       const rowKey = `${kind}:${normName}`;
       if (!rowsByGroup.has(rowKey)) {
         rowsByGroup.set(rowKey, {
@@ -3117,12 +3740,27 @@ function inferOpenRectangleVertices(vertices) {
     if (constructionFoundationMultiSelect) constructionFoundationMultiSelect.checked = Boolean(constructionState.foundationMultiSelect);
     if (constructionFoundationWindowSelect) constructionFoundationWindowSelect.checked = Boolean(constructionState.foundationWindowSelect);
     if (constructionFoundationPolylineAutoSelect) constructionFoundationPolylineAutoSelect.checked = Boolean(constructionState.foundationPolylineAutoSelect);
-    if (constructionFoundationShowOverlay) constructionFoundationShowOverlay.checked = Boolean(constructionState.foundationShowOverlay);
+    if (constructionFoundationOverlayThickness) {
+      constructionFoundationOverlayThickness.checked = constructionState.foundationOverlayShowThickness !== false;
+    }
+    if (constructionFoundationOverlayDrill) {
+      constructionFoundationOverlayDrill.checked = Boolean(constructionState.foundationOverlayShowDrill);
+    }
+    if (constructionFoundationOverlayTop) {
+      constructionFoundationOverlayTop.checked = Boolean(constructionState.foundationOverlayShowFoundationTop);
+    }
     if (constructionFoundationExcludeWithThickness) constructionFoundationExcludeWithThickness.checked = Boolean(constructionState.foundationExcludeWithThickness);
+    qa('input[name="construction-pf-height-band"]').forEach((radio) => {
+      radio.checked = radio.value === (constructionState.pfHeightBandMode || "small");
+    });
     if (constructionFoundationAreaMin) constructionFoundationAreaMin.value = String(Math.round(Number(constructionState.foundationAreaMinPos || 0)));
-    if (constructionFoundationAreaMax) constructionFoundationAreaMax.value = String(Math.round(Number(constructionState.foundationAreaMaxPos || 1000)));
-    if (constructionFoundationAreaMinLabel) constructionFoundationAreaMinLabel.textContent = `최소 ${formatAreaValue(Number(constructionState.foundationAreaMinValue || 0))}`;
-    if (constructionFoundationAreaMaxLabel) constructionFoundationAreaMaxLabel.textContent = `최대 ${formatAreaValue(Number(constructionState.foundationAreaMaxValue || 0))}`;
+    if (constructionFoundationAreaMax) constructionFoundationAreaMax.value = String(Math.round(Number(constructionState.foundationAreaMaxPos || FOUNDATION_AREA_SLIDER_MAX)));
+    if (constructionFoundationAreaMinLabel) {
+      constructionFoundationAreaMinLabel.textContent = `최소 ${formatFoundationAreaRangePos(constructionState.foundationAreaMinPos)}`;
+    }
+    if (constructionFoundationAreaMaxLabel) {
+      constructionFoundationAreaMaxLabel.textContent = `최대 ${formatFoundationAreaRangePos(constructionState.foundationAreaMaxPos)}`;
+    }
     updateFoundationAreaRangeVisual();
   }
 
@@ -3130,7 +3768,7 @@ function inferOpenRectangleVertices(vertices) {
     const minBound = Number(constructionState.foundationAreaBoundMin) || 0;
     const maxBound = Number(constructionState.foundationAreaBoundMax) || minBound;
     const span = Math.max(1, maxBound - minBound);
-    const normalized = Math.max(0, Math.min(1000, Number(pos) || 0)) / 1000;
+    const normalized = Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, Number(pos) || 0)) / FOUNDATION_AREA_SLIDER_MAX;
     return minBound + span * normalized;
   }
 
@@ -3140,7 +3778,7 @@ function inferOpenRectangleVertices(vertices) {
     const span = Math.max(1, maxBound - minBound);
     const value = Number.isFinite(Number(area)) ? Number(area) : minBound;
     const normalized = (value - minBound) / span;
-    return Math.max(0, Math.min(1000, normalized * 1000));
+    return Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, normalized * FOUNDATION_AREA_SLIDER_MAX));
   }
 
   function syncFoundationAreaValuesFromPos() {
@@ -3155,10 +3793,10 @@ function inferOpenRectangleVertices(vertices) {
 
   function updateFoundationAreaRangeVisual() {
     if (!constructionFoundationAreaActive || !constructionFoundationAreaMin || !constructionFoundationAreaMax) return;
-    const minPos = Math.max(0, Math.min(1000, Number(constructionState.foundationAreaMinPos) || 0));
-    const maxPos = Math.max(0, Math.min(1000, Number(constructionState.foundationAreaMaxPos) || 1000));
-    const left = (Math.min(minPos, maxPos) / 1000) * 100;
-    const right = (Math.max(minPos, maxPos) / 1000) * 100;
+    const minPos = Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, Number(constructionState.foundationAreaMinPos) || 0));
+    const maxPos = Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, Number(constructionState.foundationAreaMaxPos) || FOUNDATION_AREA_SLIDER_MAX));
+    const left = (Math.min(minPos, maxPos) / FOUNDATION_AREA_SLIDER_MAX) * 100;
+    const right = (Math.max(minPos, maxPos) / FOUNDATION_AREA_SLIDER_MAX) * 100;
     constructionFoundationAreaActive.style.left = `${left}%`;
     constructionFoundationAreaActive.style.width = `${Math.max(0, right - left)}%`;
   }
@@ -3171,12 +3809,1203 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function getFoundationAreaMinGapPos() {
-    return 20;
+    return Math.max(1, Math.round(FOUNDATION_AREA_SLIDER_MAX * 0.02));
   }
 
   function invalidateFoundationGroupCache() {
     constructionState.foundationGroupItemsCacheKey = "";
     constructionState.foundationGroupItemsCache = [];
+    constructionState.foundationPfMatchCacheKey = "";
+    constructionState.foundationPfMatchCache = [];
+    constructionState.foundationPfConsensusMismatchCount = 0;
+    constructionState.foundationPfLabelCandidatesRef = null;
+    constructionState.foundationPfLabelCandidates = null;
+    constructionState.foundationPfLabelXYMode = 0;
+    constructionState.foundationPolylineIdLookupKey = "";
+    constructionState.foundationPolylineIdLookup = null;
+  }
+
+  function distancePointToClosedPolygon(pt, vertices) {
+    if (!pt || !Array.isArray(vertices) || vertices.length < 3) return Infinity;
+    if (typeof pointInPolygon === "function" && pointInPolygon(pt, vertices)) return 0;
+    let minD = Infinity;
+    for (let i = 0; i < vertices.length; i += 1) {
+      const a = vertices[i];
+      const b = vertices[(i + 1) % vertices.length];
+      const d = typeof pointToSegmentDistance === "function"
+        ? pointToSegmentDistance(pt, a, b)
+        : Infinity;
+      if (d < minD) minD = d;
+    }
+    return minD;
+  }
+
+  function medianSortedNumeric(values) {
+    const a = values.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
+    if (!a.length) return 0;
+    const mid = Math.floor(a.length / 2);
+    return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+  }
+
+  /** P/F 텍스트 높이 중앙값 — 큰 글자(≥) / 작은 글자(&lt;) 구분 */
+  function getPfHeightSplitThreshold() {
+    const cands = getPfTextCandidatesCached();
+    const hs = cands.map((c) => Number(c.textHeight) || 0);
+    const pos = hs.filter((h) => h > 0);
+    if (pos.length) return medianSortedNumeric(pos);
+    return medianSortedNumeric(hs);
+  }
+
+  /**
+   * P/F 후보를 높이 순으로 나눔: 아래쪽 절반 = 작은 글자 풀, 위쪽 절반 = 큰 글자 풀.
+   * 높이 0·미기록은 항상 작은 쪽(기본 매칭이 작은 글자 위주가 되도록).
+   */
+  function getPfRankHeightBandIdSets(candidatesAll) {
+    const pos = [];
+    candidatesAll.forEach((c) => {
+      const h = Number(c.textHeight) || 0;
+      if (h > 0) pos.push(c);
+    });
+    pos.sort((a, b) => {
+      const ha = Number(a.textHeight) || 0;
+      const hb = Number(b.textHeight) || 0;
+      if (ha !== hb) return ha - hb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    const n = pos.length;
+    const mid = Math.floor(n / 2);
+    const smallPosIds = new Set(pos.slice(0, mid).map((c) => c.id));
+    const largePosIds = new Set(pos.slice(mid).map((c) => c.id));
+    const smallIds = new Set();
+    const largeIds = new Set();
+    candidatesAll.forEach((c) => {
+      const h = Number(c.textHeight) || 0;
+      if (h <= 0) {
+        smallIds.add(c.id);
+      } else if (smallPosIds.has(c.id)) {
+        smallIds.add(c.id);
+      } else {
+        largeIds.add(c.id);
+      }
+    });
+    return { smallIds, largeIds };
+  }
+
+  /** 동일 표기(P1 등) 중복 삽입(폴리 안·밖) 구분용 정규화 */
+  function normalizePfLabelKey(text) {
+    return String(text ?? "")
+      .replace(/\s+/g, "")
+      .replace(/[，,]/g, "")
+      .toUpperCase();
+  }
+
+  /** 윤곽 안 P/F 삽입점만 집계(말뚝·파일번호 데이터는 사용하지 않음). */
+  function getPfInsideLabelSupportMap(poly, allCandidates) {
+    const counts = new Map();
+    if (!poly?.vertices || typeof pointInPolygon !== "function" || !Array.isArray(allCandidates)) {
+      return counts;
+    }
+    for (let i = 0; i < allCandidates.length; i += 1) {
+      const c = allCandidates[i];
+      if (!pointInPolygon({ x: c.x, y: c.y }, poly.vertices)) continue;
+      const nk = normalizePfLabelKey(c.text);
+      if (!nk) continue;
+      counts.set(nk, (counts.get(nk) || 0) + 1);
+    }
+    return counts;
+  }
+
+  /**
+   * 윤곽 안 표기별 점수 — 큰 글자(높이 밴드)는 같은 개수라도 더 반영(현장에서 큰 표기가 구역명에 가깝다고 보는 경우).
+   */
+  function getPfInsideLabelWeightedScores(poly, allCandidates, largeIds) {
+    const scores = new Map();
+    if (!poly?.vertices || typeof pointInPolygon !== "function" || !Array.isArray(allCandidates)) {
+      return scores;
+    }
+    const wLarge = 2.85;
+    const wSmall = 1;
+    for (let i = 0; i < allCandidates.length; i += 1) {
+      const c = allCandidates[i];
+      if (!pointInPolygon({ x: c.x, y: c.y }, poly.vertices)) continue;
+      const nk = normalizePfLabelKey(c.text);
+      if (!nk) continue;
+      const w = largeIds.has(c.id) ? wLarge : wSmall;
+      scores.set(nk, (scores.get(nk) || 0) + w);
+    }
+    return scores;
+  }
+
+  /** 무게중심에 가장 가까운 반대 밴드(큰↔작) 라벨 표기 — 큰 글자만 밖에 있어도 구역명 후보로 쓴다. */
+  function getPfNearestOppositeBandNkToCentroid(poly, candidatesAll, smallIds, largeIds, band) {
+    if (!poly?.vertices || !Array.isArray(candidatesAll)) return null;
+    const cen = polylineVerticesCentroid(poly.vertices);
+    if (!cen || !Number.isFinite(cen.x) || !Number.isFinite(cen.y)) return null;
+    const oppSet = band === "small" ? largeIds : smallIds;
+    const baseMax = getPfMatchMaxDistanceForPolyline(poly.vertices);
+    const pairCap = getPfLargeSmallPairDistanceCapWorld();
+    const mUnit = getPfSpatialUnitsLikelyMeters();
+    const floorD = mUnit ? 0.06 : 115;
+    const maxD = Math.min(pairCap, Math.max(floorD, baseMax * 1.05));
+    let bestNk = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < candidatesAll.length; i += 1) {
+      const c = candidatesAll[i];
+      if (!oppSet.has(c.id)) continue;
+      const nk = normalizePfLabelKey(c.text);
+      if (!nk) continue;
+      const d = Math.hypot(c.x - cen.x, c.y - cen.y);
+      if (d >= maxD || d >= bestDist) continue;
+      bestDist = d;
+      bestNk = nk;
+    }
+    return bestNk ? { nk: bestNk, dist: bestDist } : null;
+  }
+
+  /** 윤곽 안 작은 글자(높이 밴드)만 표기별 개수 */
+  function getPfInsideSmallNkCounts(poly, candidatesAll, smallIds) {
+    const counts = new Map();
+    if (!poly?.vertices || typeof pointInPolygon !== "function" || !Array.isArray(candidatesAll)) {
+      return counts;
+    }
+    for (let i = 0; i < candidatesAll.length; i += 1) {
+      const c = candidatesAll[i];
+      if (!smallIds.has(c.id)) continue;
+      if (!pointInPolygon({ x: c.x, y: c.y }, poly.vertices)) continue;
+      const nk = normalizePfLabelKey(c.text);
+      if (!nk) continue;
+      counts.set(nk, (counts.get(nk) || 0) + 1);
+    }
+    return counts;
+  }
+
+  /**
+   * 가중 윤곽 안 점수 + (가능하면) 윤곽 안 작은 글자 표기 최우선 + 같은 표기 큰 글자 보너스.
+   * 무게중심에 가까운 "다른" 큰 글자(P2E)가 더 가깝다고 P2C(작) 합의를 빼앗지 않게 한다.
+   */
+  function resolvePfConsensusNkForPoly(poly, candidatesAll, smallIds, largeIds, band) {
+    const weighted = getPfInsideLabelWeightedScores(poly, candidatesAll, largeIds);
+    const merged = new Map();
+    weighted.forEach((v, nk) => merged.set(nk, v));
+
+    const smallInside = getPfInsideSmallNkCounts(poly, candidatesAll, smallIds);
+    let smallDomNk = null;
+    let smallDomCnt = 0;
+    smallInside.forEach((cnt, nk) => {
+      if (cnt > smallDomCnt) {
+        smallDomCnt = cnt;
+        smallDomNk = nk;
+      }
+    });
+
+    if (smallDomNk && smallDomCnt >= 1) {
+      merged.set(smallDomNk, (merged.get(smallDomNk) || 0) + 5.2);
+      const cen = polylineVerticesCentroid(poly.vertices);
+      if (cen && Number.isFinite(cen.x) && Number.isFinite(cen.y)) {
+        const baseMax = getPfMatchMaxDistanceForPolyline(poly.vertices);
+        const pairCap = getPfLargeSmallPairDistanceCapWorld();
+        const mUnit = getPfSpatialUnitsLikelyMeters();
+        const minLarge = mUnit ? 0.1 : 190;
+        const maxLarge = Math.min(pairCap, Math.max(minLarge, baseMax * 1.5));
+        let bestD = Infinity;
+        for (let i = 0; i < candidatesAll.length; i += 1) {
+          const c = candidatesAll[i];
+          if (!largeIds.has(c.id)) continue;
+          if (normalizePfLabelKey(c.text) !== smallDomNk) continue;
+          const d = Math.hypot(c.x - cen.x, c.y - cen.y);
+          if (d < maxLarge && d < bestD) bestD = d;
+        }
+        if (bestD < Infinity) {
+          merged.set(smallDomNk, (merged.get(smallDomNk) || 0) + 2.4);
+        }
+      }
+    } else {
+      const anchor = getPfNearestOppositeBandNkToCentroid(poly, candidatesAll, smallIds, largeIds, band);
+      if (anchor?.nk) {
+        const bonus = Math.min(3.6, 1.9 + 520 / (120 + anchor.dist));
+        merged.set(anchor.nk, (merged.get(anchor.nk) || 0) + bonus);
+      }
+    }
+
+    if (!merged.size) return null;
+    let topNk = null;
+    let topScore = -Infinity;
+    merged.forEach((score, nk) => {
+      if (score > topScore) {
+        topScore = score;
+        topNk = nk;
+      } else if (score === topScore && topNk != null && nk.localeCompare(topNk) < 0) {
+        topNk = nk;
+      }
+    });
+    return topNk || null;
+  }
+
+  function getPolylineBBoxDiag(vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3) return { dx: 1, dy: 1, diag: 1 };
+    const xs = vertices.map((v) => Number(v.x));
+    const ys = vertices.map((v) => Number(v.y));
+    const dx = Math.max(...xs) - Math.min(...xs);
+    const dy = Math.max(...ys) - Math.min(...ys);
+    const diag = Math.hypot(dx, dy) || Math.max(dx, dy, 1);
+    return { dx, dy, diag };
+  }
+
+  /**
+   * 면적이 전체 대비 비정상적으로 큰 "사이트 외곽" 윤곽 — 그 안의 작은 글자는 로컬 기초 매칭에서 제외(허브·원거리 합의 방지).
+   */
+  function computePfGiantPolylineIdSet(polys) {
+    const out = new Set();
+    if (!Array.isArray(polys) || polys.length < 4) return out;
+    const rows = [];
+    for (let i = 0; i < polys.length; i += 1) {
+      const p = polys[i];
+      if (!p?.vertices || p.vertices.length < 3) continue;
+      rows.push({ id: String(p.id), area: polygonArea(p.vertices) });
+    }
+    if (rows.length < 4) return out;
+    rows.sort((a, b) => a.area - b.area);
+    const med = rows[Math.floor(rows.length / 2)].area;
+    const maxA = rows[rows.length - 1].area;
+    if (!(med > 0) || maxA < med * 3.2) return out;
+    const mult = 5;
+    for (let i = 0; i < rows.length; i += 1) {
+      if (rows[i].area >= med * mult) out.add(rows[i].id);
+    }
+    return out;
+  }
+
+  /** 같은 윤곽 안에서 P/F 기준점에서 비정상적으로 먼 말뚝(파일) 연결 제거 — 폴리 크기 대비 캡 + 군집 */
+  function filterPfCircleIdsByAnchorCluster(circleIds, anchorX, anchorY, vertices) {
+    if (!Array.isArray(circleIds) || !circleIds.length) return circleIds;
+    if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) return circleIds;
+    const { dx, dy, diag } = getPolylineBBoxDiag(vertices);
+    const bboxCap = Math.min(Math.max(diag * 0.52, Math.max(dx, dy) * 0.44, 125), 880);
+    const items = [];
+    for (let i = 0; i < circleIds.length; i += 1) {
+      const c = state.circleMap?.get(String(circleIds[i]));
+      if (!c) continue;
+      const d = Math.hypot(Number(c.center_x) - anchorX, Number(c.center_y) - anchorY);
+      if (Number.isFinite(d)) items.push({ id: circleIds[i], d });
+    }
+    let pool = items.filter((x) => x.d <= bboxCap);
+    if (!pool.length) pool = items.slice();
+
+    if (pool.length === 2) {
+      const a = pool[0].d <= pool[1].d ? pool[0] : pool[1];
+      const b = pool[0].d > pool[1].d ? pool[0] : pool[1];
+      if (b.d > Math.max(a.d * 5, 95) && b.d > a.d + 180) return [a.id];
+      return [a.id, b.id];
+    }
+    pool.sort((a, b) => a.d - b.d);
+    const mid = Math.floor(pool.length / 2);
+    const med = pool.length % 2 ? pool[mid].d : (pool[mid - 1].d + pool[mid].d) / 2;
+    const cap = Math.max(med * 2.35, 48);
+    const out = pool.filter((x) => x.d <= cap).map((x) => x.id);
+    if (out.length) return out;
+    pool.sort((a, b) => a.d - b.d);
+    return [pool[0].id];
+  }
+
+  /** 닫힌 윤곽마다 허용 최대 거리 — 가까운 라벨만(윤곽 크기에 비례, 절대 상한 낮음) */
+  function getPfMatchMaxDistanceForPolyline(vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3) return 120;
+    const xs = vertices.map((v) => Number(v.x));
+    const ys = vertices.map((v) => Number(v.y));
+    const dx = Math.max(...xs) - Math.min(...xs);
+    const dy = Math.max(...ys) - Math.min(...ys);
+    const side = Math.max(dx, dy, 1);
+    const diag = Math.hypot(dx, dy) || side;
+    const cap = Math.min(Math.max(side * 0.05, diag * 0.035), 220);
+    return Math.max(35, Math.min(cap, 260));
+  }
+
+  const PF_CANDIDATE_GRID_CELL = 180;
+
+  function buildPfCandidateGrid(candidates) {
+    const buckets = new Map();
+    candidates.forEach((cand, idx) => {
+      const cx = Math.floor(cand.x / PF_CANDIDATE_GRID_CELL);
+      const cy = Math.floor(cand.y / PF_CANDIDATE_GRID_CELL);
+      const key = `${cx},${cy}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(idx);
+    });
+    return buckets;
+  }
+
+  /** 폴리 바운딩 + pad 안에 들어올 수 있는 후보만 (전체 스캔 방지) */
+  function collectCandidateIndicesNearPoly(buckets, vertices, pad) {
+    const xs = vertices.map((v) => Number(v.x));
+    const ys = vertices.map((v) => Number(v.y));
+    const minX = Math.min(...xs) - pad;
+    const maxX = Math.max(...xs) + pad;
+    const minY = Math.min(...ys) - pad;
+    const maxY = Math.max(...ys) + pad;
+    const cs = PF_CANDIDATE_GRID_CELL;
+    const i0 = Math.floor(minX / cs);
+    const i1 = Math.floor(maxX / cs);
+    const j0 = Math.floor(minY / cs);
+    const j1 = Math.floor(maxY / cs);
+    const seen = new Set();
+    const out = [];
+    for (let ix = i0; ix <= i1; ix += 1) {
+      for (let iy = j0; iy <= j1; iy += 1) {
+        const list = buckets.get(`${ix},${iy}`);
+        if (!list) continue;
+        for (let k = 0; k < list.length; k += 1) {
+          const idx = list[k];
+          if (!seen.has(idx)) {
+            seen.add(idx);
+            out.push(idx);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function isPfLocationLabelText(text) {
+    const s = String(text ?? "").trim();
+    if (!s || s.length > 220) return false;
+    return /[PFpf]/.test(s);
+  }
+
+  /** 서버에서 foundation_pf_only 로 표시된 P/F 또는(구데이터) 문자열에 P/F 가 포함된 텍스트 */
+  function isPfPositionLabelTextRecord(t) {
+    if (!t || typeof t !== "object") return false;
+    if (t.foundation_pf_only === true) return true;
+    return isPfLocationLabelText(String(t.text ?? ""));
+  }
+
+  /** P/F 라벨만 수집. `state.texts` 배열 참조가 바뀔 때만 다시 스캔(대용량 도면에서 전체 텍스트 반복 순회 방지). */
+  function getPfTextCandidatesCached() {
+    const texts = Array.isArray(state.texts) ? state.texts : [];
+    if (
+      constructionState.foundationPfLabelCandidatesRef === texts
+      && Array.isArray(constructionState.foundationPfLabelCandidates)
+      && constructionState.foundationPfLabelXYMode === 1
+    ) {
+      return constructionState.foundationPfLabelCandidates;
+    }
+    const out = [];
+    for (let i = 0; i < texts.length; i += 1) {
+      const t = texts[i];
+      const { x: tx, y: ty } = getPfTextWorldXYFromTextRecord(t);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      if (!isPfPositionLabelTextRecord(t)) continue;
+      out.push({
+        id: String(t.id),
+        text: String(t.text ?? ""),
+        x: tx,
+        y: ty,
+        textHeight: Number(t.height) || Number(t.text_height) || 0,
+        pfOnly: Boolean(t.foundation_pf_only),
+      });
+    }
+    constructionState.foundationPfLabelCandidatesRef = texts;
+    constructionState.foundationPfLabelCandidates = out;
+    constructionState.foundationPfLabelXYMode = 1;
+    return out;
+  }
+
+  /** 선택한 높이 구간 안에서만 비교(거리 → 윤곽 내부 → 무게중심) */
+  function comparePfMatchCandidates(a, b) {
+    const eps = 1e-6;
+    if (Math.abs(a.distance - b.distance) > eps) return a.distance - b.distance;
+    if (a.inside !== b.inside) return a.inside ? -1 : 1;
+    return a.dCen - b.dCen;
+  }
+
+  /**
+   * 행(윤곽)마다 서로 다른 열(텍스트 id) 하나씩 — 총비용 최소 (n ≤ m).
+   * cp-algorithms assignment (min cost).
+   */
+  function hungarianMinCostRectangular(cost) {
+    const n = cost.length;
+    if (!n) return [];
+    const m = cost[0].length;
+    if (m < n) throw new Error("hungarianMinCostRectangular: need m >= n");
+    const INF = 1e18;
+    const u = new Float64Array(n + 1);
+    const v = new Float64Array(m + 1);
+    const p = new Int32Array(m + 1);
+    const way = new Int32Array(m + 1);
+    for (let i = 1; i <= n; i += 1) {
+      p[0] = i;
+      let j0 = 0;
+      const minv = new Float64Array(m + 1);
+      for (let t = 0; t <= m; t += 1) minv[t] = INF;
+      const used = new Array(m + 1).fill(false);
+      do {
+        used[j0] = true;
+        const i0 = p[j0];
+        let delta = INF;
+        let j1 = 0;
+        for (let j = 1; j <= m; j += 1) {
+          if (!used[j]) {
+            const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+            if (cur < minv[j]) {
+              minv[j] = cur;
+              way[j] = j0;
+            }
+            if (minv[j] < delta) {
+              delta = minv[j];
+              j1 = j;
+            }
+          }
+        }
+        for (let j = 0; j <= m; j += 1) {
+          if (used[j]) {
+            u[p[j]] += delta;
+            v[j] -= delta;
+          } else {
+            minv[j] -= delta;
+          }
+        }
+        j0 = j1;
+      } while (p[j0] !== 0);
+      do {
+        const j1 = way[j0];
+        p[j0] = p[j1];
+        j0 = j1;
+      } while (j0);
+    }
+    const ans = new Array(n).fill(-1);
+    for (let j = 1; j <= m; j += 1) {
+      if (p[j] !== 0) {
+        ans[p[j] - 1] = j - 1;
+      }
+    }
+    return ans;
+  }
+
+  const PF_GLOBAL_ASSIGN_INF = 1e12;
+  /** 전역 배정에서 합의 표기와 다른 후보에 가하는 비용 — 거리만으로는 F6↔F11 등이 뒤바뀌는 경우 완화 */
+  const PF_GLOBAL_CONSENSUS_MISMATCH_PENALTY = 380;
+
+  /**
+   * 윤곽별 허용 후보(geoSorted)로 비용행렬을 만들고, 전역 최소비용으로 텍스트 id 를 한 번에 배정.
+   * 서로 다른 id 를 쓰는 완전 매칭이 불가하면 null (호출부에서 그리디로 폴백).
+   */
+  function tryPfGlobalMinCostAssignment(jobs) {
+    const n = jobs.length;
+    if (n === 0) return { assignment: [], usedTextIds: new Set() };
+
+    const colIds = [];
+    const seen = new Set();
+    for (let ji = 0; ji < n; ji += 1) {
+      const list = jobs[ji].geoSorted || [];
+      for (let k = 0; k < list.length; k += 1) {
+        const id = list[k].cand.id;
+        if (!seen.has(id)) {
+          seen.add(id);
+          colIds.push(id);
+        }
+      }
+    }
+    const m = colIds.length;
+    if (m < n) return null;
+
+    const cost = [];
+    for (let i = 0; i < n; i += 1) {
+      const row = new Array(m);
+      const list = jobs[i].geoSorted || [];
+      const distById = new Map();
+      for (let k = 0; k < list.length; k += 1) {
+        const sc = list[k];
+        distById.set(sc.cand.id, Number(sc.distance));
+      }
+      const consensusNk = jobs[i].consensusNk;
+      for (let j = 0; j < m; j += 1) {
+        const d = distById.get(colIds[j]);
+        if (!Number.isFinite(d)) {
+          row[j] = PF_GLOBAL_ASSIGN_INF;
+          continue;
+        }
+        let pen = 0;
+        if (consensusNk) {
+          let nk = null;
+          for (let k = 0; k < list.length; k += 1) {
+            if (list[k].cand.id === colIds[j]) {
+              nk = normalizePfLabelKey(list[k].cand.text);
+              break;
+            }
+          }
+          if (nk && nk !== consensusNk) pen = PF_GLOBAL_CONSENSUS_MISMATCH_PENALTY;
+        }
+        row[j] = d + pen;
+      }
+      cost.push(row);
+    }
+
+    for (let i = 0; i < n; i += 1) {
+      let ok = false;
+      for (let j = 0; j < m; j += 1) {
+        if (cost[i][j] < PF_GLOBAL_ASSIGN_INF * 0.5) {
+          ok = true;
+          break;
+        }
+      }
+      if (!ok) return null;
+    }
+
+    let colForRow;
+    try {
+      colForRow = hungarianMinCostRectangular(cost);
+    } catch {
+      return null;
+    }
+
+    const assignment = new Array(n).fill(null);
+    const usedTextIds = new Set();
+    for (let i = 0; i < n; i += 1) {
+      const j = colForRow[i];
+      if (j < 0 || j >= m) return null;
+      const cst = cost[i][j];
+      if (!Number.isFinite(cst) || cst >= PF_GLOBAL_ASSIGN_INF * 0.5) return null;
+      const candId = colIds[j];
+      const list = jobs[i].geoSorted || [];
+      let sc = null;
+      for (let k = 0; k < list.length; k += 1) {
+        if (list[k].cand.id === candId) {
+          sc = list[k];
+          break;
+        }
+      }
+      if (!sc) return null;
+      assignment[i] = { sc, baselineDist: sc.distance };
+      usedTextIds.add(candId);
+    }
+    if (usedTextIds.size !== n) return null;
+    return { assignment, usedTextIds };
+  }
+
+  /** 같은 표기의 큰글자/작은글자(반대 밴드)가 이 윤곽 무게중심 근처에 있으면 짝이 맞는 후보로 본다. */
+  function hasPfOppositeBandPartnerNearPoly(nk, poly, band, candidatesAll, smallIds, largeIds) {
+    return Number.isFinite(getOppositeBandPartnerDistToCentroid(nk, poly, band, candidatesAll, smallIds, largeIds));
+  }
+
+  /** 같은 표기·반대 밴드 후보까지의 직선 거리(큰↔작 짝 밀착도, 기초 텍스트만). */
+  function getPfNearestOppositeBandPartnerDist(sc, band, candidatesAll, smallIds, largeIds) {
+    if (!sc?.cand || !Array.isArray(candidatesAll)) return Infinity;
+    const nk = normalizePfLabelKey(sc.cand.text);
+    if (!nk) return Infinity;
+    const oppSet = band === "small" ? largeIds : smallIds;
+    let minD = Infinity;
+    for (let i = 0; i < candidatesAll.length; i += 1) {
+      const c = candidatesAll[i];
+      if (!oppSet.has(c.id)) continue;
+      if (normalizePfLabelKey(c.text) !== nk) continue;
+      const d = Math.hypot(c.x - sc.cand.x, c.y - sc.cand.y);
+      if (d < minD) minD = d;
+    }
+    const cap = getPfLargeSmallPairDistanceCapWorld();
+    return minD <= cap ? minD : Infinity;
+  }
+
+  /** 반대 밴드·같은 표기 후보가 윤곽 무게중심까지의 최소 거리(없으면 Infinity). */
+  function getOppositeBandPartnerDistToCentroid(nk, poly, band, candidatesAll, smallIds, largeIds) {
+    if (!nk || !poly?.vertices || !Array.isArray(candidatesAll)) return Infinity;
+    const oppSet = band === "small" ? largeIds : smallIds;
+    const cen = polylineVerticesCentroid(poly.vertices);
+    if (!cen || !Number.isFinite(cen.x) || !Number.isFinite(cen.y)) return Infinity;
+    const maxPair = getPfLargeSmallPairDistanceCapWorld();
+    let minD = Infinity;
+    for (let i = 0; i < candidatesAll.length; i += 1) {
+      const c = candidatesAll[i];
+      if (!oppSet.has(c.id)) continue;
+      if (normalizePfLabelKey(c.text) !== nk) continue;
+      const d = Math.hypot(c.x - cen.x, c.y - cen.y);
+      if (d < minD) minD = d;
+    }
+    return minD <= maxPair ? minD : Infinity;
+  }
+
+  /**
+   * 후보 정렬: 큰 글자 모드면 윤곽 안 작은 글과 같은 표기인 큰 글을 거리보다 우선.
+   * 그다음 윤곽까지 기하 거리 → 합의 표기·윤곽 내 다수·큰↔작 짝.
+   */
+  function sortPfCandidatesGeoFirst(
+    ranked,
+    pfInsideSupport,
+    consensusNk,
+    poly,
+    band,
+    candidatesAll,
+    smallIds,
+    largeIds,
+    insideSmallDominantNk,
+  ) {
+    return ranked.slice().sort((a, b) => {
+      if (band === "large" && insideSmallDominantNk) {
+        const na = normalizePfLabelKey(a.cand.text);
+        const nb = normalizePfLabelKey(b.cand.text);
+        const ma = na === insideSmallDominantNk ? 1 : 0;
+        const mb = nb === insideSmallDominantNk ? 1 : 0;
+        if (ma !== mb) return mb - ma;
+      }
+      const da = Number(a.distance);
+      const db = Number(b.distance);
+      if (Math.abs(da - db) > 1e-3) return comparePfMatchCandidates(a, b);
+      const na = normalizePfLabelKey(a.cand.text);
+      const nb = normalizePfLabelKey(b.cand.text);
+      const ma = consensusNk && na === consensusNk ? 1 : 0;
+      const mb = consensusNk && nb === consensusNk ? 1 : 0;
+      if (ma !== mb) return mb - ma;
+      const sa = pfInsideSupport.get(na) || 0;
+      const sb = pfInsideSupport.get(nb) || 0;
+      if (sa !== sb) return sb - sa;
+      const pa = getPfNearestOppositeBandPartnerDist(a, band, candidatesAll, smallIds, largeIds);
+      const pb = getPfNearestOppositeBandPartnerDist(b, band, candidatesAll, smallIds, largeIds);
+      if (Number.isFinite(pa) && Number.isFinite(pb) && Math.abs(pa - pb) > 1e-4) {
+        return pa - pb;
+      }
+      const ha = hasPfOppositeBandPartnerNearPoly(na, poly, band, candidatesAll, smallIds, largeIds) ? 1 : 0;
+      const hb = hasPfOppositeBandPartnerNearPoly(nb, poly, band, candidatesAll, smallIds, largeIds) ? 1 : 0;
+      if (ha !== hb) return hb - ha;
+      const dca = getOppositeBandPartnerDistToCentroid(na, poly, band, candidatesAll, smallIds, largeIds);
+      const dcb = getOppositeBandPartnerDistToCentroid(nb, poly, band, candidatesAll, smallIds, largeIds);
+      if (Number.isFinite(dca) && Number.isFinite(dcb) && ha && hb && Math.abs(dca - dcb) > 1e-4) {
+        return dca - dcb;
+      }
+      return comparePfMatchCandidates(a, b);
+    });
+  }
+
+  /** 1차 할당: geo 순에서 아직 안 쓴 text id */
+  function pickFirstUnusedPfGeoSorted(geoSorted, usedTextIds) {
+    for (let k = 0; k < geoSorted.length; k += 1) {
+      const sc = geoSorted[k];
+      if (!usedTextIds.has(sc.cand.id)) return sc;
+    }
+    return null;
+  }
+
+  /** 인접 윤곽끼리 배정을 바꿔 총 거리가 줄면 교환(P2C↔P2E 뺏기 완화) */
+  function tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId) {
+    function ownerAllows(candId, poly) {
+      const oid = ownerPolylineIdByPfCandId.get(candId);
+      return oid == null || oid === String(poly.id);
+    }
+    let changed = true;
+    let guard = 0;
+    while (changed && guard < 16) {
+      changed = false;
+      guard += 1;
+      for (let i = 0; i < jobs.length; i += 1) {
+        for (let j = i + 1; j < jobs.length; j += 1) {
+          const ai = assignment[i];
+          const aj = assignment[j];
+          if (!ai?.sc || !aj?.sc) continue;
+          const pi = jobs[i].poly;
+          const pj = jobs[j].poly;
+          if (!ownerAllows(aj.sc.cand.id, pi) || !ownerAllows(ai.sc.cand.id, pj)) continue;
+          const sii = scorePfCandidateForPoly(aj.sc.cand, pi.vertices);
+          const sjj = scorePfCandidateForPoly(ai.sc.cand, pj.vertices);
+          const s0i = scorePfCandidateForPoly(ai.sc.cand, pi.vertices);
+          const s0j = scorePfCandidateForPoly(aj.sc.cand, pj.vertices);
+          if (sii.distance + sjj.distance < s0i.distance + s0j.distance - 0.25) {
+            const t = assignment[i];
+            assignment[i] = assignment[j];
+            assignment[j] = t;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 합의 표기로 살짝 멀어져도 되나, 큰↔작 짝이 너무 나빠지거나 다른 윤곽 배정이 크게 악화되면 스왑/승급 취소.
+   */
+  function refinePfPolylineAssignments(
+    jobs,
+    assignment,
+    usedTextIds,
+    ownerPolylineIdByPfCandId,
+    band,
+    candidatesAll,
+    smallIds,
+    largeIds,
+  ) {
+    const SAME_NK_SLACK = 88;
+    const PAIR_REGRESS_LIMIT = 360;
+    const SWAP_DIST_REGRESS = 118;
+
+    function ownerAllows(candId, poly) {
+      const oid = ownerPolylineIdByPfCandId.get(candId);
+      return oid == null || oid === String(poly.id);
+    }
+
+    function pairSc(sc) {
+      return getPfNearestOppositeBandPartnerDist(sc, band, candidatesAll, smallIds, largeIds);
+    }
+
+    let changed = true;
+    let guard = 0;
+    while (changed && guard < 10) {
+      changed = false;
+      guard += 1;
+      for (let i = 0; i < jobs.length; i += 1) {
+        const job = jobs[i];
+        const cur = assignment[i];
+        if (!cur || !job.consensusNk) continue;
+        const nk = normalizePfLabelKey(cur.sc.cand.text);
+        if (nk === job.consensusNk) continue;
+
+        const pool = job.fullSorted || job.geoSorted;
+        const alt = pool.find((sc) => {
+          if (normalizePfLabelKey(sc.cand.text) !== job.consensusNk) return false;
+          if (!ownerAllows(sc.cand.id, job.poly)) return false;
+          return sc.distance <= cur.sc.distance + SAME_NK_SLACK;
+        });
+        if (!alt) continue;
+
+        const pCur = pairSc(cur.sc);
+        const pAlt = pairSc(alt);
+        if (Number.isFinite(pCur) && Number.isFinite(pAlt) && pAlt > pCur + PAIR_REGRESS_LIMIT) {
+          continue;
+        }
+
+        const holderIdx = assignment.findIndex((a, j) => a && j !== i && a.sc.cand.id === alt.cand.id);
+
+        if (holderIdx < 0) {
+          usedTextIds.delete(cur.sc.cand.id);
+          usedTextIds.add(alt.cand.id);
+          assignment[i] = { sc: alt, baselineDist: cur.baselineDist };
+          changed = true;
+          continue;
+        }
+
+        const jobO = jobs[holderIdx];
+        const curO = assignment[holderIdx];
+        if (!curO) continue;
+
+        const candMine = cur.sc.cand;
+        const candO = alt.cand;
+
+        if (!ownerAllows(candMine.id, jobO.poly)) continue;
+        if (!ownerAllows(candO.id, job.poly)) continue;
+
+        const newI = scorePfCandidateForPoly(candO, job.poly.vertices);
+        const newO = scorePfCandidateForPoly(candMine, jobO.poly.vertices);
+        if (newI.distance > job.maxD || newO.distance > jobO.maxD) continue;
+        if (newI.distance > cur.baselineDist + SWAP_DIST_REGRESS) continue;
+        if (newO.distance > curO.baselineDist + SWAP_DIST_REGRESS) continue;
+
+        const pOldI = pairSc(cur.sc);
+        const pOldO = pairSc(curO.sc);
+        const pNewI = pairSc(newI);
+        const pNewO = pairSc(newO);
+        if (
+          Number.isFinite(pOldI)
+          && Number.isFinite(pOldO)
+          && Number.isFinite(pNewI)
+          && Number.isFinite(pNewO)
+          && pNewI + pNewO > pOldI + pOldO + PAIR_REGRESS_LIMIT
+        ) {
+          continue;
+        }
+
+        assignment[i] = { sc: newI, baselineDist: cur.baselineDist };
+        assignment[holderIdx] = { sc: newO, baselineDist: curO.baselineDist };
+        changed = true;
+      }
+    }
+  }
+
+  function scorePfCandidateForPoly(cand, vertices) {
+    const d = distancePointToClosedPolygon({ x: cand.x, y: cand.y }, vertices);
+    const inside =
+      typeof pointInPolygon === "function" && pointInPolygon({ x: cand.x, y: cand.y }, vertices);
+    const cen = polylineVerticesCentroid(vertices);
+    const dCen =
+      cen && Number.isFinite(cen.x) && Number.isFinite(cen.y)
+        ? Math.hypot(cand.x - cen.x, cand.y - cen.y)
+        : Infinity;
+    return { cand, distance: d, inside: !!inside, dCen };
+  }
+
+  /** 닫힌 폴리라인마다 가장 가까운 P/F 텍스트를 붙입니다. 면적 작은 윤곽(안쪽)부터 확정해 중첩 시 바깥 윤곽이 안쪽 라벨을 가져가지 않게 합니다. */
+  function getPfPolylineMatchGroups() {
+    const polys = getBackgroundPolylinesForClick();
+    const band = constructionState.pfHeightBandMode === "large" ? "large" : "small";
+    const rawPfCandidates = getPfTextCandidatesCached();
+    const { smallIds, largeIds } = getPfRankHeightBandIdSets(rawPfCandidates);
+    const bandIdSet = band === "large" ? largeIds : smallIds;
+    const pfMetaSig = rawPfCandidates
+      .slice()
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      .map(
+        (c) =>
+          `${c.id}:${String(c.text)}:${c.pfOnly ? 1 : 0}:${(Number(c.textHeight) || 0).toFixed(4)}@${(Number(c.x) || 0).toFixed(2)},${(Number(c.y) || 0).toFixed(2)}`,
+      )
+      .join("|");
+    const polyIdsSig = polys
+      .map((p) => String(p.id))
+      .sort()
+      .join("\x1e");
+    const cacheKey = `pfpl27|${constructionState.foundationBackgroundPolylineCacheKey || ""}|${polys.length}|${polyIdsSig}|${band}|${pfMetaSig}`;
+    if (constructionState.foundationPfMatchCacheKey === cacheKey) {
+      return constructionState.foundationPfMatchCache;
+    }
+    const polysSorted = polys
+      .filter((p) => p?.vertices?.length >= 3)
+      .map((p) => ({ poly: p, area: polygonArea(p.vertices) }))
+      .sort((a, b) => {
+        const EPS = 1e-3;
+        if (Math.abs(a.area - b.area) > EPS) return a.area - b.area;
+        const ca = polylineVerticesCentroid(a.poly.vertices);
+        const cb = polylineVerticesCentroid(b.poly.vertices);
+        const pa = ca && Number.isFinite(ca.x) ? ca.x + ca.y : 0;
+        const pb = cb && Number.isFinite(cb.x) ? cb.x + cb.y : 0;
+        if (Math.abs(pa - pb) > 1e-4) return pa - pb;
+        return String(a.poly.id).localeCompare(String(b.poly.id));
+      })
+      .map((row) => row.poly);
+    const giantPolylineIdSet = computePfGiantPolylineIdSet(polysSorted);
+    /** 삽입점이 속한 면적 최소 닫힌 윤곽(가장 안쪽 영역) — 인접·바깥 윤곽이 안쪽 라벨을 가로채지 않게 함 */
+    const ownerPolylineIdByPfCandId = new Map();
+    if (typeof pointInPolygon === "function") {
+      for (let ci = 0; ci < rawPfCandidates.length; ci += 1) {
+        const c = rawPfCandidates[ci];
+        let ownerId = null;
+        for (let pi = 0; pi < polysSorted.length; pi += 1) {
+          const p = polysSorted[pi];
+          if (pointInPolygon({ x: c.x, y: c.y }, p.vertices)) {
+            ownerId = String(p.id);
+            break;
+          }
+        }
+        ownerPolylineIdByPfCandId.set(c.id, ownerId);
+      }
+    }
+    const candidatesAll = rawPfCandidates.filter((c) => {
+      if (!smallIds.has(c.id)) return true;
+      const oid = ownerPolylineIdByPfCandId.get(c.id);
+      if (oid != null && giantPolylineIdSet.has(oid)) return false;
+      return true;
+    });
+    const candidates = candidatesAll.filter((c) => bandIdSet.has(c.id));
+    const candGrid = buildPfCandidateGrid(candidates);
+    const jobs = [];
+    polysSorted.forEach((poly) => {
+      const baseMax = getPfMatchMaxDistanceForPolyline(poly.vertices);
+      const maxD =
+        band === "small"
+          ? Math.max(30, Math.min(baseMax * 0.68, 165))
+          : Math.min(baseMax, 215);
+      const nearIdx = collectCandidateIndicesNearPoly(candGrid, poly.vertices, maxD);
+      const byNorm = new Map();
+      for (let ni = 0; ni < nearIdx.length; ni += 1) {
+        const cand = candidates[nearIdx[ni]];
+        if (!cand) continue;
+        const ownerId = ownerPolylineIdByPfCandId.get(cand.id);
+        if (ownerId != null && ownerId !== String(poly.id)) continue;
+        const sc = scorePfCandidateForPoly(cand, poly.vertices);
+        if (sc.distance > maxD) continue;
+        const nk = normalizePfLabelKey(cand.text);
+        const prev = byNorm.get(nk);
+        if (!prev || comparePfMatchCandidates(sc, prev) < 0) {
+          byNorm.set(nk, sc);
+        }
+      }
+      const rawRanked = Array.from(byNorm.values());
+      if (!rawRanked.length) return;
+
+      const pfInsideSupport = getPfInsideLabelSupportMap(poly, candidatesAll);
+      const consensusNk = resolvePfConsensusNkForPoly(poly, candidatesAll, smallIds, largeIds, band);
+      const smallNkMap = getPfInsideSmallNkCounts(poly, candidatesAll, smallIds);
+      let insideSmallDominantNk = null;
+      let smBest = 0;
+      smallNkMap.forEach((cnt, nk) => {
+        if (cnt > smBest) {
+          smBest = cnt;
+          insideSmallDominantNk = nk;
+        }
+      });
+      const fullSorted = sortPfCandidatesGeoFirst(
+        rawRanked,
+        pfInsideSupport,
+        consensusNk,
+        poly,
+        band,
+        candidatesAll,
+        smallIds,
+        largeIds,
+        insideSmallDominantNk,
+      );
+      const insideRanked = rawRanked.filter((sc) => sc.inside);
+      const geoSorted =
+        insideRanked.length > 0
+          ? sortPfCandidatesGeoFirst(
+              insideRanked,
+              pfInsideSupport,
+              consensusNk,
+              poly,
+              band,
+              candidatesAll,
+              smallIds,
+              largeIds,
+              insideSmallDominantNk,
+            )
+          : fullSorted;
+      jobs.push({ poly, maxD, geoSorted, fullSorted, consensusNk, pfInsideSupport });
+    });
+
+    const usedTextIds = new Set();
+    const assignment = new Array(jobs.length).fill(null);
+    const global = tryPfGlobalMinCostAssignment(jobs);
+    if (global) {
+      for (let ji = 0; ji < jobs.length; ji += 1) {
+        assignment[ji] = global.assignment[ji];
+      }
+      global.usedTextIds.forEach((id) => usedTextIds.add(id));
+    } else {
+      jobs.forEach((job, ji) => {
+        const best = pickFirstUnusedPfGeoSorted(job.geoSorted, usedTextIds);
+        if (!best) return;
+        usedTextIds.add(best.cand.id);
+        assignment[ji] = { sc: best, baselineDist: best.distance };
+      });
+    }
+
+    refinePfPolylineAssignments(
+      jobs,
+      assignment,
+      usedTextIds,
+      ownerPolylineIdByPfCandId,
+      band,
+      candidatesAll,
+      smallIds,
+      largeIds,
+    );
+
+    tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId);
+
+    const rows = [];
+    let consensusMismatchCount = 0;
+    jobs.forEach((job, ji) => {
+      const slot = assignment[ji];
+      if (!slot) return;
+      const best = slot.sc;
+      if (job.consensusNk && normalizePfLabelKey(best.cand.text) !== job.consensusNk) {
+        consensusMismatchCount += 1;
+      }
+      const poly = job.poly;
+      const polylineId = String(poly.id);
+      let inside = getEffectiveCircleIdsForPolylineToggle(poly);
+      if (inside.length > 1) {
+        inside = filterPfCircleIdsByAnchorCluster(inside, best.cand.x, best.cand.y, poly.vertices);
+      }
+      const labelTrim = String(best.cand.text ?? "").trim();
+      const cen0 = polylineVerticesCentroid(poly.vertices);
+      rows.push({
+        pfKey: `pfpoly:${polylineId}`,
+        polylineId,
+        textId: best.cand.id,
+        label: best.cand.text,
+        clusterLabel: labelTrim || "P/F",
+        polylineIds: [polylineId],
+        circleIds: inside,
+        minDistance: best.distance,
+        area: polygonArea(poly.vertices),
+        outlineCentroidX: cen0 && Number.isFinite(cen0.x) ? cen0.x : null,
+        outlineCentroidY: cen0 && Number.isFinite(cen0.y) ? cen0.y : null,
+      });
+    });
+    rows.sort((a, b) => {
+      const c = a.clusterLabel.localeCompare(b.clusterLabel, "ko");
+      if (c !== 0) return c;
+      if (b.area !== a.area) return b.area - a.area;
+      return a.polylineId.localeCompare(b.polylineId);
+    });
+    constructionState.foundationPfMatchCacheKey = cacheKey;
+    constructionState.foundationPfMatchCache = rows;
+    constructionState.foundationPfConsensusMismatchCount = consensusMismatchCount;
+    return rows;
+  }
+
+  /** 같은 P/F 표기(clusterLabel)별로 윤곽·파일 id 를 합친 목록(버튼 1개 = 전체 선택) */
+  function getPfAggregatesByClusterLabel() {
+    const rows = getPfPolylineMatchGroups();
+    const byLabel = new Map();
+    rows.forEach((row) => {
+      const label = row.clusterLabel;
+      if (!byLabel.has(label)) {
+        byLabel.set(label, {
+          clusterLabel: label,
+          polylineIdSet: new Set(),
+          circleIdSet: new Set(),
+          textIdSet: new Set(),
+          minDistance: Infinity,
+        });
+      }
+      const agg = byLabel.get(label);
+      row.polylineIds.forEach((id) => agg.polylineIdSet.add(id));
+      row.circleIds.forEach((id) => agg.circleIdSet.add(id));
+      agg.textIdSet.add(row.textId);
+      if (Number.isFinite(row.minDistance) && row.minDistance < agg.minDistance) {
+        agg.minDistance = row.minDistance;
+      }
+    });
+    return Array.from(byLabel.values())
+      .filter((a) => a.circleIdSet.size > 0)
+      .map((a) => ({
+        clusterLabel: a.clusterLabel,
+        textIds: Array.from(a.textIdSet),
+        polylineIds: Array.from(a.polylineIdSet),
+        circleIds: Array.from(a.circleIdSet),
+        minDistance: Number.isFinite(a.minDistance) ? a.minDistance : 0,
+        outlineCount: a.polylineIdSet.size,
+        pfKey: `pfgrp:${encodeURIComponent(a.clusterLabel)}`,
+      }))
+      .sort((x, y) => x.clusterLabel.localeCompare(y.clusterLabel, "ko"));
+  }
+
+  function cloneSet(iter) {
+    return new Set(Array.from(iter || []));
+  }
+
+  function snapshotFoundationStateForHistory() {
+    return {
+      thickness: { ...constructionState.foundationThicknessByPileId },
+      pit: { ...constructionState.foundationPitOffsetByPileId },
+      drillingPile: { ...constructionState.drillingStartByPileId },
+      foundationTopPile: { ...constructionState.foundationTopByPileId },
+      selectedCircles: cloneSet(constructionState.foundationSelectedCircleIds),
+      selectedPolylines: cloneSet(constructionState.foundationSelectedPolylineIds),
+      subgroupKeys: cloneSet(constructionState.foundationSelectedSubgroupKeys),
+      pfKeys: cloneSet(constructionState.foundationSelectedPfKeys),
+      suppressedCircles: cloneSet(constructionState.foundationSuppressedCircleIds),
+      suppressedPolylines: cloneSet(constructionState.foundationSuppressedPolylineIds),
+      buildings: (state.buildings || []).map((b) => ({
+        drill: b?.drilling_start_elevation,
+        top: b?.foundation_top_elevation,
+      })),
+    };
+  }
+
+  function applyFoundationHistorySnapshot(snap) {
+    if (!snap) return;
+    constructionState.foundationThicknessByPileId = { ...snap.thickness };
+    state.foundationThicknessByPileId = { ...snap.thickness };
+    constructionState.foundationPitOffsetByPileId = { ...snap.pit };
+    state.foundationPitOffsetByPileId = { ...snap.pit };
+    constructionState.drillingStartByPileId = { ...(snap.drillingPile || {}) };
+    state.drillingStartByPileId = { ...(snap.drillingPile || {}) };
+    constructionState.foundationTopByPileId = { ...(snap.foundationTopPile || {}) };
+    state.foundationTopByPileId = { ...(snap.foundationTopPile || {}) };
+    constructionState.foundationSelectedCircleIds = cloneSet(snap.selectedCircles);
+    constructionState.foundationSelectedPolylineIds = cloneSet(snap.selectedPolylines);
+    constructionState.foundationSelectedSubgroupKeys = cloneSet(snap.subgroupKeys);
+    constructionState.foundationSelectedPfKeys = cloneSet(snap.pfKeys);
+    constructionState.foundationSuppressedCircleIds = cloneSet(snap.suppressedCircles);
+    constructionState.foundationSuppressedPolylineIds = cloneSet(snap.suppressedPolylines);
+    const buildings = state.buildings || [];
+    (snap.buildings || []).forEach((row, i) => {
+      const b = buildings[i];
+      if (!b || !row) return;
+      if (row.drill == null || row.drill === "") delete b.drilling_start_elevation;
+      else b.drilling_start_elevation = Number(row.drill);
+      if (row.top == null || row.top === "") delete b.foundation_top_elevation;
+      else b.foundation_top_elevation = Number(row.top);
+    });
+    if (typeof renderPendingNameEditor === "function") {
+      renderPendingNameEditor();
+    }
+    rerenderSettlementTableFromState();
+    invalidateFoundationGroupCache();
+    refreshFoundationPanel();
+    requestRedraw();
+  }
+
+  function beforeFoundationMutation() {
+    const snap = snapshotFoundationStateForHistory();
+    constructionState.foundationHistoryPast.push(snap);
+    if (constructionState.foundationHistoryPast.length > 60) {
+      constructionState.foundationHistoryPast.shift();
+    }
+    constructionState.foundationHistoryFuture.length = 0;
+  }
+
+  function undoFoundationStep() {
+    const past = constructionState.foundationHistoryPast;
+    if (!past.length) return;
+    constructionState.foundationHistoryFuture.push(snapshotFoundationStateForHistory());
+    const prev = past.pop();
+    applyFoundationHistorySnapshot(prev);
+    setSyncStatus("실행 취소했습니다.");
+  }
+
+  function redoFoundationStep() {
+    const future = constructionState.foundationHistoryFuture;
+    if (!future.length) return;
+    constructionState.foundationHistoryPast.push(snapshotFoundationStateForHistory());
+    const next = future.pop();
+    applyFoundationHistorySnapshot(next);
+    setSyncStatus("다시 실행했습니다.");
+  }
+
+  /** 캔버스 라벨: 항목별 색·줄 분리용 */
+  function buildFoundationCanvasLabelParts(circle) {
+    const showT = constructionState.foundationOverlayShowThickness !== false;
+    const showD = Boolean(constructionState.foundationOverlayShowDrill);
+    const showF = Boolean(constructionState.foundationOverlayShowFoundationTop);
+    if (!showT && !showD && !showF) return [];
+    const mm = getFoundationThicknessMm(circle.id);
+    const drill = getDrillingElevationMForCircle(circle.id);
+    const top = getFoundationTopElevationMForCircle(circle.id);
+    const pitOffsetM = getFoundationPitOffsetM(circle.id);
+    const allThree = showT && showD && showF;
+    const parts = [];
+    if (showT) {
+      if (Number.isFinite(mm)) {
+        let chunk = String(Math.round(mm));
+        if (Number.isFinite(pitOffsetM) && pitOffsetM > 0) {
+          chunk += ` (${formatMetric(pitOffsetM, 3)}m)`;
+        }
+        parts.push({ text: chunk, fillStyle: getFoundationThicknessColor(mm) });
+      } else if (allThree) {
+        parts.push({ text: "—", fillStyle: "#64748b" });
+      }
+    }
+    if (showD) {
+      if (Number.isFinite(drill)) {
+        parts.push({ text: formatMetric(drill, 3), fillStyle: "#0369a1" });
+      } else if (allThree) {
+        parts.push({ text: "—", fillStyle: "#64748b" });
+      }
+    }
+    if (showF) {
+      if (Number.isFinite(top)) {
+        parts.push({ text: formatMetric(top, 3), fillStyle: "#15803d" });
+      } else if (allThree) {
+        parts.push({ text: "—", fillStyle: "#64748b" });
+      }
+    }
+    return parts;
+  }
+
+  function buildFoundationCanvasLabel(circle) {
+    const parts = buildFoundationCanvasLabelParts(circle);
+    return parts.length ? parts.map((p) => p.text).join(", ") : "";
+  }
+
+  function drawFoundationCanvasLabelStack(canvasX, canvasY, parts) {
+    if (!parts.length) return;
+    ctx.save();
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    const lineHeight = 12;
+    const bottomY = canvasY - 7;
+    parts.forEach((part, i) => {
+      ctx.fillStyle = part.fillStyle;
+      ctx.fillText(part.text, canvasX, bottomY - (parts.length - 1 - i) * lineHeight);
+    });
+    ctx.restore();
   }
 
   function scheduleFoundationAreaRefresh() {
@@ -3199,6 +5028,12 @@ function inferOpenRectangleVertices(vertices) {
     return `${Math.round(value)}`;
   }
 
+  /** 면적 기준 UI: 슬라이더와 동일한 0~FOUNDATION_AREA_SLIDER_MAX 눈금 */
+  function formatFoundationAreaRangePos(pos) {
+    const n = Math.round(Number(pos) || 0);
+    return String(Math.max(0, Math.min(FOUNDATION_AREA_SLIDER_MAX, n)));
+  }
+
   function renderFoundationAreaBandInfo() {
     if (!constructionFoundationAreaValues) return;
     const rows = getSelectablePolylines().map((polyline) => ({
@@ -3211,10 +5046,13 @@ function inferOpenRectangleVertices(vertices) {
     }
     const baseMin = 1;
     constructionState.foundationAreaBoundMin = Math.min(baseMin, stats.minArea);
-    const boundedMax = Math.min(stats.maxArea, FOUNDATION_AREA_MAX_LIMIT);
+    const boundedMax = Math.min(
+      stats.maxArea,
+      FOUNDATION_AREA_ABS_MAX,
+    );
     constructionState.foundationAreaBoundMax = boundedMax;
-    const defaultMin = baseMin;
-    const defaultMax = 50;
+    const defaultMin = Math.max(baseMin, stats.minArea);
+    const defaultMax = boundedMax;
     if (!Number.isFinite(constructionState.foundationAreaMinValue)) {
       constructionState.foundationAreaMinValue = defaultMin;
     }
@@ -3236,28 +5074,462 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationAreaMaxPos = areaToSliderPos(constructionState.foundationAreaMaxValue);
     const posGap = getFoundationAreaMinGapPos();
     if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < posGap) {
-      constructionState.foundationAreaMaxPos = Math.min(1000, constructionState.foundationAreaMinPos + posGap);
+      constructionState.foundationAreaMaxPos = Math.min(FOUNDATION_AREA_SLIDER_MAX, constructionState.foundationAreaMinPos + posGap);
       if (constructionState.foundationAreaMaxPos - constructionState.foundationAreaMinPos < posGap) {
         constructionState.foundationAreaMinPos = Math.max(0, constructionState.foundationAreaMaxPos - posGap);
       }
       syncFoundationAreaValuesFromPos();
     }
+    const modePos = areaToSliderPos(stats.mode);
     constructionFoundationAreaValues.textContent =
-      `중심 ${formatAreaValue(stats.mode)} · 최소 ${formatAreaValue(constructionState.foundationAreaMinValue)} · 최대 ${formatAreaValue(constructionState.foundationAreaMaxValue)}`;
+      `중심 ${formatFoundationAreaRangePos(modePos)} · 최소 ${formatFoundationAreaRangePos(constructionState.foundationAreaMinPos)} · 최대 ${formatFoundationAreaRangePos(constructionState.foundationAreaMaxPos)}`;
+  }
+
+  function normalizePresetProjectKey(p) {
+    return String(p ?? "").trim().toLowerCase();
+  }
+
+  function getPresetCurrentProjectKey() {
+    const p = state.loadedWorkMeta?.project
+      || (typeof getActiveProjectName === "function" ? getActiveProjectName() : null)
+      || state.loadedProjectName
+      || "";
+    return String(p).trim();
+  }
+
+  function savedWorkTsForPreset(item) {
+    const d = item?.timestamp ? new Date(item.timestamp).getTime() : 0;
+    return Number.isFinite(d) ? d : 0;
+  }
+
+  function filterWorksForPresetDropdown(list) {
+    const cur = normalizePresetProjectKey(getPresetCurrentProjectKey());
+    let rows = (list || []).filter((it) => it && it.id);
+    if (cur) {
+      rows = rows.filter((it) => normalizePresetProjectKey(it.project) === cur);
+    }
+    const selfId = state.loadedWorkId;
+    if (selfId) {
+      rows = rows.filter((it) => it.id !== selfId);
+    }
+    return rows.sort((a, b) => savedWorkTsForPreset(b) - savedWorkTsForPreset(a));
+  }
+
+  async function fetchSavedWorksListForPreset() {
+    const response = await fetch(`${API_BASE_URL}/api/saved-works`);
+    if (!response.ok) return [];
+    const list = await response.json();
+    return Array.isArray(list) ? list : [];
+  }
+
+  function getSourceTypeLabelForPreset(st) {
+    const raw = String(st || "").trim().toLowerCase();
+    if (raw === "contractor_original" || raw === "원도급") return "원도급";
+    if (raw === "design" || raw === "설계") return "설계";
+    return raw || "—";
+  }
+
+  async function fetchSavedWorkPayloadById(workId) {
+    if (!workId) return null;
+    const response = await fetch(`${API_BASE_URL}/api/saved-works/${encodeURIComponent(workId)}`);
+    if (typeof pilexyParseFetchJson === "function") {
+      return pilexyParseFetchJson(response);
+    }
+    if (!response.ok) throw new Error(response.statusText || "저장 작업을 불러오지 못했습니다.");
+    return response.json();
+  }
+
+  /** 다른 저장 버전 JSON → 현재 말뚝 id에 맞는 항목만 병합 */
+  function mergePerPileFoundationMapsFromPayload(payload) {
+    const circleIds = new Set((state.circles || []).map((c) => c?.id).filter(Boolean));
+    let nThick = 0;
+    let nDrill = 0;
+    let nTop = 0;
+    let nPit = 0;
+    const thickSrc = payload?.foundationThicknessByPileId;
+    if (thickSrc && typeof thickSrc === "object") {
+      Object.entries(thickSrc).forEach(([id, v]) => {
+        if (!circleIds.has(id)) return;
+        if (Number.isFinite(Number(v)) && Number(v) >= 0) {
+          constructionState.foundationThicknessByPileId[id] = Math.round(Number(v));
+          nThick += 1;
+        }
+      });
+    }
+    const drillSrc = payload?.drillingStartByPileId;
+    if (drillSrc && typeof drillSrc === "object") {
+      Object.entries(drillSrc).forEach(([id, v]) => {
+        if (!circleIds.has(id)) return;
+        if (Number.isFinite(Number(v))) {
+          constructionState.drillingStartByPileId[id] = Number(v);
+          nDrill += 1;
+        }
+      });
+    }
+    const topSrc = payload?.foundationTopByPileId;
+    if (topSrc && typeof topSrc === "object") {
+      Object.entries(topSrc).forEach(([id, v]) => {
+        if (!circleIds.has(id)) return;
+        if (Number.isFinite(Number(v))) {
+          constructionState.foundationTopByPileId[id] = Number(v);
+          nTop += 1;
+        }
+      });
+    }
+    const pitSrc = payload?.foundationPitOffsetByPileId;
+    if (pitSrc && typeof pitSrc === "object") {
+      Object.entries(pitSrc).forEach(([id, v]) => {
+        if (!circleIds.has(id)) return;
+        if (Number.isFinite(Number(v)) && Number(v) >= 0) {
+          constructionState.foundationPitOffsetByPileId[id] = Number(v);
+          nPit += 1;
+        }
+      });
+    }
+    state.foundationThicknessByPileId = { ...constructionState.foundationThicknessByPileId };
+    state.drillingStartByPileId = { ...constructionState.drillingStartByPileId };
+    state.foundationTopByPileId = { ...constructionState.foundationTopByPileId };
+    state.foundationPitOffsetByPileId = { ...constructionState.foundationPitOffsetByPileId };
+    return { nThick, nDrill, nTop, nPit };
+  }
+
+  /** 저장 버전의 buildings → 현재 state.buildings 에 이름이 같은 윤곽에 천공·기초상 반영 */
+  function mergeBuildingElevationsFromPayload(payload) {
+    const src = Array.isArray(payload?.buildings) ? payload.buildings : [];
+    const targets = state.buildings || [];
+    let n = 0;
+    src.forEach((sb) => {
+      const name = String(sb?.name || "").trim();
+      if (!name) return;
+      const norm = normConstructionLoc(name);
+      const t = targets.find((b) => normConstructionLoc(b?.name) === norm);
+      if (!t) return;
+      const d = sb?.drilling_start_elevation;
+      const f = sb?.foundation_top_elevation;
+      if (d == null || d === "") {
+        delete t.drilling_start_elevation;
+      } else if (Number.isFinite(Number(d))) {
+        t.drilling_start_elevation = Number(d);
+      }
+      if (f == null || f === "") {
+        delete t.foundation_top_elevation;
+      } else if (Number.isFinite(Number(f))) {
+        t.foundation_top_elevation = Number(f);
+      }
+      n += 1;
+    });
+    return n;
+  }
+
+  async function refreshFoundationPresetWorkSelect() {
+    if (!constructionFoundationPresetWork) return;
+    const prev = constructionFoundationPresetWork.value;
+    try {
+      const list = await fetchSavedWorksListForPreset();
+      const rows = filterWorksForPresetDropdown(list);
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "저장 작업(버전) 선택";
+      constructionFoundationPresetWork.replaceChildren(opt0);
+      rows.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = String(item.id);
+        const title = String(item.title || "").trim() || "(제목 없음)";
+        const proj = String(item.project || "").trim() || "—";
+        const st = getSourceTypeLabelForPreset(item.sourceType);
+        const d = savedWorkTsForPreset(item);
+        const dateStr = d ? new Date(d).toLocaleString("ko-KR", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }) : "";
+        opt.textContent = `${proj} · ${title} · ${st}${dateStr ? ` · ${dateStr}` : ""}`;
+        constructionFoundationPresetWork.appendChild(opt);
+      });
+      const keep = prev && [...constructionFoundationPresetWork.options].some((o) => o.value === prev);
+      if (keep) {
+        constructionFoundationPresetWork.value = prev;
+      }
+    } catch (e) {
+      setSyncStatus(errorMessage(e), true);
+    }
   }
 
   function refreshFoundationPanel() {
+    void refreshFoundationPresetWorkSelect();
+    // 면적 슬라이더·bound를 먼저 맞춘 뒤 그룹을 계산해야 `getCurrentAreaRange`와 실제 polygonArea가 같은 스케일이다.
+    renderFoundationAreaBandInfo();
     const groups = getFoundationGroupItems();
     if (!constructionState.foundationGroupsInitialized && groups.length) {
       constructionState.foundationGroupsInitialized = true;
     }
-    renderFoundationAreaBandInfo();
     syncFoundationControlValues();
+    renderPfHeightBandHint();
     updateFoundationPreviewSelection();
     renderFoundationParkingCountFilters();
-    renderFoundationPolylineList();
-    renderFoundationPileList();
-    renderFoundationSelectionSummary();
+    if (isFoundationTabActive()) {
+      renderFoundationPfList();
+      renderFoundationPfProximityReview();
+      renderFoundationPolylineList();
+      renderFoundationPileList();
+      renderFoundationSelectionSummary();
+    }
+  }
+
+  function applyPfGroupKeyToggle(key) {
+    const raw = String(key || "");
+    const groups = getPfPolylineMatchGroups();
+    let g = null;
+    if (raw.startsWith("pfgrp:")) {
+      let label;
+      try {
+        label = decodeURIComponent(raw.slice("pfgrp:".length));
+      } catch (e) {
+        return;
+      }
+      const agg = getPfAggregatesByClusterLabel().find((row) => row.clusterLabel === label);
+      if (agg) {
+        g = {
+          pfKey: agg.pfKey,
+          circleIds: agg.circleIds,
+          polylineIds: agg.polylineIds,
+        };
+      }
+    } else if (raw.startsWith("pfpoly:")) {
+      const polylineId = raw.replace(/^pfpoly:/, "");
+      const row = groups.find((r) => r.polylineId === polylineId);
+      if (row) {
+        g = { pfKey: row.pfKey, circleIds: row.circleIds, polylineIds: row.polylineIds };
+      }
+    } else if (raw.startsWith("pf:")) {
+      const textId = raw.replace(/^pf:/, "");
+      const row = groups.find((r) => r.textId === textId);
+      if (row) {
+        g = { pfKey: row.pfKey, circleIds: row.circleIds, polylineIds: row.polylineIds };
+      }
+    }
+    if (!g) return;
+    beforeFoundationMutation();
+    constructionState.foundationSelectedSubgroupKeys.clear();
+    const pfKey = g.pfKey;
+    const ids = g.circleIds.filter((circleId) => {
+      const circle = state.circleMap?.get(circleId);
+      if (!circle || !isNumberMatchedCircle(circle)) return false;
+      if (constructionState.foundationExcludeWithThickness && Number.isFinite(getFoundationThicknessMm(circleId))) {
+        return false;
+      }
+      return true;
+    });
+
+    const sel = constructionState.foundationSelectedCircleIds;
+    const pfKeys = constructionState.foundationSelectedPfKeys;
+    const allThisSelected =
+      ids.length > 0
+      && ids.every((id) => sel.has(id))
+      && pfKeys.has(pfKey);
+
+    if (allThisSelected) {
+      ids.forEach((id) => sel.delete(id));
+      pfKeys.delete(pfKey);
+      const nextPoly = new Set(constructionState.foundationSelectedPolylineIds || []);
+      (g.polylineIds || []).forEach((pid) => nextPoly.delete(String(pid)));
+      constructionState.foundationSelectedPolylineIds = nextPoly;
+      constructionState.foundationSuppressedCircleIds.clear();
+      constructionState.foundationSuppressedPolylineIds.clear();
+      refreshFoundationPanel();
+      requestRedraw();
+      return;
+    }
+
+    if (!constructionState.foundationMultiSelect) {
+      constructionState.foundationSelectedCircleIds = new Set(ids);
+      constructionState.foundationSelectedPfKeys = new Set(ids.length ? [pfKey] : []);
+      constructionState.foundationSelectedPolylineIds = new Set(g.polylineIds || []);
+    } else {
+      ids.forEach((id) => sel.add(id));
+      if (ids.length) {
+        pfKeys.add(pfKey);
+      }
+      const nextPoly = new Set(constructionState.foundationSelectedPolylineIds || []);
+      (g.polylineIds || []).forEach((pid) => nextPoly.add(String(pid)));
+      constructionState.foundationSelectedPolylineIds = nextPoly;
+    }
+    constructionState.foundationSuppressedCircleIds.clear();
+    constructionState.foundationSuppressedPolylineIds.clear();
+    refreshFoundationPanel();
+    requestRedraw();
+  }
+
+  function pfMaxSepLargeSmallPair(L, S, maxCap) {
+    const ha = Number(L.h) + Number(S.h);
+    if (getPfSpatialUnitsLikelyMeters()) {
+      const hx = ha * 4;
+      return Math.max(0.02, Math.min(maxCap, Math.max(hx, 0.18)));
+    }
+    return Math.max(100, Math.min(maxCap, Math.max(ha * 4, 240)));
+  }
+
+  function buildPfLargeSmallRow(L, S, sep) {
+    return {
+      idLarge: L.id,
+      idSmall: S.id,
+      labelLarge: L.rawLabel || "—",
+      labelSmall: S.rawLabel || "—",
+      hLarge: L.h,
+      hSmall: S.h,
+      distance: sep,
+      xLarge: L.x,
+      yLarge: L.y,
+      xSmall: S.x,
+      ySmall: S.y,
+    };
+  }
+
+  /**
+   * 각 큰 글자에 대해 지리상 가장 가까운 작은 글자가 다른 표기인 경우만(근접 오인 검토).
+   */
+  function getPfLargeSmallGeomCrossNkRows() {
+    const threshold = getPfHeightSplitThreshold();
+    const items = getPfTextCandidatesCached().map((c) => {
+      const h = Number(c.textHeight) || 0;
+      return {
+        id: c.id,
+        rawLabel: String(c.text ?? "").trim(),
+        x: c.x,
+        y: c.y,
+        h,
+        isLarge: h >= threshold,
+      };
+    });
+    const larges = items.filter((it) => it.isLarge);
+    const smalls = items.filter((it) => !it.isLarge);
+    if (!larges.length || !smalls.length) {
+      return [];
+    }
+
+    const MAX_SEP_CAP = getPfLargeSmallPairDistanceCapWorld();
+    const cellSize = Math.max(MAX_SEP_CAP, 1e-9);
+    const gridSpan = Math.max(2, Math.min(30, Math.ceil(MAX_SEP_CAP / cellSize) + 3));
+    const bucketSmall = new Map();
+    smalls.forEach((s, si) => {
+      const k = `${Math.floor(s.x / cellSize)},${Math.floor(s.y / cellSize)}`;
+      if (!bucketSmall.has(k)) bucketSmall.set(k, []);
+      bucketSmall.get(k).push(si);
+    });
+
+    const nearestCrossNk = [];
+    for (let li = 0; li < larges.length; li += 1) {
+      const L = larges[li];
+      const nkl = normalizePfLabelKey(L.rawLabel);
+      const ix = Math.floor(L.x / cellSize);
+      const iy = Math.floor(L.y / cellSize);
+      let bestS = null;
+      let bestSep = Infinity;
+      for (let dx = -gridSpan; dx <= gridSpan; dx += 1) {
+        for (let dy = -gridSpan; dy <= gridSpan; dy += 1) {
+          const list = bucketSmall.get(`${ix + dx},${iy + dy}`);
+          if (!list) continue;
+          for (let k = 0; k < list.length; k += 1) {
+            const S = smalls[list[k]];
+            const sep = Math.hypot(L.x - S.x, L.y - S.y);
+            const maxSep = pfMaxSepLargeSmallPair(L, S, MAX_SEP_CAP);
+            if (sep > maxSep) continue;
+            if (sep < bestSep) {
+              bestSep = sep;
+              bestS = S;
+            }
+          }
+        }
+      }
+      if (!bestS || !Number.isFinite(bestSep)) continue;
+      const nks = normalizePfLabelKey(bestS.rawLabel);
+      if (!nkl || !nks || nkl === nks) continue;
+      nearestCrossNk.push(buildPfLargeSmallRow(L, bestS, bestSep));
+    }
+    const capWorld = getPfLargeSmallPairDistanceCapWorld();
+    const filtered = nearestCrossNk.filter((r) => r.distance <= capWorld + 1e-9);
+    filtered.sort((a, b) => {
+      if (Math.abs(a.distance - b.distance) > 1e-6) return a.distance - b.distance;
+      return String(a.idLarge).localeCompare(String(b.idLarge));
+    });
+
+    return filtered;
+  }
+
+  function renderPfHeightBandHint() {
+    if (!constructionFoundationPfHeightHint) return;
+    const th = getPfHeightSplitThreshold();
+    constructionFoundationPfHeightHint.textContent =
+      `매칭: P/F를 높이 순으로 나눠 아래쪽 절반만(높이 미기록 포함) 또는 위쪽 절반만 사용합니다. 근접 검토 표는 여전히 중앙값 ${formatMetric(th, 3)} 기준으로 큰/작은을 구분합니다.`;
+  }
+
+  function renderFoundationPfProximityReview() {
+    if (!constructionFoundationPfProximityReview) return;
+    const rows = getPfLargeSmallGeomCrossNkRows();
+    const crossNkCount = rows.length;
+    const consensusMismatchCount = Number(constructionState.foundationPfConsensusMismatchCount) || 0;
+    const capW = getPfLargeSmallPairDistanceCapWorld();
+    const unitHint = getPfSpatialUnitsLikelyMeters() ? `m 도면·한도 ${capW}` : `mm 도면·한도 ${capW}`;
+    const summaryLine = `<p class="construction-foundation-viewer-guide construction-pf-proximity-summary">요약: 근접·표기 다른 쌍 <strong>${crossNkCount}</strong>건 · P/F 윤곽 합의와 배정 불일치 <strong>${consensusMismatchCount}</strong>건 <span class="construction-pf-proximity-unit-hint">(${unitHint})</span></p>`;
+    if (!rows.length) {
+      constructionFoundationPfProximityReview.innerHTML =
+        `${summaryLine}<div class="empty-row muted construction-pf-proximity-empty">가깝지만 표기가 다른 큰·작 쌍이 없습니다 (2M 이내).</div>`;
+      return;
+    }
+    const body = rows
+      .map(
+        (r) =>
+          `<tr class="construction-pf-mismatch-row construction-pf-mismatch-row--geom-cross" tabindex="0" role="button" data-ax="${r.xLarge}" data-ay="${r.yLarge}" data-bx="${r.xSmall}" data-by="${r.ySmall}" data-id-a="${escape(r.idLarge)}" data-id-b="${escape(r.idSmall)}">` +
+          `<td>${escape(r.labelLarge)}</td><td>${formatMetric(r.hLarge, 3)}</td>` +
+          `<td>${escape(r.labelSmall)}</td><td>${formatMetric(r.hSmall, 3)}</td><td>${formatMetric(r.distance, 2)}</td></tr>`,
+      )
+      .join("");
+    constructionFoundationPfProximityReview.innerHTML =
+      `${summaryLine}<div class="construction-records-wrapper"><table class="construction-pf-proximity-table construction-records-table construction-summary-table"><thead><tr><th>큰 글자</th><th>큰 h</th><th>작은 글자</th><th>작은 h</th><th>거리</th></tr></thead><tbody>${body}</tbody></table></div>` +
+      '<p class="construction-foundation-viewer-guide construction-pf-mismatch-foot">행을 누르면 두 라벨 위치로 이동합니다.</p>';
+  }
+
+  /** P/F 묶음에 속한 파일(말뚝) id 기준, 기초두께(mm)별 건수 요약 — 근접 메타 옆 표시용 */
+  function summarizePfCircleIdsThicknessCounts(circleIds) {
+    const byMm = new Map();
+    let missing = 0;
+    (circleIds || []).forEach((cid) => {
+      const mm = getFoundationThicknessMm(cid);
+      if (!Number.isFinite(mm)) {
+        missing += 1;
+        return;
+      }
+      const r = Math.round(mm);
+      byMm.set(r, (byMm.get(r) || 0) + 1);
+    });
+    const parts = Array.from(byMm.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([mm, n]) => `${mm}mm×${n}`);
+    if (missing) parts.push(`미입력×${missing}`);
+    return parts.join(" · ");
+  }
+
+  function renderFoundationPfList() {
+    if (!constructionFoundationPfList) return;
+    const aggregates = getPfAggregatesByClusterLabel();
+    if (!aggregates.length) {
+      constructionFoundationPfList.innerHTML = '<div class="empty-row">P/F 텍스트와 짝지어진 닫힌 폴리선이 없습니다.</div>';
+      return;
+    }
+    const selected = constructionState.foundationSelectedPfKeys || new Set();
+    constructionFoundationPfList.innerHTML = `<div class="foundation-pf-aggregate-list">${aggregates.map((agg) => {
+      const active = selected.has(agg.pfKey);
+      const dist = formatMetric(agg.minDistance, 2);
+      const title = agg.clusterLabel === "P/F" ? "P/F (표기 없음)" : escape(agg.clusterLabel);
+      const thickSummary = summarizePfCircleIdsThicknessCounts(agg.circleIds);
+      const thickHtml = thickSummary ? ` · 두께 ${escape(thickSummary)}` : "";
+      return `<button type="button" class="ghost foundation-pf-item foundation-pf-item--aggregate${active ? " is-active" : ""}" data-foundation-pf-key="${escape(agg.pfKey)}">
+        <span class="foundation-pf-label">${title}</span>
+        <span class="foundation-pf-meta">윤곽 ${agg.outlineCount}개 · 파일 ${agg.circleIds.length} · 근접 ${dist}${thickHtml}</span>
+      </button>`;
+    }).join("")}</div>`;
   }
 
   function escapeTsvCell(value) {
@@ -3317,18 +5589,84 @@ function inferOpenRectangleVertices(vertices) {
     return String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
   }
 
+  /** 동일 위치·같은 파일번호로 말뚝이 여러 개일 때 PDAM 행에 연결할 circle id — 기초·천공 등 값이 있는 쪽을 우선한다. */
+  function settlementCircleLinkScore(circleId) {
+    if (circleId == null || circleId === "") return -1;
+    let s = 0;
+    if (pileNumericFromMap(constructionState.foundationThicknessByPileId, circleId) != null) s += 100;
+    if (pileNumericFromMap(constructionState.foundationTopByPileId, circleId) != null) s += 50;
+    if (pileNumericFromMap(constructionState.drillingStartByPileId, circleId) != null) s += 30;
+    if (pileNumericFromMap(constructionState.foundationPitOffsetByPileId, circleId) != null) s += 10;
+    return s;
+  }
+
+  function mergeSettlementCircleId(prevId, nextId) {
+    if (nextId == null || nextId === "") return prevId;
+    if (prevId == null || prevId === "") return nextId;
+    const sp = settlementCircleLinkScore(prevId);
+    const sn = settlementCircleLinkScore(nextId);
+    if (sn > sp) return nextId;
+    if (sp > sn) return prevId;
+    return String(prevId).localeCompare(String(nextId), "en") <= 0 ? prevId : nextId;
+  }
+
+  /** 말뚝별 매칭 텍스트에서 파일번호 토큰 (없으면 빈 집합). */
+  function pileKeysFromCircleMatchedText(circle) {
+    const mt = String(circle?.matched_text?.text || "").trim();
+    const keys = new Set();
+    if (!mt) return keys;
+    const pileKeyDisplay = normalizePileToken(formatDisplayedPileNumber(mt));
+    const pileKeyRaw = normalizePileToken(mt);
+    const invalid = new Set(["", "-", "—"]);
+    if (pileKeyDisplay && !invalid.has(pileKeyDisplay)) keys.add(pileKeyDisplay);
+    if (pileKeyRaw && pileKeyRaw !== pileKeyDisplay && !invalid.has(pileKeyRaw)) keys.add(pileKeyRaw);
+    return keys;
+  }
+
+  /**
+   * PDAM 행 ↔ 도면 말뚝 연결.
+   * 동일 좌표에 원이 여러 개(중복 지오메트리)일 때 번호 텍스트는 한쪽(C4)에만 있고 두께는 다른 id(C4034)에만 있는 경우가 있음.
+   * 같은 중심(반올림) 그룹 안에서 파일번호를 합쳐, 번호 없는 원도 `위치|470`에 mergeSettlementCircleId로 묶인다.
+   */
   function buildCircleLookupByLocationAndPile() {
     const lookup = new Map();
-    (state.circles || []).forEach((circle) => {
-      const locationKey = normConstructionLoc(circle?.building_name);
-      const pileKey = normalizePileToken(formatDisplayedPileNumber(circle?.matched_text?.text || ""));
-      if (!locationKey || !pileKey) return;
-      lookup.set(`${locationKey}|${pileKey}`, circle.id);
+    const parkingUnified = getSingleParkingOutlineNorm();
+    const circles = state.circles || [];
+    const byPos = new Map();
+    circles.forEach((c) => {
+      const wk = foundationOverlayWorldPosKey(c);
+      if (!wk) return;
+      if (!byPos.has(wk)) byPos.set(wk, []);
+      byPos.get(wk).push(c);
+    });
+    byPos.forEach((group) => {
+      const unionPileKeys = new Set();
+      group.forEach((c) => {
+        pileKeysFromCircleMatchedText(c).forEach((k) => unionPileKeys.add(k));
+      });
+      if (!unionPileKeys.size) return;
+      group.forEach((circle) => {
+        const resolvedLoc = resolveFoundationGroupLocationNorm(circle);
+        const locFromResolved = recordLocationForPdamMatch(resolvedLoc, parkingUnified);
+        const locFromBuildingName = recordLocationForPdamMatch(circle?.building_name, parkingUnified);
+        const locKeys = new Set();
+        if (locFromResolved) locKeys.add(locFromResolved);
+        if (locFromBuildingName && locFromBuildingName !== locFromResolved) {
+          locKeys.add(locFromBuildingName);
+        }
+        locKeys.forEach((lk) => {
+          unionPileKeys.forEach((pk) => {
+            const k = `${lk}|${pk}`;
+            lookup.set(k, mergeSettlementCircleId(lookup.get(k), circle.id));
+          });
+        });
+      });
     });
     return lookup;
   }
 
   function buildSettlementRecordsRows(records) {
+    const parkingUnified = getSingleParkingOutlineNorm();
     const avgMap = buildAverageZByNormalizedLocation();
     const circleLookup = buildCircleLookupByLocationAndPile();
     const normalizeToken = (value) => String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
@@ -3350,7 +5688,28 @@ function inferOpenRectangleVertices(vertices) {
       return score >= 4;
     };
     return (records || []).filter((record) => !isHeaderLikeRecord(record)).map((record) => {
-      const { value: startEl, basis } = resolveDrillingStartElevation(record.location, avgMap);
+      const locKey = recordLocationForPdamMatch(record.location, parkingUnified);
+      const pileKey = normalizePileToken(formatDisplayedPileNumber(record.pile_number));
+      const pileKeyRaw = normalizePileToken(record.pile_number);
+      const locNormRaw = normConstructionLoc(record.location);
+      let circleId =
+        circleLookup.get(`${locKey}|${pileKey}`)
+        || (pileKeyRaw && pileKeyRaw !== pileKey ? circleLookup.get(`${locKey}|${pileKeyRaw}`) : null)
+        || (locNormRaw && locNormRaw !== locKey ? circleLookup.get(`${locNormRaw}|${pileKey}`) : null)
+        || (locNormRaw && locNormRaw !== locKey && pileKeyRaw && pileKeyRaw !== pileKey
+          ? circleLookup.get(`${locNormRaw}|${pileKeyRaw}`)
+          : null)
+        || null;
+      const { value: resolvedStart, basis } = resolveDrillingStartElevation(record.location, avgMap, parkingUnified);
+      let startEl = resolvedStart;
+      let startElBasis = basis;
+      if (circleId) {
+        const pileDr = constructionState.drillingStartByPileId?.[circleId];
+        if (Number.isFinite(Number(pileDr))) {
+          startEl = Number(pileDr);
+          startElBasis = "말뚝별 천공시작";
+        }
+      }
       const pen = record.penetration_depth;
       let finalTip = null;
       let finalDetail = "";
@@ -3358,10 +5717,7 @@ function inferOpenRectangleVertices(vertices) {
         finalTip = startEl - Number(pen);
         finalDetail = `천공시작지반고 ${formatMetric(startEl, 3)} − 관입깊이 ${formatMetric(pen, 2)}`;
       }
-      const locKey = normConstructionLoc(record.location);
-      const pileKey = normalizePileToken(formatDisplayedPileNumber(record.pile_number));
-      const circleId = circleLookup.get(`${locKey}|${pileKey}`) || null;
-      return { record: { ...record, circle_id: circleId }, startEl, startElBasis: basis, finalTip, finalDetail };
+      return { record: { ...record, circle_id: circleId }, startEl, startElBasis, finalTip, finalDetail };
     });
   }
 
@@ -3454,10 +5810,11 @@ function inferOpenRectangleVertices(vertices) {
 
   function buildSettlementRowKey(enriched, rowIndex) {
     const r = enriched?.record || {};
+    const parkingUnified = getSingleParkingOutlineNorm();
     const parts = [
       r.id ?? "",
       r.construction_date ?? "",
-      normConstructionLoc(r.location),
+      recordLocationForPdamMatch(r.location, parkingUnified),
       r.pile_number ?? "",
       r.equipment ?? "",
       r.construction_method ?? "",
@@ -3484,17 +5841,25 @@ function inferOpenRectangleVertices(vertices) {
     };
     const rowKey = buildSettlementRowKey(enriched, rowIndex);
     const manual = constructionState.settlementManualByKey?.[rowKey] || {};
-    const normLoc = normConstructionLoc(record.location);
+    const parkingUnified = getSingleParkingOutlineNorm();
+    const normLoc = recordLocationForPdamMatch(record.location, parkingUnified);
     const buildingFoundationTop = findFoundationTopOverrideForNormLocation(normLoc);
     let foundationTop;
     let foundationTopCellTitle = "";
     if (Object.prototype.hasOwnProperty.call(manual, "foundationTop")) {
       foundationTop = toFiniteNumberOrNull(manual.foundationTop);
     } else {
-      foundationTop =
-        buildingFoundationTop != null && Number.isFinite(buildingFoundationTop) ? buildingFoundationTop : null;
-      if (foundationTop != null && Number.isFinite(foundationTop)) {
-        foundationTopCellTitle = "동·주차장 설정의 기초골조 상단레벨 기본값";
+      const cid = record?.circle_id || record?.circleId || "";
+      const pileTopOv = cid ? constructionState.foundationTopByPileId?.[cid] : null;
+      if (cid && Number.isFinite(Number(pileTopOv))) {
+        foundationTop = Number(pileTopOv);
+        foundationTopCellTitle = "말뚝별 기초골조 상단레벨";
+      } else {
+        foundationTop =
+          buildingFoundationTop != null && Number.isFinite(buildingFoundationTop) ? buildingFoundationTop : null;
+        if (foundationTop != null && Number.isFinite(foundationTop)) {
+          foundationTopCellTitle = "동·주차장 설정의 기초골조 상단레벨 기본값";
+        }
       }
     }
     const foundationThicknessFromMapMm = getFoundationThicknessMm(record?.circle_id || record?.circleId || "");
@@ -3782,6 +6147,7 @@ function inferOpenRectangleVertices(vertices) {
       ws.columns = getSettlementTableHeaderXlsx().map((header) => ({ header, width: 14 }));
       ws.getRow(1).height = 52;
       const summaryByLocation = new Map();
+      const parkingUnifiedXlsx = getSingleParkingOutlineNorm();
       rows.forEach((enriched, rowIndex) => {
         const rowData = settlementRecordRowData(enriched, rowIndex);
         const startElevation = Number.isFinite(Number(enriched?.startEl)) ? Number(enriched.startEl) : null;
@@ -3834,7 +6200,7 @@ function inferOpenRectangleVertices(vertices) {
           formula: `IFERROR(IF(OR(H${added.number}="",J${added.number}="",Q${added.number}=""),"",ROUND(MAX(0,(H${added.number}+J${added.number})-Q${added.number}),3)),"")`,
         };
 
-        const location = normConstructionLoc(enriched?.record?.location);
+        const location = recordLocationForPdamMatch(enriched?.record?.location, parkingUnifiedXlsx);
         const method = String(enriched?.record?.construction_method || "미분류").trim() || "미분류";
         const finalPenetration = roundMetricValue(rowData.finalPenetration, 3);
         if (!summaryByLocation.has(location)) {
@@ -4121,6 +6487,7 @@ function inferOpenRectangleVertices(vertices) {
     constructionSettlementPeriodNote.textContent = "기성 범위를 계산하지 못했습니다.";
     constructionSummaryRecords.textContent = "-";
     constructionSummaryUnique.textContent = "-";
+    if (constructionSummaryInstalledPiles) constructionSummaryInstalledPiles.textContent = "-";
     constructionSummaryMatched.textContent = "-";
     if (constructionSummaryAutoMatched) constructionSummaryAutoMatched.textContent = "-";
     constructionSummaryPending.textContent = "-";
@@ -4198,6 +6565,9 @@ function inferOpenRectangleVertices(vertices) {
 
     constructionSummaryRecords.textContent = dashboard?.summary?.recordCount ?? "-";
     constructionSummaryUnique.textContent = dashboard?.summary?.uniquePileCount ?? "-";
+    if (constructionSummaryInstalledPiles) {
+      constructionSummaryInstalledPiles.textContent = dashboard?.summary?.installedPileCount ?? "-";
+    }
     constructionSummaryMatched.textContent = dashboard?.summary?.matchedCircleCount ?? "-";
     if (constructionSummaryAutoMatched) constructionSummaryAutoMatched.textContent = dashboard?.summary?.autoMatchedCount ?? "-";
     constructionSummaryPending.textContent = dashboard?.summary?.pendingCircleCount ?? "-";
@@ -4236,9 +6606,12 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function collectDashboardPayload() {
+    const rawCircles = Array.isArray(state.circles) && state.circles.length ? state.circles : [];
+    // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
       datasetId: constructionDatasetSelect.value || constructionState.activeDatasetId,
-      circles: Array.isArray(state.circles) && state.circles.length ? state.circles : [],
+      circles: rawCircles,
+      excludeIdenticalGeometryDuplicates: !!(state.filter && state.filter.excludeIdenticalGeometryDuplicates),
       workId: state.loadedWorkId || null,
       dateFrom: constructionDateFrom.value || null,
       dateTo: constructionDateTo.value || null,
@@ -4256,8 +6629,7 @@ function inferOpenRectangleVertices(vertices) {
   async function refreshDatasets(preferredId) {
     const pc = encodeURIComponent(getConstructionProjectContext());
     const response = await fetch(`${API_BASE_URL}/api/construction/datasets?project_context=${pc}`);
-    if (!response.ok) throw new Error(await response.text() || "시공 데이터셋 목록을 불러오지 못했습니다.");
-    const payload = await response.json();
+    const payload = await pilexyParseFetchJson(response);
     constructionState.datasets = Array.isArray(payload) ? payload : [];
     constructionDatasetSelect.innerHTML = "";
     const placeholder = document.createElement("option");
@@ -4296,8 +6668,7 @@ function inferOpenRectangleVertices(vertices) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.detail || "시공 대시보드를 불러오지 못했습니다.");
+    const data = await pilexyParseFetchJson(response);
     renderDashboard(data);
     setSyncStatus("시공 데이터가 갱신되었습니다.");
   }
@@ -4320,8 +6691,7 @@ function inferOpenRectangleVertices(vertices) {
       const response = await fetch(`${API_BASE_URL}/api/construction/datasets/${encodeURIComponent(datasetId)}`, {
         method: "DELETE",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || "시공 데이터셋 삭제에 실패했습니다.");
+      await pilexyParseFetchJson(response);
 
       const nextDataset = constructionState.datasets.find((item) => item.id !== datasetId);
       constructionState.activeDatasetId = nextDataset?.id || "";
@@ -4368,8 +6738,7 @@ function inferOpenRectangleVertices(vertices) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || "PDAM 동기화에 실패했습니다.");
+      const data = await pilexyParseFetchJson(response);
       await refreshDatasets(data?.dataset?.id);
       if (data?.dataset?.id) constructionDatasetSelect.value = data.dataset.id;
       await refreshDashboard();
@@ -4389,8 +6758,7 @@ function inferOpenRectangleVertices(vertices) {
     setSyncStatus("엑셀 업로드와 시공기록 추출을 진행하는 중입니다.");
     try {
       const response = await fetch(`${API_BASE_URL}/api/construction/import-workbook`, { method: "POST", body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || "시공 엑셀 업로드에 실패했습니다.");
+      const data = await pilexyParseFetchJson(response);
       await refreshDatasets(data?.dataset?.id);
       if (data?.dataset?.id) constructionDatasetSelect.value = data.dataset.id;
       await refreshDashboard();
@@ -4653,6 +7021,15 @@ function inferOpenRectangleVertices(vertices) {
       constructionState.foundationMultiSelect = Boolean(constructionFoundationMultiSelect.checked);
     });
   }
+  qa('input[name="construction-pf-height-band"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      constructionState.pfHeightBandMode = radio.value === "large" ? "large" : "small";
+      invalidateFoundationGroupCache();
+      refreshFoundationPanel();
+      requestRedraw();
+    });
+  });
   if (constructionFoundationWindowSelect) {
     constructionFoundationWindowSelect.addEventListener("change", () => {
       constructionState.foundationWindowSelect = Boolean(constructionFoundationWindowSelect.checked);
@@ -4670,7 +7047,7 @@ function inferOpenRectangleVertices(vertices) {
   if (constructionFoundationAreaMin) {
     constructionFoundationAreaMin.addEventListener("input", () => {
       const minBound = Number(constructionFoundationAreaMin.min) || 0;
-      const maxBound = Number(constructionFoundationAreaMin.max) || 1000;
+      const maxBound = Number(constructionFoundationAreaMin.max) || FOUNDATION_AREA_SLIDER_MAX;
       const value = Math.max(minBound, Math.min(maxBound, Number(constructionFoundationAreaMin.value) || minBound));
       const minGap = getFoundationAreaMinGapPos();
       const maxAllowed = Math.max(minBound, Number(constructionState.foundationAreaMaxPos) - minGap);
@@ -4684,7 +7061,7 @@ function inferOpenRectangleVertices(vertices) {
   if (constructionFoundationAreaMax) {
     constructionFoundationAreaMax.addEventListener("input", () => {
       const minBound = Number(constructionFoundationAreaMax.min) || 0;
-      const maxBound = Number(constructionFoundationAreaMax.max) || 1000;
+      const maxBound = Number(constructionFoundationAreaMax.max) || FOUNDATION_AREA_SLIDER_MAX;
       const value = Math.max(minBound, Math.min(maxBound, Number(constructionFoundationAreaMax.value) || maxBound));
       const minGap = getFoundationAreaMinGapPos();
       const minAllowed = Math.min(maxBound, Number(constructionState.foundationAreaMinPos) + minGap);
@@ -4695,9 +7072,37 @@ function inferOpenRectangleVertices(vertices) {
       scheduleFoundationAreaRefresh();
     });
   }
-  if (constructionFoundationShowOverlay) {
-    constructionFoundationShowOverlay.addEventListener("change", () => {
-      constructionState.foundationShowOverlay = Boolean(constructionFoundationShowOverlay.checked);
+  function syncFoundationOverlayCheckboxesFromState() {
+    constructionState.foundationOverlayShowThickness = constructionFoundationOverlayThickness
+      ? Boolean(constructionFoundationOverlayThickness.checked)
+      : true;
+    constructionState.foundationOverlayShowDrill = Boolean(constructionFoundationOverlayDrill?.checked);
+    constructionState.foundationOverlayShowFoundationTop = Boolean(constructionFoundationOverlayTop?.checked);
+  }
+  if (constructionFoundationOverlayThickness) {
+    constructionFoundationOverlayThickness.addEventListener("change", () => {
+      syncFoundationOverlayCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationOverlayDrill) {
+    constructionFoundationOverlayDrill.addEventListener("change", () => {
+      syncFoundationOverlayCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationOverlayTop) {
+    constructionFoundationOverlayTop.addEventListener("change", () => {
+      syncFoundationOverlayCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationOverlayAll) {
+    constructionFoundationOverlayAll.addEventListener("click", () => {
+      if (constructionFoundationOverlayThickness) constructionFoundationOverlayThickness.checked = true;
+      if (constructionFoundationOverlayDrill) constructionFoundationOverlayDrill.checked = true;
+      if (constructionFoundationOverlayTop) constructionFoundationOverlayTop.checked = true;
+      syncFoundationOverlayCheckboxesFromState();
       requestRedraw();
     });
   }
@@ -4711,15 +7116,23 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationClearSelection) {
     constructionFoundationClearSelection.addEventListener("click", () => {
+      beforeFoundationMutation();
       constructionState.foundationSelectedCircleIds.clear();
       constructionState.foundationSelectedPolylineIds.clear();
       constructionState.foundationFilteredPolylineIds.clear();
       constructionState.foundationSelectedSubgroupKeys.clear();
+      constructionState.foundationSelectedPfKeys.clear();
       constructionState.foundationSuppressedCircleIds.clear();
       constructionState.foundationSuppressedPolylineIds.clear();
       refreshFoundationPanel();
       requestRedraw();
     });
+  }
+  if (constructionFoundationUndo) {
+    constructionFoundationUndo.addEventListener("click", () => undoFoundationStep());
+  }
+  if (constructionFoundationRedo) {
+    constructionFoundationRedo.addEventListener("click", () => redoFoundationStep());
   }
   if (constructionFoundationResetAll) {
     constructionFoundationResetAll.addEventListener("click", () => {
@@ -4728,16 +7141,21 @@ function inferOpenRectangleVertices(vertices) {
         setSyncStatus("초기화가 취소되었습니다. (문구 불일치)", true);
         return;
       }
+      beforeFoundationMutation();
       // '설정'이 아닌 입력한 두께/피트 데이터만 초기화
       constructionState.foundationThicknessByPileId = {};
       state.foundationThicknessByPileId = {};
       constructionState.foundationPitOffsetByPileId = {};
       state.foundationPitOffsetByPileId = {};
+      constructionState.drillingStartByPileId = {};
+      state.drillingStartByPileId = {};
+      constructionState.foundationTopByPileId = {};
+      state.foundationTopByPileId = {};
       rerenderSettlementTableFromState();
       refreshFoundationPanel();
       requestRedraw();
-      setSyncStatus("기초골조 두께/엘레베이터 피트 데이터를 초기화했습니다.");
-      persistFoundationSettings("기초골조/엘레베이터 피트 초기화 저장");
+      setSyncStatus("말뚝별 천공·기초상·두께·엘레베이터 피트 데이터를 초기화했습니다.");
+      persistFoundationSettings("기초 탭 말뚝별 수치 초기화 저장");
     });
   }
   if (constructionFoundationPolylineList) {
@@ -4746,6 +7164,8 @@ function inferOpenRectangleVertices(vertices) {
       if (!button) return;
       const key = button.dataset.foundationSubgroupKey || "";
       if (!key) return;
+      beforeFoundationMutation();
+      constructionState.foundationSelectedPfKeys.clear();
       const wasSelected = constructionState.foundationSelectedSubgroupKeys.has(key);
       if (!constructionState.foundationMultiSelect) {
         constructionState.foundationSelectedSubgroupKeys = wasSelected ? new Set() : new Set([key]);
@@ -4771,6 +7191,8 @@ function inferOpenRectangleVertices(vertices) {
     constructionFoundationParkingCountFilters.addEventListener("click", (event) => {
       const button = event.target?.closest?.("[data-foundation-bulk-scope]");
       if (!button) return;
+      beforeFoundationMutation();
+      constructionState.foundationSelectedPfKeys.clear();
       const scope = String(button.dataset.foundationBulkScope || "inside");
       const groups = getFoundationGroupItems();
       const targetKeys = groups.map((group) => `${group.key}:${scope === "outside" ? "outside" : "inside"}`);
@@ -4796,6 +7218,40 @@ function inferOpenRectangleVertices(vertices) {
       requestRedraw();
     });
   }
+  if (constructionFoundationPfList) {
+    constructionFoundationPfList.addEventListener("click", (event) => {
+      const button = event.target?.closest?.("[data-foundation-pf-key]");
+      if (!button) return;
+      const key = button.dataset.foundationPfKey || "";
+      if (!key) return;
+      applyPfGroupKeyToggle(key);
+    });
+  }
+  if (constructionFoundationPfProximityReview) {
+    const goMismatchRow = (row) => {
+      if (!row || !row.classList?.contains("construction-pf-mismatch-row")) return;
+      const ax = Number(row.dataset.ax);
+      const ay = Number(row.dataset.ay);
+      const bx = Number(row.dataset.bx);
+      const by = Number(row.dataset.by);
+      const idA = row.dataset.idA || "";
+      const idB = row.dataset.idB || "";
+      if (typeof focusPfLabelMismatchPair === "function") {
+        focusPfLabelMismatchPair(ax, ay, bx, by, idA, idB);
+      }
+    };
+    constructionFoundationPfProximityReview.addEventListener("click", (event) => {
+      const row = event.target?.closest?.(".construction-pf-mismatch-row");
+      goMismatchRow(row);
+    });
+    constructionFoundationPfProximityReview.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const row = event.target?.closest?.(".construction-pf-mismatch-row");
+      if (!row) return;
+      event.preventDefault();
+      goMismatchRow(row);
+    });
+  }
   if (constructionFoundationApplySelection) {
     constructionFoundationApplySelection.addEventListener("click", () => {
       const mm = toFiniteNumberOrNull(constructionFoundationThicknessMm?.value);
@@ -4803,6 +7259,7 @@ function inferOpenRectangleVertices(vertices) {
         setSyncStatus("두께(mm)는 0 이상의 숫자로 입력해주세요.", true);
         return;
       }
+      beforeFoundationMutation();
       const selectedIds = Array.from(constructionState.foundationSelectedCircleIds || []);
       const selectedCircleMap = new Map((state.circles || []).map((circle) => [circle.id, circle]));
       const strictUnmatched = selectedIds.filter((id) => !isStrictNumberMatchedCircle(selectedCircleMap.get(id)));
@@ -4815,8 +7272,95 @@ function inferOpenRectangleVertices(vertices) {
       refreshFoundationPanel();
     });
   }
+  if (constructionFoundationApplyDrill) {
+    constructionFoundationApplyDrill.addEventListener("click", () => {
+      const m = toFiniteNumberOrNull(constructionFoundationDrillM?.value);
+      if (!Number.isFinite(m)) {
+        setSyncStatus("천공시작(m)은 숫자로 입력해주세요.", true);
+        return;
+      }
+      beforeFoundationMutation();
+      const selectedIds = Array.from(constructionState.foundationSelectedCircleIds || []);
+      applyDrillingStartToCircles(selectedIds, m);
+      setSyncStatus(`선택 ${selectedIds.length}개에 천공시작 ${formatMetric(m, 3)} m 적용 완료`);
+      persistFoundationSettings("말뚝별 천공시작 저장");
+      refreshFoundationPanel();
+    });
+  }
+  if (constructionFoundationClearDrillSelection) {
+    constructionFoundationClearDrillSelection.addEventListener("click", () => {
+      beforeFoundationMutation();
+      const ids = Array.from(constructionState.foundationSelectedCircleIds || []);
+      clearDrillingStartForCircles(ids);
+      setSyncStatus(`선택 ${ids.length}개 말뚝별 천공 값을 삭제했습니다. (동 설정값으로 표시)`);
+      persistFoundationSettings("말뚝별 천공시작 삭제 저장");
+      refreshFoundationPanel();
+    });
+  }
+  if (constructionFoundationApplyTop) {
+    constructionFoundationApplyTop.addEventListener("click", () => {
+      const m = toFiniteNumberOrNull(constructionFoundationTopM?.value);
+      if (!Number.isFinite(m)) {
+        setSyncStatus("기초상단(m)은 숫자로 입력해주세요.", true);
+        return;
+      }
+      beforeFoundationMutation();
+      const selectedIds = Array.from(constructionState.foundationSelectedCircleIds || []);
+      applyFoundationTopElevationToCircles(selectedIds, m);
+      setSyncStatus(`선택 ${selectedIds.length}개에 기초상단 ${formatMetric(m, 3)} m 적용 완료`);
+      persistFoundationSettings("말뚝별 기초상단 저장");
+      refreshFoundationPanel();
+    });
+  }
+  if (constructionFoundationClearTopSelection) {
+    constructionFoundationClearTopSelection.addEventListener("click", () => {
+      beforeFoundationMutation();
+      const ids = Array.from(constructionState.foundationSelectedCircleIds || []);
+      clearFoundationTopElevationForCircles(ids);
+      setSyncStatus(`선택 ${ids.length}개 말뚝별 기초상단 값을 삭제했습니다. (동 설정값으로 표시)`);
+      persistFoundationSettings("말뚝별 기초상단 삭제 저장");
+      refreshFoundationPanel();
+    });
+  }
+  if (constructionFoundationPresetLoad) {
+    constructionFoundationPresetLoad.addEventListener("click", () => {
+      void (async () => {
+        const workId = constructionFoundationPresetWork?.value;
+        if (!workId) {
+          setSyncStatus("저장 버전을 선택해주세요.", true);
+          return;
+        }
+        let payload;
+        try {
+          payload = await fetchSavedWorkPayloadById(workId);
+        } catch (e) {
+          setSyncStatus(errorMessage(e), true);
+          return;
+        }
+        if (!payload || typeof payload !== "object") {
+          setSyncStatus("저장 데이터를 불러오지 못했습니다.", true);
+          return;
+        }
+        beforeFoundationMutation();
+        const pile = mergePerPileFoundationMapsFromPayload(payload);
+        const nBld = mergeBuildingElevationsFromPayload(payload);
+        if (typeof renderPendingNameEditor === "function") {
+          renderPendingNameEditor();
+        }
+        rerenderSettlementTableFromState();
+        invalidateFoundationGroupCache();
+        persistFoundationSettings("다른 저장 버전 기초 설정 병합");
+        refreshFoundationPanel();
+        requestRedraw();
+        setSyncStatus(
+          `선택 버전 반영: 말뚝 두께 ${pile.nThick}·천공 ${pile.nDrill}·기초상 ${pile.nTop}·피트 ${pile.nPit}건, 동 윤곽 ${nBld}곳 천공·기초상 병합`,
+        );
+      })();
+    });
+  }
   if (constructionFoundationClearSelectionValues) {
     constructionFoundationClearSelectionValues.addEventListener("click", () => {
+      beforeFoundationMutation();
       const ids = Array.from(constructionState.foundationSelectedCircleIds || []);
       clearFoundationThicknessForCircles(ids);
       setSyncStatus(`선택 ${ids.length}개 두께 값을 삭제했습니다.`);
@@ -4831,6 +7375,7 @@ function inferOpenRectangleVertices(vertices) {
         setSyncStatus("엘레베이터 피트 오프셋(mm)은 0 이상의 숫자로 입력해주세요.", true);
         return;
       }
+      beforeFoundationMutation();
       const offsetM = Number(offsetMm) / 1000;
       const ids = Array.from(constructionState.foundationSelectedCircleIds || []);
       applyFoundationPitOffsetToCircles(ids, offsetM);
@@ -4841,6 +7386,7 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationClearElevatorPit) {
     constructionFoundationClearElevatorPit.addEventListener("click", () => {
+      beforeFoundationMutation();
       const ids = Array.from(constructionState.foundationSelectedCircleIds || []);
       clearFoundationPitOffsetForCircles(ids);
       setSyncStatus(`선택 ${ids.length}개 엘레베이터 피트 값을 삭제했습니다.`);
@@ -4919,10 +7465,17 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationPitOffsetByPileId = state.foundationPitOffsetByPileId && typeof state.foundationPitOffsetByPileId === "object"
       ? { ...state.foundationPitOffsetByPileId }
       : {};
+    constructionState.drillingStartByPileId = state.drillingStartByPileId && typeof state.drillingStartByPileId === "object"
+      ? { ...state.drillingStartByPileId }
+      : {};
+    constructionState.foundationTopByPileId = state.foundationTopByPileId && typeof state.foundationTopByPileId === "object"
+      ? { ...state.foundationTopByPileId }
+      : {};
     constructionState.foundationSelectedCircleIds.clear();
     constructionState.foundationSelectedPolylineIds.clear();
     constructionState.foundationFilteredPolylineIds.clear();
     constructionState.foundationSelectedSubgroupKeys.clear();
+    constructionState.foundationSelectedPfKeys.clear();
     constructionState.foundationSuppressedCircleIds.clear();
     constructionState.foundationSuppressedPolylineIds.clear();
     constructionState.foundationPreviewCircleIds.clear();
@@ -4935,12 +7488,46 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationGroupItemsCache = [];
     constructionState.foundationAreaMinValue = null;
     constructionState.foundationAreaMaxValue = null;
-    constructionState.foundationAreaMinPos = 150;
-    constructionState.foundationAreaMaxPos = 850;
+    constructionState.foundationAreaMinPos = 15;
+    constructionState.foundationAreaMaxPos = 85;
     constructionState.foundationAreaBoundMin = 0;
     constructionState.foundationAreaBoundMax = 0;
-    refreshFoundationPanel();
-    updateConstructionButtonsState();
+    // DXF 로드 직후 등 대량 텍스트에서 패널 전체 갱신이 메인 스레드를 오래 잡지 않게 한 틀 뒤 실행
+    requestAnimationFrame(() => {
+      refreshFoundationPanel();
+      updateConstructionButtonsState();
+    });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!isFoundationTabActive()) return;
+    const tag = (e.target && e.target.tagName) || "";
+    const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target?.isContentEditable;
+    if (e.key === "Escape" && !inField) {
+      e.preventDefault();
+      beforeFoundationMutation();
+      constructionState.foundationSelectedCircleIds.clear();
+      constructionState.foundationSelectedPolylineIds.clear();
+      constructionState.foundationFilteredPolylineIds.clear();
+      constructionState.foundationSelectedSubgroupKeys.clear();
+      constructionState.foundationSelectedPfKeys.clear();
+      constructionState.foundationSuppressedCircleIds.clear();
+      constructionState.foundationSuppressedPolylineIds.clear();
+      constructionState.foundationWindowRect = null;
+      constructionState.foundationDragging = false;
+      refreshFoundationPanel();
+      requestRedraw();
+      return;
+    }
+    if (inField) return;
+    if (e.ctrlKey && e.key === "z") {
+      e.preventDefault();
+      undoFoundationStep();
+    }
+    if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "Z"))) {
+      e.preventDefault();
+      redoFoundationStep();
+    }
   });
 
   renderProjectContext();
