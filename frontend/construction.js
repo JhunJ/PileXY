@@ -6800,8 +6800,11 @@ function inferOpenRectangleVertices(vertices) {
       option.textContent = `${dataset.name || dataset.filename || dataset.id}${proj} (${dataset.createdAt ? new Date(dataset.createdAt).toLocaleString("ko-KR") : ""})`;
       constructionDatasetSelect.appendChild(option);
     });
-    const targetId = preferredId || constructionState.activeDatasetId || (constructionState.datasets[0] && constructionState.datasets[0].id);
-    if (targetId && [...constructionDatasetSelect.options].some((option) => option.value === targetId)) {
+    // 기본값은 "현재 프로젝트의 최신 저장 데이터셋"으로 맞춘다.
+    const latestDatasetId = constructionState.datasets[0]?.id || "";
+    const targetId = [preferredId, latestDatasetId]
+      .find((candidate) => candidate && [...constructionDatasetSelect.options].some((option) => option.value === candidate)) || "";
+    if (targetId) {
       constructionDatasetSelect.value = targetId;
       constructionState.activeDatasetId = targetId;
     } else {
