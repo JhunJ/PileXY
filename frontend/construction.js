@@ -3251,7 +3251,9 @@ function inferOpenRectangleVertices(vertices) {
       return constructionState.foundationGroupItemsCache;
     }
     const targetKinds = new Set(["building", "parking"]);
-    const circles = (state.circles || []).filter((circle) => targetKinds.has(getCircleAreaKind(circle)));
+    const circles = (state.circles || []).filter((circle) => (
+      targetKinds.has(getCircleAreaKind(circle)) && isNumberMatchedCircle(circle)
+    ));
     // 클릭 선택 경로와 동일한 폴리라인 집합을 사용해 필터 결과 불일치를 줄인다.
     const polylines = getBackgroundPolylinesForClick();
     const byNormName = new Map();
