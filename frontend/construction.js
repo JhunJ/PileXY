@@ -46,8 +46,13 @@
         <div class="construction-sync-grid">
           <label>PDAM ID<input type="text" id="construction-user-id" class="save-work-input" placeholder="we8104 아이디" autocomplete="username" /></label>
           <label>비밀번호<input type="password" id="construction-password" class="save-work-input" placeholder="we8104 비밀번호" autocomplete="current-password" /></label>
-          <label>보고서 페이지 URL<input type="text" id="construction-report-page-url" class="save-work-input" placeholder="예: https://we8104.com/..." /></label>
-          <label>Report ID<input type="number" id="construction-report-id" class="save-work-input" placeholder="예: 323" /></label>
+        </div>
+        <div class="construction-report-advanced">
+          <button type="button" id="construction-report-fields-toggle" class="construction-report-toggle" aria-expanded="false" aria-controls="construction-report-fields">보고서 URL / Report ID 펼치기</button>
+          <div id="construction-report-fields" class="construction-sync-grid construction-sync-grid--report" hidden>
+            <label>보고서 페이지 URL<input type="text" id="construction-report-page-url" class="save-work-input" placeholder="예: https://we8104.com/..." /></label>
+            <label>Report ID<input type="number" id="construction-report-id" class="save-work-input" placeholder="예: 323" /></label>
+          </div>
         </div>
         <div class="construction-sync-actions">
           <button type="button" id="construction-sync-btn" class="header-construction-btn">PDAM 동기화</button>
@@ -383,6 +388,8 @@
   const constructionPassword = q("#construction-password");
   const constructionReportPageUrl = q("#construction-report-page-url");
   const constructionReportId = q("#construction-report-id");
+  const constructionReportFieldsToggle = q("#construction-report-fields-toggle");
+  const constructionReportFields = q("#construction-report-fields");
   const constructionSyncBtn = q("#construction-sync-btn");
   const constructionUploadBtn = q("#construction-upload-btn");
   const constructionUploadInput = q("#construction-upload-input");
@@ -1000,6 +1007,19 @@
     if (!constructionSettlementPreviewBtn) return;
     constructionSettlementPreviewBtn.classList.toggle("is-active", constructionState.settlementPreviewOnly);
     constructionSettlementPreviewBtn.textContent = constructionState.settlementPreviewOnly ? "선택 월 시공만 보는 중" : "선택 월 시공만 보기";
+  }
+
+  function syncReportFieldsToggle() {
+    if (!constructionReportFieldsToggle || !constructionReportFields) return;
+    const isExpanded = !constructionReportFields.hidden;
+    constructionReportFieldsToggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+    constructionReportFieldsToggle.textContent = isExpanded ? "보고서 URL / Report ID 닫기" : "보고서 URL / Report ID 펼치기";
+  }
+
+  function toggleReportFields() {
+    if (!constructionReportFields) return;
+    constructionReportFields.hidden = !constructionReportFields.hidden;
+    syncReportFieldsToggle();
   }
 
   function applyOverlayVisibilityFilters() {
@@ -7567,6 +7587,10 @@ function inferOpenRectangleVertices(vertices) {
     const file = event.target?.files?.[0];
     importWorkbookFile(file);
   });
+  if (constructionReportFieldsToggle) {
+    constructionReportFieldsToggle.addEventListener("click", toggleReportFields);
+  }
+  syncReportFieldsToggle();
 
   constructionOverlayMode.addEventListener("change", () => {
     constructionState.overlayMode = constructionOverlayMode.value || "status";
