@@ -5003,15 +5003,24 @@ function inferOpenRectangleVertices(vertices) {
     const textPadX = 6;
     const textPadY = 5;
     const textLayerGap = state.showTextLabels !== false ? 22 : 10;
-    const anchorLift = Math.min(34, Math.max(12, radiusPx + textLayerGap));
+    const anchorLift = state.showTextLabels !== false ? 24 : 14;
+    const canvasSize = typeof getCanvasSize === "function"
+      ? getCanvasSize()
+      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
+    const viewportPadding = 24;
+    if (
+      canvasX < -viewportPadding
+      || canvasX > canvasSize.width + viewportPadding
+      || canvasY < -viewportPadding
+      || canvasY > canvasSize.height + viewportPadding
+    ) {
+      return;
+    }
     ctx.save();
     ctx.font = `600 ${fontPx}px "Segoe UI", sans-serif`;
     const widths = parts.map((part) => ctx.measureText(part.text).width);
     const boxWidth = Math.ceil((widths.length ? Math.max(...widths) : 0) + textPadX * 2);
     const boxHeight = Math.ceil(parts.length * lineHeight + textPadY * 2 - 2);
-    const canvasSize = typeof getCanvasSize === "function"
-      ? getCanvasSize()
-      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
     let boxX = canvasX - boxWidth / 2;
     let boxY = canvasY - anchorLift - boxHeight;
     const maxBoxX = Math.max(4, canvasSize.width - boxWidth - 4);
