@@ -434,6 +434,10 @@ body {
   margin-top: 0;
 }
 
+.construction-sync-grid[hidden] {
+  display: none !important;
+}
+
 .construction-sync-actions,
 .construction-filter-actions,
 .construction-dataset-row {
