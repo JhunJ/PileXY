@@ -146,12 +146,98 @@ const loadWorkListClose = document.getElementById("load-work-list-close");
 const loadWorkProjectSearch = document.getElementById("load-work-project-search");
 const loadWorkVersionSearch = document.getElementById("load-work-version-search");
 const headerWorkContextEl = document.getElementById("header-work-context");
+const gaSetupTriggerBtn = document.getElementById("ga-setup-trigger");
 const meissaProjectSelect = document.getElementById("meissa-project-select");
 const meissaProjectIdInput = document.getElementById("meissa-project-id");
 
 const LOAD_WORK_FAV_PROJECTS_KEY = "pilexy:load-fav-projects";
 const LOAD_WORK_FAV_WORK_IDS_KEY = "pilexy:load-fav-work-ids";
 const SETTINGS_CONTEXT_STORAGE_KEY = "pilexy:outline-settings-context";
+const GA_MEASUREMENT_ID_STORAGE_KEY = "pilexy:ga-measurement-id";
+const GA_SETUP_PASSWORD = "정헌재93";
+
+let gaBootstrapped = false;
+
+function normalizeGaMeasurementId(value) {
+  return String(value || "").trim();
+}
+
+function readStoredGaMeasurementId() {
+  try {
+    return normalizeGaMeasurementId(localStorage.getItem(GA_MEASUREMENT_ID_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+}
+
+function saveGaMeasurementId(value) {
+  const next = normalizeGaMeasurementId(value);
+  if (!next) return;
+  try {
+    localStorage.setItem(GA_MEASUREMENT_ID_STORAGE_KEY, next);
+  } catch (_) {}
+}
+
+function ensureGoogleAnalyticsScript(measurementId) {
+  if (!measurementId) return;
+  if (document.querySelector('script[data-pilexy-ga-script="1"]')) return;
+  const script = document.createElement("script");
+  script.async = true;
+  script.dataset.pilexyGaScript = "1";
+  script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+  document.head.appendChild(script);
+}
+
+function ensureGoogleAnalyticsGtag() {
+  window.dataLayer = window.dataLayer || [];
+  if (typeof window.gtag !== "function") {
+    window.gtag = function gtag() {
+      window.dataLayer.push(arguments);
+    };
+  }
+  return window.gtag;
+}
+
+function applyGoogleAnalyticsMeasurementId(measurementId, { notify = true } = {}) {
+  const next = normalizeGaMeasurementId(measurementId);
+  if (!next) return false;
+  ensureGoogleAnalyticsScript(next);
+  const gtag = ensureGoogleAnalyticsGtag();
+  if (!gaBootstrapped) {
+    gtag("js", new Date());
+    gaBootstrapped = true;
+  }
+  gtag("config", next);
+  saveGaMeasurementId(next);
+  if (notify) {
+    alert(`구글 애널리틱스 설정 완료: ${next}`);
+  }
+  return true;
+}
+
+function initGoogleAnalyticsFromStorage() {
+  const stored = readStoredGaMeasurementId();
+  if (!stored) return;
+  applyGoogleAnalyticsMeasurementId(stored, { notify: false });
+}
+
+function handleGaSetupTrigger() {
+  const password = window.prompt("비밀번호를 입력하세요.");
+  if (password == null) return;
+  if (password !== GA_SETUP_PASSWORD) {
+    alert("비밀번호가 올바르지 않습니다.");
+    return;
+  }
+  const current = readStoredGaMeasurementId();
+  const measurementId = window.prompt("구글 애널리틱스 측정 ID(API)를 입력하세요. 예: G-XXXXXXXXXX", current || "G-");
+  if (measurementId == null) return;
+  const normalized = normalizeGaMeasurementId(measurementId);
+  if (!normalized) {
+    alert("측정 ID(API)를 입력해야 설정됩니다.");
+    return;
+  }
+  applyGoogleAnalyticsMeasurementId(normalized, { notify: true });
+}
 
 function loadFavoriteProjectNames() {
   try {
@@ -1631,6 +1717,7 @@ function syncMeissaCompareBtnEnabled() {
 function init() {
   if (!uploadForm) return;
   restoreSettingsContext();
+  initGoogleAnalyticsFromStorage();
   window.__PILEXY_GET_MEISSA_CONTEXT__ = function pilexyGetMeissaContext() {
     return {
       circles: (state.circles || []).map((c) => ({
@@ -1692,6 +1779,9 @@ function initClusteringSettings() {
 }
 
 function bindEvents() {
+  if (gaSetupTriggerBtn) {
+    gaSetupTriggerBtn.addEventListener("click", handleGaSetupTrigger);
+  }
   uploadForm.addEventListener("submit", handleUpload);
   fileInput.addEventListener("change", () => {
     updateUploadButtonState();
