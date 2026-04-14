@@ -617,6 +617,9 @@
     foundationTwinCircleIdsLookupKey: "",
     foundationTwinCircleIdsLookupRef: null,
     foundationTwinCircleIdsLookup: null,
+    foundationHatchInsideCacheKey: "",
+    foundationHatchInsideCirclesRef: null,
+    foundationHatchInsideRows: [],
   });
   if (!constructionState.settlementManualByKey || typeof constructionState.settlementManualByKey !== "object") {
     constructionState.settlementManualByKey = {};
@@ -1760,8 +1763,20 @@
     });
   }
 
-  const originalDrawCanvas = drawCanvas;
   drawCanvas = function drawCanvasWithConstruction() {
+    const { width, height } = typeof getCanvasSize === "function"
+      ? getCanvasSize()
+      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, width, height);
+    if (!state.hasDataset || !(state.circles || []).length) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "16px 'Segoe UI'";
+      ctx.textAlign = "center";
+      ctx.fillText("Upload a DXF to visualize", width / 2, height / 2);
+      return;
+    }
     constructionState.renderFrameToken += 1;
     constructionState.playbackPathFrameToken = -1;
     constructionState.foundationOverlayWorldPosGuard = new Set();
@@ -1772,8 +1787,28 @@
       };
     }
     try {
+      drawPolylineHints();
+      drawBuildings();
       drawFoundationAreaHatches();
-      originalDrawCanvas();
+      drawAreaCreationPreview();
+      const circles = getVisibleCircles();
+      const duplicateCircleIds = typeof getDuplicateCircleIds === "function" ? getDuplicateCircleIds() : new Set();
+      if (state.showCircles) {
+        circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+      }
+      if (state.showPoints) {
+        circles.forEach((circle) => drawCirclePoint(circle));
+      }
+      if (typeof drawDuplicateLabels === "function") {
+        drawDuplicateLabels(circles, duplicateCircleIds);
+      }
+      if (state.showTextLabels) {
+        drawTextLabels();
+      }
+      if (state.showMatchLines) {
+        drawCircleToNumberMatchLines(circles);
+      }
+      drawTooltip();
     } finally {
       if (prevGetVisibleCircles) getVisibleCircles = prevGetVisibleCircles;
     }
@@ -3598,7 +3633,6 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function isFoundationHatchLayerEnabled() {
-    if (!isFoundationLabelVizEnabled()) return false;
     return Boolean(
       constructionState.foundationHatchShowThickness
       || constructionState.foundationHatchShowDrill
@@ -3688,21 +3722,49 @@ function inferOpenRectangleVertices(vertices) {
     });
   }
 
+  function getFoundationHatchInsideRows() {
+    const polylines = getBackgroundPolylinesForClick();
+    const circlesRef = Array.isArray(state.circles) ? state.circles : [];
+    if (!polylines.length || !circlesRef.length) return [];
+    const key = `${constructionState.foundationBackgroundPolylineCacheKey}|${polylines.length}|${circlesRef.length}`;
+    if (
+      constructionState.foundationHatchInsideCacheKey === key
+      && constructionState.foundationHatchInsideCirclesRef === circlesRef
+      && Array.isArray(constructionState.foundationHatchInsideRows)
+    ) {
+      return constructionState.foundationHatchInsideRows;
+    }
+    const rows = [];
+    const signatureSeen = new Set();
+    polylines.forEach((polyline) => {
+      const insideIds = getEffectiveCircleIdsForPolylineToggle(polyline)
+        .map((id) => String(id))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "en"));
+      if (!insideIds.length) return;
+      const signature = insideIds.join("|");
+      if (!signature || signatureSeen.has(signature)) return;
+      signatureSeen.add(signature);
+      rows.push({
+        polylineId: polyline.id,
+        insideIds,
+      });
+    });
+    constructionState.foundationHatchInsideCacheKey = key;
+    constructionState.foundationHatchInsideCirclesRef = circlesRef;
+    constructionState.foundationHatchInsideRows = rows;
+    return rows;
+  }
+
   function drawFoundationMetricHatchLayer(metricKey) {
     const lookup = getFoundationPolylineIdLookup();
-    const polylines = getBackgroundPolylinesForClick();
-    if (!polylines.length) return;
+    const hatchRows = getFoundationHatchInsideRows();
+    if (!hatchRows.length && !(state.circles || []).length) return;
     const polygonFillByColor = new Map();
     const circleFillByColor = new Map();
     const circlesAlreadyPainted = new Set();
-    const processedInsideSignatures = new Set();
-    polylines.forEach((polyline) => {
-      const insideIds = getEffectiveCircleIdsForPolylineToggle(polyline);
-      if (!insideIds.length) return;
-      const insideSignature = insideIds.map((id) => String(id)).sort((a, b) => a.localeCompare(b, "en")).join("|");
-      if (!insideSignature || processedInsideSignatures.has(insideSignature)) return;
-      processedInsideSignatures.add(insideSignature);
-      const insideRows = insideIds
+    hatchRows.forEach((row) => {
+      const insideRows = row.insideIds
         .map((circleId) => getCircleFromMapById(circleId))
         .filter((circle) => circle && isNumberMatchedCircle(circle));
       if (!insideRows.length) return;
@@ -3714,7 +3776,7 @@ function inferOpenRectangleVertices(vertices) {
       });
       const hasAllFinite = valueKeys.length === insideRows.length;
       const uniqueValueKeys = new Set(valueKeys);
-      const polylineRow = lookup.get(polyline.id);
+      const polylineRow = lookup.get(row.polylineId);
       if (hasAllFinite && uniqueValueKeys.size === 1 && polylineRow?.vertices?.length >= 3) {
         const valueKey = valueKeys[0];
         const color = getFoundationHatchColor(metricKey, valueKey);
@@ -3747,7 +3809,7 @@ function inferOpenRectangleVertices(vertices) {
       circleFillByColor.get(color).push(circle);
       circlesAlreadyPainted.add(idKey);
     });
-    const layerAlpha = metricKey === "thickness" ? 0.16 : 0.13;
+    const layerAlpha = metricKey === "thickness" ? 0.24 : 0.2;
     drawHatchPolygonsByColor(polygonFillByColor, layerAlpha);
     drawHatchCirclesByColor(circleFillByColor, layerAlpha);
   }
