@@ -33,7 +33,16 @@ HEADER_ALIASES: Dict[str, Sequence[str]] = {
     "pile_type": ("파일종류", "파일 종류", "파일형식"),
     "construction_method": ("시공공법", "시공 공법", "공법"),
     "location": ("시공위치", "시공 위치", "위치", "동"),
-    "pile_number": ("파일번호", "파일 번호", "파일no", "파일 no", "pile no", "pile number"),
+    "pile_number": (
+        "파일번호",
+        "파일 번호",
+        "파일no",
+        "파일 no",
+        "pile no",
+        "pile number",
+        "기초번호",
+        "기초 번호",
+    ),
     "pile_diameter": ("파일규격", "파일규격d", "파일규격(d)", "직경"),
     "pile_classification_single": ("파일구분단본", "파일구분 단본", "단본"),
     "pile_classification_total": ("파일구분합계", "파일구분 합계", "합계"),
@@ -351,7 +360,7 @@ def _resolve_field_mapping(headers: Sequence[str]) -> Dict[str, str]:
                     if (
                         field == "sequence_no"
                         and alias == "번호"
-                        and "파일" in normalized
+                        and ("파일" in normalized or "기초" in normalized)
                     ):
                         continue
                     return header
@@ -1953,6 +1962,13 @@ def _build_date_series(
 
 def _build_method_matrix(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     latest = _latest_records_by_pile(records)
+    # 필터 칩(_option_items)과 동일: 열 이름이 값으로 박힌 행은 매트릭스 집계에서 제외
+    latest = [
+        item
+        for item in latest
+        if not _cell_matches_column_header_echo(item.get("construction_method"), "construction_method")
+        and not _cell_matches_column_header_echo(item.get("pile_type"), "pile_type")
+    ]
     methods = sorted({_normalize_construction_method(item.get("construction_method")) or "미분류" for item in latest})
     pile_types = sorted({_cell_text(item.get("pile_type")) or "미분류" for item in latest})
     cells: List[Dict[str, Any]] = []

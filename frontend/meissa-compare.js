@@ -304,7 +304,7 @@
   /** false: 상단 iframe을 Meissa /3d 뷰어로 연다(기본). true면 스냅샷(2D) URL만 사용. */
   const MEISSA_3D_EXCLUDED = false;
   /** false: 공식 Meissa 화면을 페이지 안 iframe에 띄우지 않고 새 탭 링크만 맞춤(임베드 3D·로그인 뷰 제거). */
-  const MEISSA_CLOUD_3D_FRAME_VISIBLE = false;
+  const MEISSA_CLOUD_3D_FRAME_VISIBLE = true;
   /** true: Carta 타일·모자이크·휠 타일 z/recenter 제거. 정사(orthophoto/raw/dataUrl)+georef만 매칭, 확대는 CSS matrix만. */
   const MEISSA_2D_SIMPLE_ORTHO = true;
   /** true: orthophoto-preview 를 max_edge=저해상(3072) 단일만 쓰고 뷰포트 패치 고해상도 끔(검증·저대역용).

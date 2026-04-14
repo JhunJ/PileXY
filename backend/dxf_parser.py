@@ -35,19 +35,61 @@ def _normalize_label_hyphens(s: str) -> str:
     )
 
 
+def _leading_pf_ascii(compact: str) -> Optional[str]:
+    """첫 글자를 ASCII P/F 로 본다(전각 ＰＦ·일반 p f 포함). 아니면 None."""
+    if not compact:
+        return None
+    ch = compact[0]
+    o = ord(ch)
+    if 0xFF21 <= o <= 0xFF3A:
+        mapped = chr(o - 0xFF21 + ord("A"))
+    elif 0xFF41 <= o <= 0xFF5A:
+        mapped = chr(o - 0xFF41 + ord("A"))
+    else:
+        mapped = ch.upper()
+    return mapped if mapped in ("P", "F") else None
+
+
+def _ascii_fold_pf_compact(compact: str) -> str:
+    """전각 P/F/숫자 등을 ASCII로 펼쳐 PF1 패턴 검사용 문자열을 만든다."""
+    out: List[str] = []
+    for ch in compact:
+        o = ord(ch)
+        if 0xFF21 <= o <= 0xFF3A:
+            out.append(chr(o - 0xFF21 + ord("A")))
+        elif 0xFF41 <= o <= 0xFF5A:
+            out.append(chr(o - 0xFF41 + ord("A")))
+        elif 0xFF10 <= o <= 0xFF19:
+            out.append(chr(o - 0xFF10 + ord("0")))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _is_pf_digit_mark_compact(compact: str) -> bool:
+    """PF1, PF2, PF-3, pf12, ＰＦ１ 등 P+F+번호(현장 기초 구역)."""
+    s = _ascii_fold_pf_compact(compact).upper()
+    return bool(re.match(r"^PF-?\d+$", s))
+
+
 def _is_foundation_pf_style_compact(compact: str) -> bool:
     """P/F 기초 표기로 보이는 경우만( PHC·PART 등 잡문자열 제외 )."""
     if not compact:
         return False
-    c0 = compact[0].upper()
-    if c0 not in ("P", "F"):
+    if _is_pf_digit_mark_compact(compact):
+        return True
+    if _leading_pf_ascii(compact) is None:
         return False
     if len(compact) == 1:
         return True
     c1 = compact[1]
     if c1 in "-\u2212\u2013\u2014." or c1.isdigit():
         return True
-    return False
+    # ASCII 라틴 알파벳만 이어지면 PHC·PART 등으로 보고 제외
+    if ("A" <= c1 <= "Z") or ("a" <= c1 <= "z"):
+        return False
+    # 숫자·하이픈 다음: 한글·전각·기호 등은 현장 기초 구역명으로 수집
+    return True
 
 
 def foundation_pf_only_flag(raw: str) -> bool:
