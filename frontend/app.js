@@ -154,8 +154,6 @@ const LOAD_WORK_FAV_PROJECTS_KEY = "pilexy:load-fav-projects";
 const LOAD_WORK_FAV_WORK_IDS_KEY = "pilexy:load-fav-work-ids";
 const SETTINGS_CONTEXT_STORAGE_KEY = "pilexy:outline-settings-context";
 const GA_MEASUREMENT_ID_STORAGE_KEY = "pilexy:ga-measurement-id";
-const GA_SETUP_PASSWORD = "정헌재93";
-
 let gaBootstrapped = false;
 
 function normalizeGaMeasurementId(value) {
@@ -222,21 +220,7 @@ function initGoogleAnalyticsFromStorage() {
 }
 
 function handleGaSetupTrigger() {
-  const password = window.prompt("비밀번호를 입력하세요.");
-  if (password == null) return;
-  if (password !== GA_SETUP_PASSWORD) {
-    alert("비밀번호가 올바르지 않습니다.");
-    return;
-  }
-  const current = readStoredGaMeasurementId();
-  const measurementId = window.prompt("구글 애널리틱스 측정 ID(API)를 입력하세요. 예: G-XXXXXXXXXX", current || "G-");
-  if (measurementId == null) return;
-  const normalized = normalizeGaMeasurementId(measurementId);
-  if (!normalized) {
-    alert("측정 ID(API)를 입력해야 설정됩니다.");
-    return;
-  }
-  applyGoogleAnalyticsMeasurementId(normalized, { notify: true });
+  alert("반가워요! 😊✨");
 }
 
 function loadFavoriteProjectNames() {
