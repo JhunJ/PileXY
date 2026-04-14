@@ -3656,7 +3656,11 @@ function inferOpenRectangleVertices(vertices) {
     if (metricKey === "thickness") return roundFoundationMetricValue(metricKey, getFoundationThicknessMm(circleId));
     if (metricKey === "drill") return roundFoundationMetricValue(metricKey, getDrillingElevationMForCircle(circleId));
     if (metricKey === "top") return roundFoundationMetricValue(metricKey, getFoundationTopElevationMForCircle(circleId));
-    if (metricKey === "pit") return roundFoundationMetricValue(metricKey, getFoundationPitOffsetM(circleId));
+    if (metricKey === "pit") {
+      const pit = getFoundationPitOffsetM(circleId);
+      if (!Number.isFinite(Number(pit)) || Number(pit) <= 0) return null;
+      return roundFoundationMetricValue(metricKey, pit);
+    }
     return null;
   }
 
