@@ -310,7 +310,7 @@
             <label><input type="checkbox" id="construction-foundation-hatch-thickness" checked /> 기초두께(mm)</label>
             <label><input type="checkbox" id="construction-foundation-hatch-drill" /> 천공(m)</label>
             <label><input type="checkbox" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
-            <label><input type="checkbox" id="construction-foundation-hatch-pit" /> 피트오프셋(m)</label>
+            <label><input type="checkbox" id="construction-foundation-hatch-pit" /> 피트오프셋(m)만</label>
             <button type="button" id="construction-foundation-hatch-all" class="ghost construction-foundation-overlay-all-btn">가시성 전체</button>
           </div>
           <div class="construction-foundation-building-levels">
@@ -7848,6 +7848,20 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
     constructionState.foundationHatchShowPit = Boolean(constructionFoundationHatchPit?.checked);
   }
+
+  function enforceFoundationHatchExclusiveMode(source) {
+    if (!constructionFoundationHatchThickness || !constructionFoundationHatchDrill || !constructionFoundationHatchTop || !constructionFoundationHatchPit) return;
+    const pitChecked = Boolean(constructionFoundationHatchPit.checked);
+    if (source === "pit" && pitChecked) {
+      constructionFoundationHatchThickness.checked = false;
+      constructionFoundationHatchDrill.checked = false;
+      constructionFoundationHatchTop.checked = false;
+      return;
+    }
+    if ((source === "thickness" || source === "drill" || source === "top") && pitChecked) {
+      constructionFoundationHatchPit.checked = false;
+    }
+  }
   if (constructionFoundationOverlayThickness) {
     constructionFoundationOverlayThickness.addEventListener("change", () => {
       syncFoundationOverlayCheckboxesFromState();
@@ -7877,24 +7891,28 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationHatchThickness) {
     constructionFoundationHatchThickness.addEventListener("change", () => {
+      enforceFoundationHatchExclusiveMode("thickness");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchDrill) {
     constructionFoundationHatchDrill.addEventListener("change", () => {
+      enforceFoundationHatchExclusiveMode("drill");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchTop) {
     constructionFoundationHatchTop.addEventListener("change", () => {
+      enforceFoundationHatchExclusiveMode("top");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchPit) {
     constructionFoundationHatchPit.addEventListener("change", () => {
+      enforceFoundationHatchExclusiveMode("pit");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
