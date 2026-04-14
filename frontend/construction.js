@@ -305,6 +305,13 @@
             <label><input type="checkbox" id="construction-foundation-overlay-top" /> 기초상단(m)</label>
             <button type="button" id="construction-foundation-overlay-all" class="ghost construction-foundation-overlay-all-btn">가시성 전체</button>
           </div>
+          <div class="construction-foundation-mode-row construction-foundation-overlay-toggles">
+            <span class="construction-foundation-area-filter-title">캔버스 면적으로 보기(해치)</span>
+            <label><input type="checkbox" id="construction-foundation-hatch-thickness" checked /> 기초두께(mm)</label>
+            <label><input type="checkbox" id="construction-foundation-hatch-drill" /> 천공(m)</label>
+            <label><input type="checkbox" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
+            <button type="button" id="construction-foundation-hatch-all" class="ghost construction-foundation-overlay-all-btn">가시성 전체</button>
+          </div>
           <div class="construction-foundation-building-levels">
             <div class="construction-foundation-area-filter-title">다른 저장 버전에서 불러오기</div>
             <p class="muted construction-foundation-preset-hint">같은 프로젝트의 다른 저장 버전을 고른 뒤 불러오기를 누르면, 그 버전에 있던 말뚝별 두께·천공·기초상·피트 오프셋과 동·주차장 윤곽별 천공·기초상 레벨을 <strong>현재 화면에 덮어씁니다</strong>(말뚝 id·윤곽 이름이 맞는 항목만).</p>
@@ -464,6 +471,10 @@
   const constructionFoundationOverlayDrill = q("#construction-foundation-overlay-drill");
   const constructionFoundationOverlayTop = q("#construction-foundation-overlay-top");
   const constructionFoundationOverlayAll = q("#construction-foundation-overlay-all");
+  const constructionFoundationHatchThickness = q("#construction-foundation-hatch-thickness");
+  const constructionFoundationHatchDrill = q("#construction-foundation-hatch-drill");
+  const constructionFoundationHatchTop = q("#construction-foundation-hatch-top");
+  const constructionFoundationHatchAll = q("#construction-foundation-hatch-all");
   const constructionFoundationPfList = q("#construction-foundation-pf-list");
   const constructionFoundationPfHeightHint = q("#construction-foundation-pf-height-hint");
   const constructionFoundationPfProximityReview = q("#construction-foundation-pf-proximity-review");
@@ -573,6 +584,9 @@
     foundationOverlayShowThickness: true,
     foundationOverlayShowDrill: false,
     foundationOverlayShowFoundationTop: false,
+    foundationHatchShowThickness: true,
+    foundationHatchShowDrill: false,
+    foundationHatchShowFoundationTop: false,
     foundationExcludeWithThickness: false,
     foundationSelectedPfKeys: new Set(),
     foundationHistoryPast: [],
@@ -603,6 +617,9 @@
     foundationTwinCircleIdsLookupKey: "",
     foundationTwinCircleIdsLookupRef: null,
     foundationTwinCircleIdsLookup: null,
+    foundationHatchInsideCacheKey: "",
+    foundationHatchInsideCirclesRef: null,
+    foundationHatchInsideRows: [],
   });
   if (!constructionState.settlementManualByKey || typeof constructionState.settlementManualByKey !== "object") {
     constructionState.settlementManualByKey = {};
@@ -641,6 +658,9 @@
   constructionState.foundationOverlayShowThickness = constructionState.foundationOverlayShowThickness !== false;
   constructionState.foundationOverlayShowDrill = Boolean(constructionState.foundationOverlayShowDrill);
   constructionState.foundationOverlayShowFoundationTop = Boolean(constructionState.foundationOverlayShowFoundationTop);
+  constructionState.foundationHatchShowThickness = constructionState.foundationHatchShowThickness !== false;
+  constructionState.foundationHatchShowDrill = Boolean(constructionState.foundationHatchShowDrill);
+  constructionState.foundationHatchShowFoundationTop = Boolean(constructionState.foundationHatchShowFoundationTop);
   constructionState.foundationExcludeWithThickness = Boolean(constructionState.foundationExcludeWithThickness);
   if (constructionState.pfHeightBandMode !== "large" && constructionState.pfHeightBandMode !== "small") {
     constructionState.pfHeightBandMode = "small";
@@ -1743,8 +1763,20 @@
     });
   }
 
-  const originalDrawCanvas = drawCanvas;
   drawCanvas = function drawCanvasWithConstruction() {
+    const { width, height } = typeof getCanvasSize === "function"
+      ? getCanvasSize()
+      : { width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, width, height);
+    if (!state.hasDataset || !(state.circles || []).length) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "16px 'Segoe UI'";
+      ctx.textAlign = "center";
+      ctx.fillText("Upload a DXF to visualize", width / 2, height / 2);
+      return;
+    }
     constructionState.renderFrameToken += 1;
     constructionState.playbackPathFrameToken = -1;
     constructionState.foundationOverlayWorldPosGuard = new Set();
@@ -1755,7 +1787,28 @@
       };
     }
     try {
-      originalDrawCanvas();
+      drawPolylineHints();
+      drawBuildings();
+      drawFoundationAreaHatches();
+      drawAreaCreationPreview();
+      const circles = getVisibleCircles();
+      const duplicateCircleIds = typeof getDuplicateCircleIds === "function" ? getDuplicateCircleIds() : new Set();
+      if (state.showCircles) {
+        circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+      }
+      if (state.showPoints) {
+        circles.forEach((circle) => drawCirclePoint(circle));
+      }
+      if (typeof drawDuplicateLabels === "function") {
+        drawDuplicateLabels(circles, duplicateCircleIds);
+      }
+      if (state.showTextLabels) {
+        drawTextLabels();
+      }
+      if (state.showMatchLines) {
+        drawCircleToNumberMatchLines(circles);
+      }
+      drawTooltip();
     } finally {
       if (prevGetVisibleCircles) getVisibleCircles = prevGetVisibleCircles;
     }
@@ -3579,6 +3632,198 @@ function inferOpenRectangleVertices(vertices) {
     return "#ef4444";
   }
 
+  function isFoundationHatchLayerEnabled() {
+    return Boolean(
+      constructionState.foundationHatchShowThickness
+      || constructionState.foundationHatchShowDrill
+      || constructionState.foundationHatchShowFoundationTop,
+    );
+  }
+
+  function roundFoundationMetricValue(metricKey, value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    if (metricKey === "thickness") return Math.round(numeric);
+    return Math.round(numeric * 1000) / 1000;
+  }
+
+  function getFoundationMetricValueForCircle(metricKey, circleId) {
+    if (metricKey === "thickness") return roundFoundationMetricValue(metricKey, getFoundationThicknessMm(circleId));
+    if (metricKey === "drill") return roundFoundationMetricValue(metricKey, getDrillingElevationMForCircle(circleId));
+    if (metricKey === "top") return roundFoundationMetricValue(metricKey, getFoundationTopElevationMForCircle(circleId));
+    return null;
+  }
+
+  function getFoundationMetricValueKey(metricKey, value) {
+    if (!Number.isFinite(Number(value))) return "";
+    if (metricKey === "thickness") return String(Math.round(Number(value)));
+    return Number(value).toFixed(3).replace(/\.?0+$/, "");
+  }
+
+  function hashFoundationValueKey(valueKey) {
+    let hash = 0;
+    for (let i = 0; i < valueKey.length; i += 1) {
+      hash = (hash * 31 + valueKey.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
+  }
+
+  function getFoundationHatchColor(metricKey, valueKey) {
+    const palettes = {
+      thickness: ["#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16", "#ec4899"],
+      drill: ["#0284c7", "#0d9488", "#7c3aed", "#ea580c", "#16a34a", "#db2777", "#2563eb", "#f59e0b"],
+      top: ["#15803d", "#1d4ed8", "#0f766e", "#be123c", "#6d28d9", "#c2410c", "#0ea5e9", "#65a30d"],
+    };
+    const palette = palettes[metricKey] || palettes.thickness;
+    const idx = hashFoundationValueKey(`${metricKey}:${valueKey}`) % palette.length;
+    return palette[idx];
+  }
+
+  function drawHatchPolygonsByColor(polygonsByColor, fillAlpha) {
+    polygonsByColor.forEach((verticesList, color) => {
+      if (!Array.isArray(verticesList) || !verticesList.length) return;
+      ctx.save();
+      ctx.beginPath();
+      verticesList.forEach((vertices) => {
+        if (!Array.isArray(vertices) || vertices.length < 3) return;
+        vertices.forEach((vertex, index) => {
+          const p = worldToCanvas(vertex.x, vertex.y);
+          if (index === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      });
+      ctx.fillStyle = hexToRgba(color, fillAlpha);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawHatchCirclesByColor(circlesByColor, fillAlpha) {
+    circlesByColor.forEach((circleList, color) => {
+      if (!Array.isArray(circleList) || !circleList.length) return;
+      ctx.save();
+      ctx.beginPath();
+      circleList.forEach((circle) => {
+        const cx = Number(circle?.center_x);
+        const cy = Number(circle?.center_y);
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+        const rawRadius = Number.isFinite(Number(circle?.radius))
+          ? Number(circle.radius)
+          : (Number.isFinite(Number(circle?.diameter)) ? Number(circle.diameter) / 2 : 0);
+        const hatchRadius = Math.max(0.5, rawRadius * 2.5);
+        const center = worldToCanvas(cx, cy);
+        ctx.moveTo(center.x + hatchRadius * view.scale, center.y);
+        ctx.arc(center.x, center.y, hatchRadius * view.scale, 0, Math.PI * 2);
+      });
+      ctx.fillStyle = hexToRgba(color, fillAlpha);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function getFoundationHatchInsideRows() {
+    const polylines = getBackgroundPolylinesForClick();
+    const circlesRef = Array.isArray(state.circles) ? state.circles : [];
+    if (!polylines.length || !circlesRef.length) return [];
+    const key = `${constructionState.foundationBackgroundPolylineCacheKey}|${polylines.length}|${circlesRef.length}`;
+    if (
+      constructionState.foundationHatchInsideCacheKey === key
+      && constructionState.foundationHatchInsideCirclesRef === circlesRef
+      && Array.isArray(constructionState.foundationHatchInsideRows)
+    ) {
+      return constructionState.foundationHatchInsideRows;
+    }
+    const rows = [];
+    const signatureSeen = new Set();
+    polylines.forEach((polyline) => {
+      const insideIds = getEffectiveCircleIdsForPolylineToggle(polyline)
+        .map((id) => String(id))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "en"));
+      if (!insideIds.length) return;
+      const signature = insideIds.join("|");
+      if (!signature || signatureSeen.has(signature)) return;
+      signatureSeen.add(signature);
+      rows.push({
+        polylineId: polyline.id,
+        insideIds,
+      });
+    });
+    constructionState.foundationHatchInsideCacheKey = key;
+    constructionState.foundationHatchInsideCirclesRef = circlesRef;
+    constructionState.foundationHatchInsideRows = rows;
+    return rows;
+  }
+
+  function drawFoundationMetricHatchLayer(metricKey) {
+    const lookup = getFoundationPolylineIdLookup();
+    const hatchRows = getFoundationHatchInsideRows();
+    if (!hatchRows.length && !(state.circles || []).length) return;
+    const polygonFillByColor = new Map();
+    const circleFillByColor = new Map();
+    const circlesAlreadyPainted = new Set();
+    hatchRows.forEach((row) => {
+      const insideRows = row.insideIds
+        .map((circleId) => getCircleFromMapById(circleId))
+        .filter((circle) => circle && isNumberMatchedCircle(circle));
+      if (!insideRows.length) return;
+      const valueKeys = [];
+      insideRows.forEach((circle) => {
+        const value = getFoundationMetricValueForCircle(metricKey, circle.id);
+        const valueKey = getFoundationMetricValueKey(metricKey, value);
+        if (valueKey) valueKeys.push(valueKey);
+      });
+      const hasAllFinite = valueKeys.length === insideRows.length;
+      const uniqueValueKeys = new Set(valueKeys);
+      const polylineRow = lookup.get(row.polylineId);
+      if (hasAllFinite && uniqueValueKeys.size === 1 && polylineRow?.vertices?.length >= 3) {
+        const valueKey = valueKeys[0];
+        const color = getFoundationHatchColor(metricKey, valueKey);
+        if (!polygonFillByColor.has(color)) polygonFillByColor.set(color, []);
+        polygonFillByColor.get(color).push(polylineRow.vertices);
+        insideRows.forEach((circle) => circlesAlreadyPainted.add(String(circle.id)));
+        return;
+      }
+      insideRows.forEach((circle) => {
+        const idKey = String(circle.id);
+        if (!idKey || circlesAlreadyPainted.has(idKey)) return;
+        const value = getFoundationMetricValueForCircle(metricKey, circle.id);
+        const valueKey = getFoundationMetricValueKey(metricKey, value);
+        if (!valueKey) return;
+        const color = getFoundationHatchColor(metricKey, valueKey);
+        if (!circleFillByColor.has(color)) circleFillByColor.set(color, []);
+        circleFillByColor.get(color).push(circle);
+        circlesAlreadyPainted.add(idKey);
+      });
+    });
+    (state.circles || []).forEach((circle) => {
+      const idKey = String(circle?.id ?? "");
+      if (!idKey || circlesAlreadyPainted.has(idKey)) return;
+      if (!isNumberMatchedCircle(circle)) return;
+      const value = getFoundationMetricValueForCircle(metricKey, circle.id);
+      const valueKey = getFoundationMetricValueKey(metricKey, value);
+      if (!valueKey) return;
+      const color = getFoundationHatchColor(metricKey, valueKey);
+      if (!circleFillByColor.has(color)) circleFillByColor.set(color, []);
+      circleFillByColor.get(color).push(circle);
+      circlesAlreadyPainted.add(idKey);
+    });
+    const layerAlpha = metricKey === "thickness" ? 0.24 : 0.2;
+    drawHatchPolygonsByColor(polygonFillByColor, layerAlpha);
+    drawHatchCirclesByColor(circleFillByColor, layerAlpha);
+  }
+
+  function drawFoundationAreaHatches() {
+    if (!isFoundationHatchLayerEnabled()) return;
+    const metrics = [];
+    if (constructionState.foundationHatchShowThickness) metrics.push("thickness");
+    if (constructionState.foundationHatchShowDrill) metrics.push("drill");
+    if (constructionState.foundationHatchShowFoundationTop) metrics.push("top");
+    if (!metrics.length) return;
+    metrics.forEach((metricKey) => drawFoundationMetricHatchLayer(metricKey));
+  }
+
   function applyFoundationThicknessToCircles(circleIds, mmValue) {
     const ids = expandFoundationCircleIdsWithTwins(circleIds);
     if (!ids.length) return;
@@ -3884,6 +4129,15 @@ function inferOpenRectangleVertices(vertices) {
     }
     if (constructionFoundationOverlayTop) {
       constructionFoundationOverlayTop.checked = Boolean(constructionState.foundationOverlayShowFoundationTop);
+    }
+    if (constructionFoundationHatchThickness) {
+      constructionFoundationHatchThickness.checked = constructionState.foundationHatchShowThickness !== false;
+    }
+    if (constructionFoundationHatchDrill) {
+      constructionFoundationHatchDrill.checked = Boolean(constructionState.foundationHatchShowDrill);
+    }
+    if (constructionFoundationHatchTop) {
+      constructionFoundationHatchTop.checked = Boolean(constructionState.foundationHatchShowFoundationTop);
     }
     if (constructionFoundationExcludeWithThickness) constructionFoundationExcludeWithThickness.checked = Boolean(constructionState.foundationExcludeWithThickness);
     qa('input[name="construction-pf-height-band"]').forEach((radio) => {
@@ -7571,6 +7825,13 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationOverlayShowDrill = Boolean(constructionFoundationOverlayDrill?.checked);
     constructionState.foundationOverlayShowFoundationTop = Boolean(constructionFoundationOverlayTop?.checked);
   }
+  function syncFoundationHatchCheckboxesFromState() {
+    constructionState.foundationHatchShowThickness = constructionFoundationHatchThickness
+      ? Boolean(constructionFoundationHatchThickness.checked)
+      : true;
+    constructionState.foundationHatchShowDrill = Boolean(constructionFoundationHatchDrill?.checked);
+    constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
+  }
   if (constructionFoundationOverlayThickness) {
     constructionFoundationOverlayThickness.addEventListener("change", () => {
       syncFoundationOverlayCheckboxesFromState();
@@ -7595,6 +7856,33 @@ function inferOpenRectangleVertices(vertices) {
       if (constructionFoundationOverlayDrill) constructionFoundationOverlayDrill.checked = true;
       if (constructionFoundationOverlayTop) constructionFoundationOverlayTop.checked = true;
       syncFoundationOverlayCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationHatchThickness) {
+    constructionFoundationHatchThickness.addEventListener("change", () => {
+      syncFoundationHatchCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationHatchDrill) {
+    constructionFoundationHatchDrill.addEventListener("change", () => {
+      syncFoundationHatchCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationHatchTop) {
+    constructionFoundationHatchTop.addEventListener("change", () => {
+      syncFoundationHatchCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationHatchAll) {
+    constructionFoundationHatchAll.addEventListener("click", () => {
+      if (constructionFoundationHatchThickness) constructionFoundationHatchThickness.checked = true;
+      if (constructionFoundationHatchDrill) constructionFoundationHatchDrill.checked = true;
+      if (constructionFoundationHatchTop) constructionFoundationHatchTop.checked = true;
+      syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
