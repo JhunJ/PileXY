@@ -307,10 +307,10 @@
           </div>
           <div class="construction-foundation-mode-row construction-foundation-overlay-toggles">
             <span class="construction-foundation-area-filter-title">캔버스 면적으로 보기(해치)</span>
-            <label><input type="checkbox" id="construction-foundation-hatch-thickness" checked /> 기초두께(mm)</label>
-            <label><input type="checkbox" id="construction-foundation-hatch-drill" /> 천공(m)</label>
-            <label><input type="checkbox" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
-            <label><input type="checkbox" id="construction-foundation-hatch-pit" /> 피트오프셋(m)만</label>
+            <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-thickness" checked /> 기초두께(mm)</label>
+            <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-drill" /> 천공(m)</label>
+            <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
+            <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-pit" /> 피트오프셋(m)만</label>
           </div>
           <div class="construction-foundation-building-levels">
             <div class="construction-foundation-area-filter-title">다른 저장 버전에서 불러오기</div>
@@ -663,6 +663,24 @@
   constructionState.foundationHatchShowDrill = Boolean(constructionState.foundationHatchShowDrill);
   constructionState.foundationHatchShowFoundationTop = Boolean(constructionState.foundationHatchShowFoundationTop);
   constructionState.foundationHatchShowPit = Boolean(constructionState.foundationHatchShowPit);
+  function normalizeFoundationHatchExclusiveState(preferredKey = "") {
+    const keys = ["thickness", "drill", "top", "pit"];
+    const stateByKey = {
+      thickness: Boolean(constructionState.foundationHatchShowThickness),
+      drill: Boolean(constructionState.foundationHatchShowDrill),
+      top: Boolean(constructionState.foundationHatchShowFoundationTop),
+      pit: Boolean(constructionState.foundationHatchShowPit),
+    };
+    let selected = keys.find((key) => key === preferredKey && stateByKey[key]);
+    if (!selected) selected = keys.find((key) => stateByKey[key]);
+    if (!selected) selected = "thickness";
+    constructionState.foundationHatchShowThickness = selected === "thickness";
+    constructionState.foundationHatchShowDrill = selected === "drill";
+    constructionState.foundationHatchShowFoundationTop = selected === "top";
+    constructionState.foundationHatchShowPit = selected === "pit";
+    return selected;
+  }
+  normalizeFoundationHatchExclusiveState();
   constructionState.foundationExcludeWithThickness = Boolean(constructionState.foundationExcludeWithThickness);
   if (constructionState.pfHeightBandMode !== "large" && constructionState.pfHeightBandMode !== "small") {
     constructionState.pfHeightBandMode = "small";
@@ -7848,20 +7866,7 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationHatchShowDrill = Boolean(constructionFoundationHatchDrill?.checked);
     constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
     constructionState.foundationHatchShowPit = Boolean(constructionFoundationHatchPit?.checked);
-  }
-
-  function enforceFoundationHatchExclusiveMode(source) {
-    if (!constructionFoundationHatchThickness || !constructionFoundationHatchDrill || !constructionFoundationHatchTop || !constructionFoundationHatchPit) return;
-    const pitChecked = Boolean(constructionFoundationHatchPit.checked);
-    if (source === "pit" && pitChecked) {
-      constructionFoundationHatchThickness.checked = false;
-      constructionFoundationHatchDrill.checked = false;
-      constructionFoundationHatchTop.checked = false;
-      return;
-    }
-    if ((source === "thickness" || source === "drill" || source === "top") && pitChecked) {
-      constructionFoundationHatchPit.checked = false;
-    }
+    normalizeFoundationHatchExclusiveState();
   }
   if (constructionFoundationOverlayThickness) {
     constructionFoundationOverlayThickness.addEventListener("change", () => {
@@ -7892,28 +7897,24 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationHatchThickness) {
     constructionFoundationHatchThickness.addEventListener("change", () => {
-      enforceFoundationHatchExclusiveMode("thickness");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchDrill) {
     constructionFoundationHatchDrill.addEventListener("change", () => {
-      enforceFoundationHatchExclusiveMode("drill");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchTop) {
     constructionFoundationHatchTop.addEventListener("change", () => {
-      enforceFoundationHatchExclusiveMode("top");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
   }
   if (constructionFoundationHatchPit) {
     constructionFoundationHatchPit.addEventListener("change", () => {
-      enforceFoundationHatchExclusiveMode("pit");
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
