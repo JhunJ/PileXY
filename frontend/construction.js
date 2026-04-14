@@ -3646,8 +3646,9 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function roundFoundationMetricValue(metricKey, value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return null;
+    const numeric = toFiniteNumberOrNull(value);
+    if (numeric == null) return null;
+    if (metricKey === "pit" && numeric <= 0) return null;
     if (metricKey === "thickness") return Math.round(numeric);
     return Math.round(numeric * 1000) / 1000;
   }
@@ -3665,9 +3666,11 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function getFoundationMetricValueKey(metricKey, value) {
-    if (!Number.isFinite(Number(value))) return "";
-    if (metricKey === "thickness") return String(Math.round(Number(value)));
-    return Number(value).toFixed(3).replace(/\.?0+$/, "");
+    const numeric = toFiniteNumberOrNull(value);
+    if (numeric == null) return "";
+    if (metricKey === "pit" && numeric <= 0) return "";
+    if (metricKey === "thickness") return String(Math.round(numeric));
+    return numeric.toFixed(3).replace(/\.?0+$/, "");
   }
 
   function hashFoundationValueKey(valueKey) {
