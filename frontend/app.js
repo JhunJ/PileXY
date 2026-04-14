@@ -146,12 +146,82 @@ const loadWorkListClose = document.getElementById("load-work-list-close");
 const loadWorkProjectSearch = document.getElementById("load-work-project-search");
 const loadWorkVersionSearch = document.getElementById("load-work-version-search");
 const headerWorkContextEl = document.getElementById("header-work-context");
+const gaSetupTriggerBtn = document.getElementById("ga-setup-trigger");
 const meissaProjectSelect = document.getElementById("meissa-project-select");
 const meissaProjectIdInput = document.getElementById("meissa-project-id");
 
 const LOAD_WORK_FAV_PROJECTS_KEY = "pilexy:load-fav-projects";
 const LOAD_WORK_FAV_WORK_IDS_KEY = "pilexy:load-fav-work-ids";
 const SETTINGS_CONTEXT_STORAGE_KEY = "pilexy:outline-settings-context";
+const GA_MEASUREMENT_ID_STORAGE_KEY = "pilexy:ga-measurement-id";
+let gaBootstrapped = false;
+
+function normalizeGaMeasurementId(value) {
+  return String(value || "").trim();
+}
+
+function readStoredGaMeasurementId() {
+  try {
+    return normalizeGaMeasurementId(localStorage.getItem(GA_MEASUREMENT_ID_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+}
+
+function saveGaMeasurementId(value) {
+  const next = normalizeGaMeasurementId(value);
+  if (!next) return;
+  try {
+    localStorage.setItem(GA_MEASUREMENT_ID_STORAGE_KEY, next);
+  } catch (_) {}
+}
+
+function ensureGoogleAnalyticsScript(measurementId) {
+  if (!measurementId) return;
+  if (document.querySelector('script[data-pilexy-ga-script="1"]')) return;
+  const script = document.createElement("script");
+  script.async = true;
+  script.dataset.pilexyGaScript = "1";
+  script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+  document.head.appendChild(script);
+}
+
+function ensureGoogleAnalyticsGtag() {
+  window.dataLayer = window.dataLayer || [];
+  if (typeof window.gtag !== "function") {
+    window.gtag = function gtag() {
+      window.dataLayer.push(arguments);
+    };
+  }
+  return window.gtag;
+}
+
+function applyGoogleAnalyticsMeasurementId(measurementId, { notify = true } = {}) {
+  const next = normalizeGaMeasurementId(measurementId);
+  if (!next) return false;
+  ensureGoogleAnalyticsScript(next);
+  const gtag = ensureGoogleAnalyticsGtag();
+  if (!gaBootstrapped) {
+    gtag("js", new Date());
+    gaBootstrapped = true;
+  }
+  gtag("config", next);
+  saveGaMeasurementId(next);
+  if (notify) {
+    alert(`구글 애널리틱스 설정 완료: ${next}`);
+  }
+  return true;
+}
+
+function initGoogleAnalyticsFromStorage() {
+  const stored = readStoredGaMeasurementId();
+  if (!stored) return;
+  applyGoogleAnalyticsMeasurementId(stored, { notify: false });
+}
+
+function handleGaSetupTrigger() {
+  alert("반가워요! 😊✨");
+}
 
 function loadFavoriteProjectNames() {
   try {
@@ -1631,6 +1701,7 @@ function syncMeissaCompareBtnEnabled() {
 function init() {
   if (!uploadForm) return;
   restoreSettingsContext();
+  initGoogleAnalyticsFromStorage();
   window.__PILEXY_GET_MEISSA_CONTEXT__ = function pilexyGetMeissaContext() {
     return {
       circles: (state.circles || []).map((c) => ({
@@ -1692,6 +1763,9 @@ function initClusteringSettings() {
 }
 
 function bindEvents() {
+  if (gaSetupTriggerBtn) {
+    gaSetupTriggerBtn.addEventListener("click", handleGaSetupTrigger);
+  }
   uploadForm.addEventListener("submit", handleUpload);
   fileInput.addEventListener("change", () => {
     updateUploadButtonState();

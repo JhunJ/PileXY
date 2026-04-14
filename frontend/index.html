@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>파일 마스터</title>
     <link rel="stylesheet" href="/frontend/styles.css?v=202603698" />
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-WS5RRTXTKW"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        window.dataLayer.push(arguments);
+      }
+      window.gtag = window.gtag || gtag;
+      window.gtag("js", new Date());
+      window.gtag("config", "G-WS5RRTXTKW");
+    </script>
   </head>
   <body>
     <header class="app-header">
@@ -49,6 +59,13 @@
           </div>
         </div>
       </div>
+      <button
+        type="button"
+        id="ga-setup-trigger"
+        class="ga-setup-trigger"
+        aria-label="구글 애널리틱스 설정"
+        title="구글 애널리틱스 설정"
+      ></button>
       <div id="save-work-modal" class="save-work-modal" aria-hidden="true" role="dialog" aria-labelledby="save-work-modal-title">
         <div class="save-work-modal-backdrop"></div>
         <div class="save-work-modal-content">
@@ -1487,7 +1504,7 @@
     </aside>
 
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/app.js?v=202603680"></script>
+    <script src="/frontend/app.js?v=2026041401"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="/frontend/construction.js?v=202604132"></script>
