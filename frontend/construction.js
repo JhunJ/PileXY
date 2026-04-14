@@ -311,7 +311,6 @@
             <label><input type="checkbox" id="construction-foundation-hatch-drill" /> 천공(m)</label>
             <label><input type="checkbox" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
             <label><input type="checkbox" id="construction-foundation-hatch-pit" /> 피트오프셋(m)만</label>
-            <button type="button" id="construction-foundation-hatch-all" class="ghost construction-foundation-overlay-all-btn">가시성 전체</button>
           </div>
           <div class="construction-foundation-building-levels">
             <div class="construction-foundation-area-filter-title">다른 저장 버전에서 불러오기</div>
@@ -476,7 +475,6 @@
   const constructionFoundationHatchDrill = q("#construction-foundation-hatch-drill");
   const constructionFoundationHatchTop = q("#construction-foundation-hatch-top");
   const constructionFoundationHatchPit = q("#construction-foundation-hatch-pit");
-  const constructionFoundationHatchAll = q("#construction-foundation-hatch-all");
   const constructionFoundationPfList = q("#construction-foundation-pf-list");
   const constructionFoundationPfHeightHint = q("#construction-foundation-pf-height-hint");
   const constructionFoundationPfProximityReview = q("#construction-foundation-pf-proximity-review");
@@ -7916,16 +7914,6 @@ function inferOpenRectangleVertices(vertices) {
   if (constructionFoundationHatchPit) {
     constructionFoundationHatchPit.addEventListener("change", () => {
       enforceFoundationHatchExclusiveMode("pit");
-      syncFoundationHatchCheckboxesFromState();
-      requestRedraw();
-    });
-  }
-  if (constructionFoundationHatchAll) {
-    constructionFoundationHatchAll.addEventListener("click", () => {
-      if (constructionFoundationHatchThickness) constructionFoundationHatchThickness.checked = true;
-      if (constructionFoundationHatchDrill) constructionFoundationHatchDrill.checked = true;
-      if (constructionFoundationHatchTop) constructionFoundationHatchTop.checked = true;
-      if (constructionFoundationHatchPit) constructionFoundationHatchPit.checked = true;
       syncFoundationHatchCheckboxesFromState();
       requestRedraw();
     });
