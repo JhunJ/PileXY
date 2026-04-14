@@ -2097,6 +2097,14 @@ def _is_parking_like_placeholder_location(value: Any) -> bool:
     return "주차장" in compact or "지하" in compact
 
 
+def _is_tower_area_location(value: Any) -> bool:
+    """도면·윤곽 부위 정규화 결과가 타워(T1, T2, …)이면 True."""
+    loc = _normalize_location(value)
+    if not loc or loc == "미지정":
+        return False
+    return bool(re.fullmatch(r"T\d+", loc, flags=re.IGNORECASE))
+
+
 def _allow_globally_unique_pile_alias_fallback(
     *,
     circle_location_display: Any,
@@ -2107,10 +2115,13 @@ def _allow_globally_unique_pile_alias_fallback(
 
     `N동` 도면은 동 구분이 필수라서(같은 파일번호가 여러 동에 존재할 수 있음) 전역 유일 폴백을 쓰지 않는다.
     지하주차(Bn)·주차장 추론 경로는 건드리지 않는다.
+    타워(Tn)도 동과 같이 부위가 PDAM과 반드시 맞아야 하며, 파일번호 접미(예: T7-9→9)만으로 다른 부위 행과 엮지 않는다.
     """
     if circle_kind == "dong":
         return False
     if circle_kind == "basement":
+        return False
+    if _is_tower_area_location(circle_location_display):
         return False
     if parking_unified_location is None and _is_parking_like_placeholder_location(circle_location_display):
         return False

@@ -4248,27 +4248,58 @@ function inferOpenRectangleVertices(vertices) {
     return { dx, dy, diag };
   }
 
+  // 절대 크기 giant 판정(상대 분포 비교 사용 안 함)
+  const PF_GIANT_POLY_ABS_MAX_SIDE_M = 80;
+  const PF_GIANT_POLY_ABS_MAX_SIDE_MM = 80000;
+  const PF_GIANT_POLY_ABS_MIN_AREA_M2 = 1200;
+  const PF_GIANT_POLY_ABS_MIN_AREA_MM2 = 1200000000; // 1200 m^2
+
   /**
-   * 면적이 전체 대비 비정상적으로 큰 "사이트 외곽" 윤곽 — 그 안의 작은 글자는 로컬 기초 매칭에서 제외(허브·원거리 합의 방지).
+   * 절대 면적/변 길이로 "사이트 외곽급 거대 윤곽" 판정.
+   * (분포 기반 상대 비교는 사용하지 않는다.)
    */
   function computePfGiantPolylineIdSet(polys) {
     const out = new Set();
-    if (!Array.isArray(polys) || polys.length < 4) return out;
-    const rows = [];
+    if (!Array.isArray(polys) || !polys.length) return out;
+    const inMeters = getPfSpatialUnitsLikelyMeters();
+    const areaThreshold = inMeters ? PF_GIANT_POLY_ABS_MIN_AREA_M2 : PF_GIANT_POLY_ABS_MIN_AREA_MM2;
+    const sideThreshold = inMeters ? PF_GIANT_POLY_ABS_MAX_SIDE_M : PF_GIANT_POLY_ABS_MAX_SIDE_MM;
     for (let i = 0; i < polys.length; i += 1) {
       const p = polys[i];
       if (!p?.vertices || p.vertices.length < 3) continue;
-      rows.push({ id: String(p.id), area: polygonArea(p.vertices) });
+      const area = polygonArea(p.vertices);
+      if (!Number.isFinite(area) || area <= 0) continue;
+      const xs = p.vertices.map((v) => Number(v.x));
+      const ys = p.vertices.map((v) => Number(v.y));
+      const side = Math.max(
+        (Math.max(...xs) - Math.min(...xs)) || 0,
+        (Math.max(...ys) - Math.min(...ys)) || 0,
+      );
+      if (area >= areaThreshold || side >= sideThreshold) {
+        out.add(String(p.id));
+      }
     }
-    if (rows.length < 4) return out;
-    rows.sort((a, b) => a.area - b.area);
-    const med = rows[Math.floor(rows.length / 2)].area;
-    const maxA = rows[rows.length - 1].area;
-    if (!(med > 0) || maxA < med * 3.2) return out;
-    const mult = 5;
-    for (let i = 0; i < rows.length; i += 1) {
-      if (rows[i].area >= med * mult) out.add(rows[i].id);
-    }
+    return out;
+  }
+
+  const PF_GIANT_TEXT_ABS_HEIGHT_M = 1.2;
+  const PF_GIANT_TEXT_ABS_HEIGHT_MM = 1200;
+
+  /**
+   * 절대 글자 높이(TEXT height)로 giant 텍스트 판정.
+   * (분포 기반 상대 비교는 사용하지 않는다.)
+   */
+  function computePfGiantTextIdSet(cands) {
+    const out = new Set();
+    if (!Array.isArray(cands) || !cands.length) return out;
+    const inMeters = getPfSpatialUnitsLikelyMeters();
+    const threshold = inMeters ? PF_GIANT_TEXT_ABS_HEIGHT_M : PF_GIANT_TEXT_ABS_HEIGHT_MM;
+    cands.forEach((c) => {
+      const id = String(c?.id ?? "");
+      const h = Number(c?.textHeight) || 0;
+      if (!id || !Number.isFinite(h) || h <= 0) return;
+      if (h >= threshold) out.add(id);
+    });
     return out;
   }
 
@@ -4976,9 +5007,12 @@ function inferOpenRectangleVertices(vertices) {
     const polys = getBackgroundPolylinesForClick();
     const band = constructionState.pfHeightBandMode === "large" ? "large" : "small";
     const rawPfCandidates = getPfTextCandidatesCached();
-    const { smallIds, largeIds } = getPfRankHeightBandIdSets(rawPfCandidates);
+    const giantTextIdSet = computePfGiantTextIdSet(rawPfCandidates);
+    const pfCandidates = rawPfCandidates.filter((c) => !giantTextIdSet.has(String(c.id)));
+    const { smallIds, largeIds } = getPfRankHeightBandIdSets(pfCandidates);
     const bandIdSet = band === "large" ? largeIds : smallIds;
-    const pfMetaSig = rawPfCandidates
+    const giantTextSig = Array.from(giantTextIdSet).sort().join(",");
+    const pfMetaSig = pfCandidates
       .slice()
       .sort((a, b) => String(a.id).localeCompare(String(b.id)))
       .map(
@@ -4990,7 +5024,7 @@ function inferOpenRectangleVertices(vertices) {
       .map((p) => String(p.id))
       .sort()
       .join("\x1e");
-    const cacheKey = `pfpl36|${constructionState.foundationBackgroundPolylineCacheKey || ""}|${polys.length}|${polyIdsSig}|${band}|${pfMetaSig}`;
+    const cacheKey = `pfpl37|${constructionState.foundationBackgroundPolylineCacheKey || ""}|${polys.length}|${polyIdsSig}|${band}|${giantTextSig}|${pfMetaSig}`;
     if (constructionState.foundationPfMatchCacheKey === cacheKey) {
       return constructionState.foundationPfMatchCache;
     }
@@ -5032,11 +5066,17 @@ function inferOpenRectangleVertices(vertices) {
       polyAreaKindById.set(String(p.id), kind);
     }
     const giantPolylineIdSet = computePfGiantPolylineIdSet(polysSorted);
+    // 사이트 외곽처럼 비정상적으로 큰 닫힌 윤곽은 P/F 매칭 자체에서 제외한다.
+    // (큰 글자 모드에서 F13A/F12A 같은 라벨이 외곽과 직접 묶이는 오매칭 방지)
+    const polysForMatching = polysSorted.filter(
+      (p) => !giantPolylineIdSet.has(String(p.id)),
+    );
+    const effectivePolysForMatching = polysForMatching;
     /** 삽입점이 속한 면적 최소 닫힌 윤곽(가장 안쪽 영역) — 인접·바깥 윤곽이 안쪽 라벨을 가로채지 않게 함 */
     const ownerPolylineIdByPfCandId = new Map();
     if (typeof pointInPolygon === "function") {
-      for (let ci = 0; ci < rawPfCandidates.length; ci += 1) {
-        const c = rawPfCandidates[ci];
+      for (let ci = 0; ci < pfCandidates.length; ci += 1) {
+        const c = pfCandidates[ci];
         let ownerId = null;
         for (let pi = 0; pi < polysSorted.length; pi += 1) {
           const p = polysSorted[pi];
@@ -5048,7 +5088,7 @@ function inferOpenRectangleVertices(vertices) {
         ownerPolylineIdByPfCandId.set(c.id, ownerId);
       }
     }
-    let candidatesAll = rawPfCandidates.filter((c) => {
+    let candidatesAll = pfCandidates.filter((c) => {
       if (!smallIds.has(c.id)) return true;
       const oid = ownerPolylineIdByPfCandId.get(c.id);
       if (oid != null && giantPolylineIdSet.has(oid)) {
@@ -5064,8 +5104,8 @@ function inferOpenRectangleVertices(vertices) {
       return true;
     });
     // 사이트 외곽(거대 폴리) 안의 작은 P/F만 전부 제외되면 후보가 0이 될 수 있음 → 풍무 등에서 PF1~3이 안 잡히는 경우 방지.
-    if (!candidatesAll.length && rawPfCandidates.length) {
-      candidatesAll = rawPfCandidates;
+    if (!candidatesAll.length && pfCandidates.length) {
+      candidatesAll = pfCandidates;
     }
     let candidates = candidatesAll.filter((c) => bandIdSet.has(c.id));
     // 높이 밴드(작은/큰)만 잡히면 후보가 0이 될 수 있음(예: 양수 높이 P/F가 1개뿐이면 전부 '큰' 쪽만).
@@ -5075,7 +5115,7 @@ function inferOpenRectangleVertices(vertices) {
     }
     const candGrid = buildPfCandidateGrid(candidates);
     const jobs = [];
-    polysSorted.forEach((poly) => {
+    effectivePolysForMatching.forEach((poly) => {
       const baseMax = getPfMatchMaxDistanceForPolyline(poly.vertices);
       const maxD =
         band === "small"

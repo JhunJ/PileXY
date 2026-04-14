@@ -538,6 +538,60 @@ def test_map_records_to_circles_globally_unique_pile_alias_when_non_dong_locatio
     assert mapping["circleMappings"][0]["status"] == "installed"
 
 
+def test_map_records_to_circles_tower_does_not_globally_unique_match_other_location():
+    """타워(Tn) 원은 동·다른 부위 PDAM 행과 파일번호 접미만 같다고 전역 유일 폴백으로 연결하지 않는다."""
+    records = [
+        {
+            "location": "108동",
+            "pile_number": "8-9",
+            "construction_date": "2026-04-07",
+            "row_number": 35,
+            "construction_month": "2026-04",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "DRA",
+            "pile_remaining": 0.3,
+            "penetration_depth": 7.7,
+            "boring_depth": 7.7,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [{"id": "C1049", "building_name": "T7", "matched_text": {"text": "T7-9"}}]
+    mapping = construction_reports.map_records_to_circles(records, circles)
+    assert mapping["matchedCircleCount"] == 0
+    assert mapping["pendingCircleCount"] == 1
+    assert mapping["circleMappings"][0]["matchType"] == "pending"
+    assert mapping["circleMappings"][0]["status"] == "pending"
+
+
+def test_map_records_to_circles_tower_exact_location_match_still_works():
+    """타워는 PDAM 시공위치가 Tn으로 일치할 때 (파일번호) exact 매칭은 그대로 된다."""
+    records = [
+        {
+            "location": "T7",
+            "pile_number": "7-9",
+            "construction_date": "2026-04-07",
+            "row_number": 10,
+            "construction_month": "2026-04",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "DRA",
+            "pile_remaining": 0.0,
+            "penetration_depth": 7.0,
+            "boring_depth": 7.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [{"id": "C1", "building_name": "T7", "matched_text": {"text": "T7-9"}}]
+    mapping = construction_reports.map_records_to_circles(records, circles)
+    assert mapping["matchedCircleCount"] == 1
+    assert mapping["circleMappings"][0]["matchType"] == "exact"
+    assert mapping["circleMappings"][0]["status"] == "installed"
+    assert mapping["circleMappings"][0]["locationNormalized"] == "T7"
+
+
 def test_map_records_single_parking_unifies_pdam_labels_with_parking_keyword():
     """저장 작업에 지하주차장 윤곽이 1개(B2)일 때 PDAM 'B3주차장' 등도 B2 윤곽 좌표와 매칭."""
     records = [

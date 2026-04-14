@@ -978,6 +978,90 @@ def point_in_polygon(x: float, y: float, vertices: List[Tuple[float, float]]) ->
     return inside
 
 
+# Fallback outline(polyline) should roughly follow pile spread.
+# Extremely large site boundaries can swallow all texts/circles and break mapping.
+AUTO_POLYLINE_MAX_AREA_TO_CIRCLE_BBOX_RATIO = 20.0
+
+
+def _polygon_area(vertices: List[Tuple[float, float]]) -> float:
+    if len(vertices) < 3:
+        return 0.0
+    area = 0.0
+    n = len(vertices)
+    for i in range(n):
+        x1, y1 = vertices[i]
+        x2, y2 = vertices[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    return abs(area) * 0.5
+
+
+def _circles_bbox_area(circles: List[Dict]) -> Optional[float]:
+    if not circles:
+        return None
+    xs = [float(circle.get("center_x", 0.0)) for circle in circles]
+    ys = [float(circle.get("center_y", 0.0)) for circle in circles]
+    width = max(xs) - min(xs)
+    height = max(ys) - min(ys)
+    area = width * height
+    return area if area > 0 else None
+
+
+def _is_excessive_fallback_polyline(
+    vertices: List[Tuple[float, float]],
+    circles_bbox_area: Optional[float],
+) -> bool:
+    if circles_bbox_area is None or circles_bbox_area <= 0:
+        return False
+    area = _polygon_area(vertices)
+    if area <= 0:
+        return False
+    return area > circles_bbox_area * AUTO_POLYLINE_MAX_AREA_TO_CIRCLE_BBOX_RATIO
+
+
+def _polyline_vertices(polyline: Dict[str, Any]) -> List[Tuple[float, float]]:
+    points = polyline.get("points")
+    if not isinstance(points, list):
+        return []
+    vertices: List[Tuple[float, float]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        if "x" not in point or "y" not in point:
+            continue
+        try:
+            vertices.append((float(point["x"]), float(point["y"])))
+        except (TypeError, ValueError):
+            continue
+    return vertices
+
+
+def _sanitize_reference_polylines(
+    polylines: Optional[List[Dict]],
+    circles: List[Dict],
+) -> List[Dict]:
+    rows = list(polylines or [])
+    if not rows:
+        return []
+    circles_bbox_area = _circles_bbox_area(circles)
+    sanitized: List[Dict] = []
+    for index, polyline in enumerate(rows):
+        if not isinstance(polyline, dict):
+            continue
+        vertices = _polyline_vertices(polyline)
+        if (
+            len(vertices) >= 3
+            and polyline.get("closed") is not False
+            and _is_excessive_fallback_polyline(vertices, circles_bbox_area)
+        ):
+            logger.debug(
+                "Dropping oversized reference polyline from response: %s",
+                polyline.get("id") or f"poly_{index}",
+            )
+            continue
+        sanitized.append(polyline)
+    return sanitized
+
+
 
 def classify_entities(
     circles: List[Dict],
@@ -990,6 +1074,7 @@ def classify_entities(
     fall back to clustering polygons when necessary.
     """
     polygons: List[Tuple[int, int, str, List[Tuple[float, float]]]] = []
+    circles_bbox_area = _circles_bbox_area(circles)
 
     # Use building definitions first
     for index, building in enumerate(buildings):
@@ -1030,6 +1115,14 @@ def classify_entities(
                 if "x" in p and "y" in p
             ]
             if len(vertices) >= 3:
+                if _is_excessive_fallback_polyline(vertices, circles_bbox_area):
+                    logger.debug(
+                        "Skipping oversized fallback polyline: %s (area=%.2f, circle_bbox_area=%.2f)",
+                        polyline.get("id") or f"polyline_{idx + 1}",
+                        _polygon_area(vertices),
+                        circles_bbox_area,
+                    )
+                    continue
                 polyline_name = (
                     polyline.get("cluster_id")
                     or polyline.get("id")
@@ -1900,6 +1993,7 @@ def build_response(
         matched_pairs=matched_pairs,
         duplicate_groups=len(duplicate_groups),
     )
+    safe_raw_polylines = _sanitize_reference_polylines(raw_polylines, filtered_circles)
     circles = [to_circle_model(circle) for circle in filtered_circles]
     texts = [to_text_model(text) for text in filtered_texts]
     return CircleResponse(
@@ -1907,7 +2001,7 @@ def build_response(
         circles=circles,
         texts=texts,
         duplicates=duplicate_groups,
-        polylines=_ensure_polyline_ids(raw_polylines or []),
+        polylines=_ensure_polyline_ids(safe_raw_polylines),
         buildings=building_definitions,
         pile_clusters=cluster_payload,
         cluster_polylines=_ensure_polyline_ids(cluster_polylines),
@@ -3131,6 +3225,9 @@ def _build_filtered_circle_response(
         matched_pairs=matched_pairs,
         duplicate_groups=len(duplicate_groups),
     )
+    safe_response_polylines = _sanitize_reference_polylines(
+        response_polylines, filtered_circles
+    )
     circle_records = [to_circle_model(c) for c in filtered_circles]
     text_records = [to_text_model(t) for t in filtered_texts]
     return CircleResponse(
@@ -3138,7 +3235,7 @@ def _build_filtered_circle_response(
         circles=circle_records,
         texts=text_records,
         duplicates=duplicate_groups,
-        polylines=_ensure_polyline_ids(response_polylines or []),
+        polylines=_ensure_polyline_ids(safe_response_polylines),
         buildings=resolved_buildings,
         pile_clusters=cluster_payload_list,
         cluster_polylines=_ensure_polyline_ids(cluster_polylines),
