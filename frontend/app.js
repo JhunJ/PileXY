@@ -1262,12 +1262,31 @@ function renderSettingsContextSelect(list) {
     : "";
 
   const contextMap = new Map();
+  function addContext(project, projectId) {
+    const pid = normalizeSettingsContextProjectId(projectId);
+    const pname = project ? normalizeProjectName(project) : "";
+    if (!pname && !pid) return;
+    const projectLabel = pname || (pid ? `프로젝트 ${pid}` : "");
+    if (!projectLabel) return;
+    const key = pid ? `id:${pid}` : `name:${projectLabel}`;
+    if (contextMap.has(key)) return;
+    contextMap.set(key, { project: projectLabel, projectId: pid });
+  }
+  if (meissaProjectSelect) {
+    const skipLabels = new Set(["프로젝트 선택", "프로젝트 없음"]);
+    for (const opt of meissaProjectSelect.options) {
+      const projectId = normalizeSettingsContextProjectId(opt.value);
+      if (!projectId) continue;
+      const label = String(opt.textContent || "").trim();
+      if (!label || skipLabels.has(label)) continue;
+      addContext(label, projectId);
+    }
+  }
   (Array.isArray(list) ? list : []).forEach((item) => {
     const project = item?.contextProject ? normalizeProjectName(item.contextProject) : "";
     const projectId = normalizeSettingsContextProjectId(item?.contextProjectId);
     if (!project) return;
-    const key = `${projectId}::${project}`;
-    if (!contextMap.has(key)) contextMap.set(key, { project, projectId });
+    addContext(project, projectId);
   });
 
   const sorted = [...contextMap.values()].sort((a, b) => {
@@ -4054,6 +4073,12 @@ function appendSameBuildingNumberErrors(circles, errors) {
   });
   groups.forEach((items) => {
     if (items.length < 2) return;
+    let siteCount = items.length;
+    if (state.filter?.excludeIdenticalGeometryDuplicates) {
+      const clusters = clusterCirclesByCoLocatedGeometryPolicy(items);
+      if (clusters.length < 2) return;
+      siteCount = clusters.length;
+    }
     const display = getSameBuildingDuplicateDisplayLabel(items[0]);
     const bname = (items[0].building_name || "").trim() || "미할당";
     items.forEach((c) => {
@@ -4067,7 +4092,7 @@ function appendSameBuildingNumberErrors(circles, errors) {
       text_id: null,
       text_value: display,
       circle_ids: items.map((c) => c.id),
-      message: `"${bname}"(동)에서 파일번호 ${display}이(가) ${items.length}개 좌표에 중복되었습니다.`,
+      message: `"${bname}"(동)에서 파일번호 ${display}이(가) ${siteCount}개 좌표에 중복되었습니다.`,
     });
   });
 }
@@ -4087,11 +4112,17 @@ function buildSameBuildingNumberDuplicateGroups(circles) {
   const out = [];
   groups.forEach((items) => {
     if (items.length < 2) return;
+    let siteCount = items.length;
+    if (state.filter?.excludeIdenticalGeometryDuplicates) {
+      const clusters = clusterCirclesByCoLocatedGeometryPolicy(items);
+      if (clusters.length < 2) return;
+      siteCount = clusters.length;
+    }
     const ax = items.reduce((s, c) => s + cx(c), 0) / items.length;
     const ay = items.reduce((s, c) => s + cy(c), 0) / items.length;
     out.push({
       coord_key: { x: ax, y: ay },
-      count: items.length,
+      count: siteCount,
       circle_ids: items.map((i) => i.id ?? i._id),
       details: items.map((item) => ({
         id: item.id,
@@ -4167,6 +4198,38 @@ function geometryMatchesCoLocatedDupPolicy(a, b) {
     return sameFileCircleGeometryLoose(a, b);
   }
   return sameFileCircleGeometry(a, b);
+}
+
+/**
+ * 동일 말뚝 심볼(geometryMatchesCoLocatedDupPolicy)끼리 union-find로 묶은 클러스터.
+ * 「동일 좌표·크기 원 중복 제외」 시 동·번호 중복이 겹침 엔티티만으로 불어나지 않게 할 때 사용.
+ */
+function clusterCirclesByCoLocatedGeometryPolicy(circles) {
+  const n = circles.length;
+  if (n === 0) return [];
+  if (n === 1) return [[circles[0]]];
+  const parent = circles.map((_, i) => i);
+  const find = (i) => {
+    if (parent[i] !== i) parent[i] = find(parent[i]);
+    return parent[i];
+  };
+  const union = (i, j) => {
+    const pi = find(i);
+    const pj = find(j);
+    if (pi !== pj) parent[pi] = pj;
+  };
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (geometryMatchesCoLocatedDupPolicy(circles[i], circles[j])) union(i, j);
+    }
+  }
+  const comp = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!comp.has(r)) comp.set(r, []);
+    comp.get(r).push(circles[i]);
+  }
+  return [...comp.values()];
 }
 
 /** 겹침 중복 Union-Find에 넣을 쌍인지(옵션과 일관되게) */
@@ -8388,6 +8451,8 @@ async function openSaveWorkModal(isOverwrite = false) {
     saveWorkOverwriteSelect.removeEventListener("change", saveWorkOverwriteSelect._overwriteChange);
     try {
       const list = await getSavedWorksList();
+      // await 이후 한 번 더 비움: 연속으로 모달이 열리면 이전 비동기 호출이 나중에 끝나며 옵션이 이중으로 붙는 것을 방지
+      saveWorkOverwriteSelect.innerHTML = "";
       list.forEach((item) => {
         const opt = document.createElement("option");
         opt.value = item.id || "";
@@ -8444,16 +8509,17 @@ async function openSaveWorkModal(isOverwrite = false) {
   }
 
   if (saveWorkAuthorSelect) {
+    let authorList = [];
+    try {
+      authorList = await getSavedWorksList();
+    } catch (_) {}
     saveWorkAuthorSelect.innerHTML = "";
     const optEmpty = document.createElement("option");
     optEmpty.value = "";
     optEmpty.textContent = "선택 (없음)";
     saveWorkAuthorSelect.appendChild(optEmpty);
     const authorSet = new Set();
-    try {
-      const list = await getSavedWorksList();
-      (list.map((item) => (item.author || "").trim()).filter(Boolean)).forEach((a) => authorSet.add(a));
-    } catch (_) {}
+    (authorList.map((item) => (item.author || "").trim()).filter(Boolean)).forEach((a) => authorSet.add(a));
     [...authorSet].sort().forEach((a) => {
       const opt = document.createElement("option");
       opt.value = a;
@@ -8470,13 +8536,14 @@ async function openSaveWorkModal(isOverwrite = false) {
   if (saveWorkAuthorCustom) saveWorkAuthorCustom.value = "";
 
   if (saveWorkProjectSelect) {
-    saveWorkProjectSelect.innerHTML = "";
-    const set = new Set([DEFAULT_PROJECT_NAME]);
+    let projectList = [];
     try {
-      const list = await getSavedWorksList();
-      list.map((item) => normalizeProjectName(item.project)).filter(Boolean).forEach((p) => set.add(p));
+      projectList = await getSavedWorksList();
     } catch (_) {}
+    const set = new Set([DEFAULT_PROJECT_NAME]);
+    projectList.map((item) => normalizeProjectName(item.project)).filter(Boolean).forEach((p) => set.add(p));
     const projects = [...set].sort();
+    saveWorkProjectSelect.innerHTML = "";
     projects.forEach((p) => {
       const opt = document.createElement("option");
       opt.value = p;
@@ -10829,14 +10896,38 @@ function normalizeProjectRecord(record) {
   };
 }
 
+/** "현장명 (473)" 과 작업 메타의 "현장명" 을 같은 불러오기 컨텍스트로 본다. */
+function settingsContextProjectBaseLabel(name) {
+  const s = normalizeProjectName(name);
+  const m = s.match(/^(.*)\s+\(\d+\)\s*$/);
+  return m ? m[1].trim() : s;
+}
+
+function settingsContextNamesLooselyMatch(a, b) {
+  const na = normalizeProjectName(a);
+  const nb = normalizeProjectName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const ba = settingsContextProjectBaseLabel(na);
+  const bb = settingsContextProjectBaseLabel(nb);
+  if (ba && bb && ba === bb) return true;
+  return na === bb || nb === ba;
+}
+
 function isProjectRecordInSettingsContext(project, contextProject, contextProjectId) {
   const normalizedRecordId = normalizeSettingsContextProjectId(project?.contextProjectId);
   const normalizedTargetId = normalizeSettingsContextProjectId(contextProjectId);
-  if (normalizedTargetId) {
-    return normalizedRecordId !== "" && normalizedRecordId === normalizedTargetId;
+  const recProj = project?.contextProject;
+  if (normalizedTargetId && normalizedRecordId) {
+    return normalizedRecordId === normalizedTargetId;
   }
-  if (normalizedRecordId) return false;
-  return normalizeProjectName(project?.contextProject) === normalizeProjectName(contextProject);
+  if (normalizedTargetId && !normalizedRecordId) {
+    return settingsContextNamesLooselyMatch(recProj, contextProject);
+  }
+  if (!normalizedTargetId && normalizedRecordId) {
+    return settingsContextNamesLooselyMatch(recProj, contextProject);
+  }
+  return settingsContextNamesLooselyMatch(recProj, contextProject);
 }
 
 function getVisibleProjectListByContext(list) {

@@ -33,6 +33,25 @@ class DxfPileLabelCollectionTest(unittest.TestCase):
         self.assertFalse(foundation_pf_only_flag("184"))
         self.assertFalse(foundation_pf_only_flag("T4-1"))
 
+    def test_foundation_pf_korean_suffix_collected(self) -> None:
+        """P/F 직후 한글(동·구역명)도 기초 표기로 수집 — 일부 현장 DXF."""
+        self.assertEqual(pile_label_for_collection("P동"), "P동")
+        self.assertEqual(pile_label_for_collection("F기초"), "F기초")
+        self.assertTrue(foundation_pf_only_flag("P동"))
+
+    def test_foundation_pf_fullwidth_leading(self) -> None:
+        self.assertEqual(pile_label_for_collection("\uff30\uff11"), "Ｐ１")  # Ｐ１
+        self.assertTrue(foundation_pf_only_flag("\uff261"))  # Ｆ1
+
+    def test_pf_digit_series_collected(self) -> None:
+        """PF1, PF2 형태 — 두 번째 글자 F가 PHC 오탐으로 빠지지 않아야 함."""
+        self.assertEqual(pile_label_for_collection("PF1"), "PF1")
+        self.assertEqual(pile_label_for_collection("PF2"), "PF2")
+        self.assertEqual(pile_label_for_collection("pf12"), "pf12")
+        self.assertEqual(pile_label_for_collection("PF-2"), "PF-2")
+        self.assertTrue(foundation_pf_only_flag("PF3"))
+        self.assertEqual(pile_label_for_collection("\uff30\uff26\uff11"), "\uff30\uff26\uff11")  # ＰＦ１
+
 
 if __name__ == "__main__":
     unittest.main()

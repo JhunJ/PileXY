@@ -46,8 +46,13 @@
         <div class="construction-sync-grid">
           <label>PDAM ID<input type="text" id="construction-user-id" class="save-work-input" placeholder="we8104 아이디" autocomplete="username" /></label>
           <label>비밀번호<input type="password" id="construction-password" class="save-work-input" placeholder="we8104 비밀번호" autocomplete="current-password" /></label>
-          <label>보고서 페이지 URL<input type="text" id="construction-report-page-url" class="save-work-input" placeholder="예: https://we8104.com/..." /></label>
-          <label>Report ID<input type="number" id="construction-report-id" class="save-work-input" placeholder="예: 323" /></label>
+        </div>
+        <div class="construction-report-advanced">
+          <button type="button" id="construction-report-fields-toggle" class="construction-report-toggle" aria-expanded="false" aria-controls="construction-report-fields">보고서 URL / Report ID 펼치기</button>
+          <div id="construction-report-fields" class="construction-sync-grid construction-sync-grid--report" hidden>
+            <label>보고서 페이지 URL<input type="text" id="construction-report-page-url" class="save-work-input" placeholder="예: https://we8104.com/..." /></label>
+            <label>Report ID<input type="number" id="construction-report-id" class="save-work-input" placeholder="예: 323" /></label>
+          </div>
         </div>
         <div class="construction-sync-actions">
           <button type="button" id="construction-sync-btn" class="header-construction-btn">PDAM 동기화</button>
@@ -383,6 +388,8 @@
   const constructionPassword = q("#construction-password");
   const constructionReportPageUrl = q("#construction-report-page-url");
   const constructionReportId = q("#construction-report-id");
+  const constructionReportFieldsToggle = q("#construction-report-fields-toggle");
+  const constructionReportFields = q("#construction-report-fields");
   const constructionSyncBtn = q("#construction-sync-btn");
   const constructionUploadBtn = q("#construction-upload-btn");
   const constructionUploadInput = q("#construction-upload-input");
@@ -1000,6 +1007,19 @@
     if (!constructionSettlementPreviewBtn) return;
     constructionSettlementPreviewBtn.classList.toggle("is-active", constructionState.settlementPreviewOnly);
     constructionSettlementPreviewBtn.textContent = constructionState.settlementPreviewOnly ? "선택 월 시공만 보는 중" : "선택 월 시공만 보기";
+  }
+
+  function syncReportFieldsToggle() {
+    if (!constructionReportFieldsToggle || !constructionReportFields) return;
+    const isExpanded = !constructionReportFields.hidden;
+    constructionReportFieldsToggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+    constructionReportFieldsToggle.textContent = isExpanded ? "보고서 URL / Report ID 닫기" : "보고서 URL / Report ID 펼치기";
+  }
+
+  function toggleReportFields() {
+    if (!constructionReportFields) return;
+    constructionReportFields.hidden = !constructionReportFields.hidden;
+    syncReportFieldsToggle();
   }
 
   function applyOverlayVisibilityFilters() {
@@ -3973,8 +3993,11 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   /**
-   * P/F 후보를 높이 순으로 나눔: 아래쪽 절반 = 작은 글자 풀, 위쪽 절반 = 큰 글자 풀.
-   * 높이 0·미기록은 항상 작은 쪽(기본 매칭이 작은 글자 위주가 되도록).
+   * P/F 후보(양수 높이만)를 높이값 기준 두 그룹으로 나눔.
+   * 1) 정렬 후 인접 높이 차이가 가장 큰 지점에서 자름(자연스러운 두 덩어리).
+   * 2) 간격이 전체 범위 대비 너무 작으면(거의 동일 높이) 높이 중앙값으로 작/큰 구분.
+   * 3) 그래도 한쪽이 비면 개수 절반으로 자름.
+   * 높이 0·미기록은 항상 작은 쪽에만 둔다.
    */
   function getPfRankHeightBandIdSets(candidatesAll) {
     const pos = [];
@@ -3989,19 +4012,77 @@ function inferOpenRectangleVertices(vertices) {
       return String(a.id).localeCompare(String(b.id));
     });
     const n = pos.length;
-    const mid = Math.floor(n / 2);
-    const smallPosIds = new Set(pos.slice(0, mid).map((c) => c.id));
-    const largePosIds = new Set(pos.slice(mid).map((c) => c.id));
+    let smallPosIds = new Set();
+    let largePosIds = new Set();
+
+    if (n === 0) {
+      // only below
+    } else if (n === 1) {
+      const id = pos[0].id;
+      smallPosIds.add(id);
+      largePosIds.add(id);
+    } else {
+      const heights = pos.map((c) => Number(c.textHeight) || 0);
+      const range = heights[n - 1] - heights[0];
+      let splitAfter = -1;
+      let bestGap = -1;
+      for (let i = 0; i < n - 1; i += 1) {
+        const gap = heights[i + 1] - heights[i];
+        if (gap > bestGap) {
+          bestGap = gap;
+          splitAfter = i;
+        }
+      }
+      const useGap =
+        Number.isFinite(range)
+        && range > 0
+        && bestGap >= range * 0.03
+        && splitAfter >= 0
+        && splitAfter < n - 1;
+
+      if (useGap) {
+        pos.slice(0, splitAfter + 1).forEach((c) => smallPosIds.add(c.id));
+        pos.slice(splitAfter + 1).forEach((c) => largePosIds.add(c.id));
+      } else if (!Number.isFinite(range) || range <= 0) {
+        pos.forEach((c) => {
+          smallPosIds.add(c.id);
+          largePosIds.add(c.id);
+        });
+      } else {
+        const medianH = medianSortedNumeric(heights);
+        const low = [];
+        const high = [];
+        pos.forEach((c) => {
+          const h = Number(c.textHeight) || 0;
+          if (h <= medianH) low.push(c);
+          else high.push(c);
+        });
+        if (!high.length || !low.length) {
+          const mid = Math.floor(n / 2);
+          pos.slice(0, mid).forEach((c) => smallPosIds.add(c.id));
+          pos.slice(mid).forEach((c) => largePosIds.add(c.id));
+        } else {
+          low.forEach((c) => smallPosIds.add(c.id));
+          high.forEach((c) => largePosIds.add(c.id));
+        }
+      }
+    }
+
     const smallIds = new Set();
     const largeIds = new Set();
     candidatesAll.forEach((c) => {
       const h = Number(c.textHeight) || 0;
       if (h <= 0) {
         smallIds.add(c.id);
+      } else if (smallPosIds.has(c.id) && largePosIds.has(c.id)) {
+        smallIds.add(c.id);
+        largeIds.add(c.id);
       } else if (smallPosIds.has(c.id)) {
         smallIds.add(c.id);
-      } else {
+      } else if (largePosIds.has(c.id)) {
         largeIds.add(c.id);
+      } else {
+        smallIds.add(c.id);
       }
     });
     return { smallIds, largeIds };
@@ -4167,27 +4248,58 @@ function inferOpenRectangleVertices(vertices) {
     return { dx, dy, diag };
   }
 
+  // 절대 크기 giant 판정(상대 분포 비교 사용 안 함)
+  const PF_GIANT_POLY_ABS_MAX_SIDE_M = 80;
+  const PF_GIANT_POLY_ABS_MAX_SIDE_MM = 80000;
+  const PF_GIANT_POLY_ABS_MIN_AREA_M2 = 1200;
+  const PF_GIANT_POLY_ABS_MIN_AREA_MM2 = 1200000000; // 1200 m^2
+
   /**
-   * 면적이 전체 대비 비정상적으로 큰 "사이트 외곽" 윤곽 — 그 안의 작은 글자는 로컬 기초 매칭에서 제외(허브·원거리 합의 방지).
+   * 절대 면적/변 길이로 "사이트 외곽급 거대 윤곽" 판정.
+   * (분포 기반 상대 비교는 사용하지 않는다.)
    */
   function computePfGiantPolylineIdSet(polys) {
     const out = new Set();
-    if (!Array.isArray(polys) || polys.length < 4) return out;
-    const rows = [];
+    if (!Array.isArray(polys) || !polys.length) return out;
+    const inMeters = getPfSpatialUnitsLikelyMeters();
+    const areaThreshold = inMeters ? PF_GIANT_POLY_ABS_MIN_AREA_M2 : PF_GIANT_POLY_ABS_MIN_AREA_MM2;
+    const sideThreshold = inMeters ? PF_GIANT_POLY_ABS_MAX_SIDE_M : PF_GIANT_POLY_ABS_MAX_SIDE_MM;
     for (let i = 0; i < polys.length; i += 1) {
       const p = polys[i];
       if (!p?.vertices || p.vertices.length < 3) continue;
-      rows.push({ id: String(p.id), area: polygonArea(p.vertices) });
+      const area = polygonArea(p.vertices);
+      if (!Number.isFinite(area) || area <= 0) continue;
+      const xs = p.vertices.map((v) => Number(v.x));
+      const ys = p.vertices.map((v) => Number(v.y));
+      const side = Math.max(
+        (Math.max(...xs) - Math.min(...xs)) || 0,
+        (Math.max(...ys) - Math.min(...ys)) || 0,
+      );
+      if (area >= areaThreshold || side >= sideThreshold) {
+        out.add(String(p.id));
+      }
     }
-    if (rows.length < 4) return out;
-    rows.sort((a, b) => a.area - b.area);
-    const med = rows[Math.floor(rows.length / 2)].area;
-    const maxA = rows[rows.length - 1].area;
-    if (!(med > 0) || maxA < med * 3.2) return out;
-    const mult = 5;
-    for (let i = 0; i < rows.length; i += 1) {
-      if (rows[i].area >= med * mult) out.add(rows[i].id);
-    }
+    return out;
+  }
+
+  const PF_GIANT_TEXT_ABS_HEIGHT_M = 1.2;
+  const PF_GIANT_TEXT_ABS_HEIGHT_MM = 1200;
+
+  /**
+   * 절대 글자 높이(TEXT height)로 giant 텍스트 판정.
+   * (분포 기반 상대 비교는 사용하지 않는다.)
+   */
+  function computePfGiantTextIdSet(cands) {
+    const out = new Set();
+    if (!Array.isArray(cands) || !cands.length) return out;
+    const inMeters = getPfSpatialUnitsLikelyMeters();
+    const threshold = inMeters ? PF_GIANT_TEXT_ABS_HEIGHT_M : PF_GIANT_TEXT_ABS_HEIGHT_MM;
+    cands.forEach((c) => {
+      const id = String(c?.id ?? "");
+      const h = Number(c?.textHeight) || 0;
+      if (!id || !Number.isFinite(h) || h <= 0) return;
+      if (h >= threshold) out.add(id);
+    });
     return out;
   }
 
@@ -4325,12 +4437,22 @@ function inferOpenRectangleVertices(vertices) {
     return out;
   }
 
-  /** 선택한 높이 구간 안에서만 비교(거리 → 윤곽 내부 → 무게중심) */
+  /**
+   * 선택한 높이 구간 안에서만 비교.
+   * 링(바깥 안·안쪽 밖)에 있는 글자가 안쪽 윤곽에만 가깝다고 잘못 붙는 것을 막기 위해
+   * 삽입점이 해당 윤곽 닫힌선 안(포함)인지를 거리보다 먼저 본다.
+   */
   function comparePfMatchCandidates(a, b) {
+    if (Boolean(a?.inside) !== Boolean(b?.inside)) {
+      return a.inside ? -1 : 1;
+    }
     const eps = 1e-6;
-    if (Math.abs(a.distance - b.distance) > eps) return a.distance - b.distance;
-    if (a.inside !== b.inside) return a.inside ? -1 : 1;
-    return a.dCen - b.dCen;
+    const ad = Number(a.distance);
+    const bd = Number(b.distance);
+    if (Math.abs(ad - bd) > eps) return ad - bd;
+    const ac = Number(a.dCen) || 0;
+    const bc = Number(b.dCen) || 0;
+    return ac - bc;
   }
 
   /**
@@ -4399,6 +4521,14 @@ function inferOpenRectangleVertices(vertices) {
   const PF_GLOBAL_ASSIGN_INF = 1e12;
   /** 전역 배정에서 합의 표기와 다른 후보에 가하는 비용 — 거리만으로는 F6↔F11 등이 뒤바뀌는 경우 완화 */
   const PF_GLOBAL_CONSENSUS_MISMATCH_PENALTY = 380;
+  /** 삽입점이 윤곽 밖이면 기하 거리에 가산 — 전역 배정·스왑이 '가까운 밖'보다 '포함 안'을 우선하도록 함 */
+  const PF_MATCH_OUTSIDE_POLYLINE_EXTRA_COST = 2e6;
+
+  function getPfEffectiveMatchCost(sc) {
+    if (!sc || !Number.isFinite(Number(sc.distance))) return Infinity;
+    const d = Number(sc.distance);
+    return sc.inside ? d : d + PF_MATCH_OUTSIDE_POLYLINE_EXTRA_COST;
+  }
 
   /**
    * 윤곽별 허용 후보(geoSorted)로 비용행렬을 만들고, 전역 최소비용으로 텍스트 id 를 한 번에 배정.
@@ -4427,18 +4557,19 @@ function inferOpenRectangleVertices(vertices) {
     for (let i = 0; i < n; i += 1) {
       const row = new Array(m);
       const list = jobs[i].geoSorted || [];
-      const distById = new Map();
+      const scoreById = new Map();
       for (let k = 0; k < list.length; k += 1) {
         const sc = list[k];
-        distById.set(sc.cand.id, Number(sc.distance));
+        scoreById.set(sc.cand.id, sc);
       }
       const consensusNk = jobs[i].consensusNk;
       for (let j = 0; j < m; j += 1) {
-        const d = distById.get(colIds[j]);
-        if (!Number.isFinite(d)) {
+        const sc = scoreById.get(colIds[j]);
+        if (!sc || !Number.isFinite(Number(sc.distance))) {
           row[j] = PF_GLOBAL_ASSIGN_INF;
           continue;
         }
+        const d = getPfEffectiveMatchCost(sc);
         let pen = 0;
         if (consensusNk) {
           let nk = null;
@@ -4598,12 +4729,73 @@ function inferOpenRectangleVertices(vertices) {
     return null;
   }
 
-  /** 인접 윤곽끼리 배정을 바꿔 총 거리가 줄면 교환(P2C↔P2E 뺏기 완화) */
-  function tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId) {
-    function ownerAllows(candId, poly) {
-      const oid = ownerPolylineIdByPfCandId.get(candId);
-      return oid == null || oid === String(poly.id);
+  /** 안쪽 닫힌선이 바깥 닫힌선 내부에 중첩되는지(중심점 기준). */
+  function isInnerClosedPolylineNestedInOuter(innerVerts, outerVerts) {
+    if (!Array.isArray(innerVerts) || innerVerts.length < 3 || !Array.isArray(outerVerts) || outerVerts.length < 3) {
+      return false;
     }
+    if (typeof pointInPolygon !== "function") return false;
+    const c = polylineVerticesCentroid(innerVerts);
+    if (!c || !Number.isFinite(c.x)) return false;
+    return pointInPolygon({ x: c.x, y: c.y }, outerVerts);
+  }
+
+  /**
+   * 삽입점이 속한 가장 작은 닫힌 윤곽(owner)에만 P/F를 붙인다.
+   * 링(큰 기초판 안·안쪽 기둥·작은 윤곽 밖)에 있는 글자는 owner가 바깥 윤곽뿐이므로,
+   * 예전처럼 안쪽 윤곽에도 후보를 열어 두면 가까운 안쪽 폴리선으로만 잘못 붙는다.
+   */
+  function pfOwnerAllowsCandForPoly(cand, poly, ownerPolylineIdByPfCandId, polyById) {
+    if (!cand || !poly?.vertices || !polyById) return false;
+    if (typeof pointInPolygon === "function" && pointInPolygon({ x: cand.x, y: cand.y }, poly.vertices)) {
+      return true;
+    }
+    const oid = ownerPolylineIdByPfCandId.get(cand.id);
+    if (oid == null || oid === String(poly.id)) return true;
+    return false;
+  }
+
+  /**
+   * 거대 외곽(giant) 안의 작은 P/F 후보는 기본적으로 제외하지만,
+   * 바깥 판 안에 기둥·작은 구멍 폴리선이 여러 개 있어 링 영역에 라벨이 있는 경우(기초판)는 유지한다.
+   * (단순 사이트 외곽만 있는 경우는 제외 유지)
+   */
+  function pfKeepSmallCandidateDespiteGiantOwner(cand, ownerId, polysSorted, polyById) {
+    const outer = polyById.get(String(ownerId));
+    if (!outer?.vertices || typeof pointInPolygon !== "function") return false;
+    const pt = { x: cand.x, y: cand.y };
+    if (!pointInPolygon(pt, outer.vertices)) return false;
+    const oa = polygonArea(outer.vertices);
+    if (!(oa > 0)) return false;
+
+    const nested = [];
+    for (let i = 0; i < polysSorted.length; i += 1) {
+      const p = polysSorted[i];
+      if (String(p.id) === String(outer.id)) continue;
+      const a = polygonArea(p.vertices);
+      if (a >= oa - 1e-3) continue;
+      if (!isInnerClosedPolylineNestedInOuter(p.vertices, outer.vertices)) continue;
+      nested.push({ p, a });
+    }
+    if (!nested.length) return false;
+
+    const TINY_FRAC = 0.028;
+    const SMALL_FRAC = 0.085;
+    const hasTinyHole = nested.some((x) => x.a <= oa * TINY_FRAC);
+    const smallOnes = nested.filter((x) => x.a <= oa * SMALL_FRAC);
+    const multiSmallPlate = smallOnes.length >= 2;
+    const singleModestHole = nested.length === 1 && nested[0].a <= oa * 0.058;
+
+    if (!hasTinyHole && !multiSmallPlate && !singleModestHole) return false;
+
+    for (let i = 0; i < nested.length; i += 1) {
+      if (pointInPolygon(pt, nested[i].p.vertices)) return false;
+    }
+    return true;
+  }
+
+  /** 인접 윤곽끼리 배정을 바꿔 총 거리가 줄면 교환(P2C↔P2E 뺏기 완화) */
+  function tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId, polyById) {
     let changed = true;
     let guard = 0;
     while (changed && guard < 16) {
@@ -4616,12 +4808,20 @@ function inferOpenRectangleVertices(vertices) {
           if (!ai?.sc || !aj?.sc) continue;
           const pi = jobs[i].poly;
           const pj = jobs[j].poly;
-          if (!ownerAllows(aj.sc.cand.id, pi) || !ownerAllows(ai.sc.cand.id, pj)) continue;
+          if (
+            !pfOwnerAllowsCandForPoly(aj.sc.cand, pi, ownerPolylineIdByPfCandId, polyById)
+            || !pfOwnerAllowsCandForPoly(ai.sc.cand, pj, ownerPolylineIdByPfCandId, polyById)
+          ) {
+            continue;
+          }
           const sii = scorePfCandidateForPoly(aj.sc.cand, pi.vertices);
           const sjj = scorePfCandidateForPoly(ai.sc.cand, pj.vertices);
           const s0i = scorePfCandidateForPoly(ai.sc.cand, pi.vertices);
           const s0j = scorePfCandidateForPoly(aj.sc.cand, pj.vertices);
-          if (sii.distance + sjj.distance < s0i.distance + s0j.distance - 0.25) {
+          if (
+            getPfEffectiveMatchCost(sii) + getPfEffectiveMatchCost(sjj)
+            < getPfEffectiveMatchCost(s0i) + getPfEffectiveMatchCost(s0j) - 0.25
+          ) {
             const t = assignment[i];
             assignment[i] = assignment[j];
             assignment[j] = t;
@@ -4644,15 +4844,11 @@ function inferOpenRectangleVertices(vertices) {
     candidatesAll,
     smallIds,
     largeIds,
+    polyById,
   ) {
     const SAME_NK_SLACK = 88;
     const PAIR_REGRESS_LIMIT = 360;
     const SWAP_DIST_REGRESS = 118;
-
-    function ownerAllows(candId, poly) {
-      const oid = ownerPolylineIdByPfCandId.get(candId);
-      return oid == null || oid === String(poly.id);
-    }
 
     function pairSc(sc) {
       return getPfNearestOppositeBandPartnerDist(sc, band, candidatesAll, smallIds, largeIds);
@@ -4673,7 +4869,7 @@ function inferOpenRectangleVertices(vertices) {
         const pool = job.fullSorted || job.geoSorted;
         const alt = pool.find((sc) => {
           if (normalizePfLabelKey(sc.cand.text) !== job.consensusNk) return false;
-          if (!ownerAllows(sc.cand.id, job.poly)) return false;
+          if (!pfOwnerAllowsCandForPoly(sc.cand, job.poly, ownerPolylineIdByPfCandId, polyById)) return false;
           return sc.distance <= cur.sc.distance + SAME_NK_SLACK;
         });
         if (!alt) continue;
@@ -4701,8 +4897,8 @@ function inferOpenRectangleVertices(vertices) {
         const candMine = cur.sc.cand;
         const candO = alt.cand;
 
-        if (!ownerAllows(candMine.id, jobO.poly)) continue;
-        if (!ownerAllows(candO.id, job.poly)) continue;
+        if (!pfOwnerAllowsCandForPoly(candMine, jobO.poly, ownerPolylineIdByPfCandId, polyById)) continue;
+        if (!pfOwnerAllowsCandForPoly(candO, job.poly, ownerPolylineIdByPfCandId, polyById)) continue;
 
         const newI = scorePfCandidateForPoly(candO, job.poly.vertices);
         const newO = scorePfCandidateForPoly(candMine, jobO.poly.vertices);
@@ -4743,14 +4939,80 @@ function inferOpenRectangleVertices(vertices) {
     return { cand, distance: d, inside: !!inside, dCen };
   }
 
+  /**
+   * 동일 표기(PF1)가 도면에 여러 TEXT로 반복되면, 각 윤곽이 가장 가까운 PF1 id만 골라
+   * PF2·PF3 같은 다른 표기 id가 한 윤곽에도 배정되지 않을 수 있다.
+   * 후보에 있으면서 아직 배정되지 않은 표기는, 허용 거리 안에서 가장 가까운 윤곽 하나에 붙인다(다른 표기와 윤곽 충돌 시 거리 짧은 순).
+   */
+  function supplementMissingPfNormalizedLabelAssignments(
+    jobs,
+    assignment,
+    usedTextIds,
+    ownerPolylineIdByPfCandId,
+    candidatesAll,
+    polyById,
+  ) {
+    const nkSeen = new Set();
+    for (let ji = 0; ji < assignment.length; ji += 1) {
+      const slot = assignment[ji];
+      if (slot?.sc?.cand?.text) nkSeen.add(normalizePfLabelKey(slot.sc.cand.text));
+    }
+
+    const byNk = new Map();
+    for (let i = 0; i < candidatesAll.length; i += 1) {
+      const c = candidatesAll[i];
+      const nk = normalizePfLabelKey(c.text);
+      if (!nk) continue;
+      if (!byNk.has(nk)) byNk.set(nk, []);
+      byNk.get(nk).push(c);
+    }
+
+    const missing = Array.from(byNk.keys())
+      .filter((nk) => !nkSeen.has(nk))
+      .sort((a, b) => a.localeCompare(b, "ko"));
+    if (!missing.length) return;
+
+    const claimedJi = new Set();
+    missing.forEach((nk) => {
+      const cands = byNk.get(nk) || [];
+      let best = null;
+      cands.forEach((cand) => {
+        for (let ji = 0; ji < jobs.length; ji += 1) {
+          if (claimedJi.has(ji)) continue;
+          const job = jobs[ji];
+          if (!pfOwnerAllowsCandForPoly(cand, job.poly, ownerPolylineIdByPfCandId, polyById)) continue;
+          const sc = scorePfCandidateForPoly(cand, job.poly.vertices);
+          if (sc.distance > job.maxD) continue;
+          const eff = getPfEffectiveMatchCost(sc);
+          if (
+            !best
+            || eff < best.dist
+            || (Math.abs(eff - best.dist) < 1e-6 && ji < best.ji)
+          ) {
+            best = { ji, sc, cand, dist: eff };
+          }
+        }
+      });
+      if (!best) return;
+      const old = assignment[best.ji];
+      if (old?.sc?.cand?.id) usedTextIds.delete(old.sc.cand.id);
+      assignment[best.ji] = { sc: best.sc, baselineDist: best.sc.distance };
+      usedTextIds.add(best.cand.id);
+      claimedJi.add(best.ji);
+    });
+  }
+
   /** 닫힌 폴리라인마다 가장 가까운 P/F 텍스트를 붙입니다. 면적 작은 윤곽(안쪽)부터 확정해 중첩 시 바깥 윤곽이 안쪽 라벨을 가져가지 않게 합니다. */
   function getPfPolylineMatchGroups() {
     const polys = getBackgroundPolylinesForClick();
     const band = constructionState.pfHeightBandMode === "large" ? "large" : "small";
     const rawPfCandidates = getPfTextCandidatesCached();
-    const { smallIds, largeIds } = getPfRankHeightBandIdSets(rawPfCandidates);
+    const giantTextIdSet = computePfGiantTextIdSet(rawPfCandidates);
+    const pfCandidates = rawPfCandidates.filter((c) => !giantTextIdSet.has(String(c.id)));
+    const { smallIds, largeIds } = getPfRankHeightBandIdSets(pfCandidates);
     const bandIdSet = band === "large" ? largeIds : smallIds;
-    const pfMetaSig = rawPfCandidates
+    const giantTextSig = Array.from(giantTextIdSet).sort().join(",");
+    const pfMetaSig = pfCandidates
       .slice()
       .sort((a, b) => String(a.id).localeCompare(String(b.id)))
       .map(
@@ -4762,7 +5024,7 @@ function inferOpenRectangleVertices(vertices) {
       .map((p) => String(p.id))
       .sort()
       .join("\x1e");
-    const cacheKey = `pfpl27|${constructionState.foundationBackgroundPolylineCacheKey || ""}|${polys.length}|${polyIdsSig}|${band}|${pfMetaSig}`;
+    const cacheKey = `pfpl37|${constructionState.foundationBackgroundPolylineCacheKey || ""}|${polys.length}|${polyIdsSig}|${band}|${giantTextSig}|${pfMetaSig}`;
     if (constructionState.foundationPfMatchCacheKey === cacheKey) {
       return constructionState.foundationPfMatchCache;
     }
@@ -4780,12 +5042,41 @@ function inferOpenRectangleVertices(vertices) {
         return String(a.poly.id).localeCompare(String(b.poly.id));
       })
       .map((row) => row.poly);
+    const polyById = new Map();
+    polysSorted.forEach((p) => polyById.set(String(p.id), p));
+    const areaOutlines = (state.buildings || []).filter((b) => Array.isArray(b?.vertices) && b.vertices.length >= 3);
+    function resolveAreaKindByPoint(pt) {
+      if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y) || typeof pointInPolygon !== "function") return "outside";
+      for (let i = 0; i < areaOutlines.length; i += 1) {
+        const b = areaOutlines[i];
+        const verts = b.vertices.map((v) => ({ x: Number(v.x), y: Number(v.y) }));
+        if (verts.length < 3) continue;
+        if (!pointInPolygon(pt, verts)) continue;
+        const k = String(b.kind || "building").trim().toLowerCase();
+        if (k === "parking") return "parking";
+        return "building";
+      }
+      return "outside";
+    }
+    const polyAreaKindById = new Map();
+    for (let i = 0; i < polysSorted.length; i += 1) {
+      const p = polysSorted[i];
+      const cen = polylineVerticesCentroid(p.vertices);
+      const kind = resolveAreaKindByPoint(cen || { x: NaN, y: NaN });
+      polyAreaKindById.set(String(p.id), kind);
+    }
     const giantPolylineIdSet = computePfGiantPolylineIdSet(polysSorted);
+    // 사이트 외곽처럼 비정상적으로 큰 닫힌 윤곽은 P/F 매칭 자체에서 제외한다.
+    // (큰 글자 모드에서 F13A/F12A 같은 라벨이 외곽과 직접 묶이는 오매칭 방지)
+    const polysForMatching = polysSorted.filter(
+      (p) => !giantPolylineIdSet.has(String(p.id)),
+    );
+    const effectivePolysForMatching = polysForMatching;
     /** 삽입점이 속한 면적 최소 닫힌 윤곽(가장 안쪽 영역) — 인접·바깥 윤곽이 안쪽 라벨을 가로채지 않게 함 */
     const ownerPolylineIdByPfCandId = new Map();
     if (typeof pointInPolygon === "function") {
-      for (let ci = 0; ci < rawPfCandidates.length; ci += 1) {
-        const c = rawPfCandidates[ci];
+      for (let ci = 0; ci < pfCandidates.length; ci += 1) {
+        const c = pfCandidates[ci];
         let ownerId = null;
         for (let pi = 0; pi < polysSorted.length; pi += 1) {
           const p = polysSorted[pi];
@@ -4797,16 +5088,34 @@ function inferOpenRectangleVertices(vertices) {
         ownerPolylineIdByPfCandId.set(c.id, ownerId);
       }
     }
-    const candidatesAll = rawPfCandidates.filter((c) => {
+    let candidatesAll = pfCandidates.filter((c) => {
       if (!smallIds.has(c.id)) return true;
       const oid = ownerPolylineIdByPfCandId.get(c.id);
-      if (oid != null && giantPolylineIdSet.has(oid)) return false;
+      if (oid != null && giantPolylineIdSet.has(oid)) {
+        const ownerAreaKind = polyAreaKindById.get(String(oid));
+        if (ownerAreaKind === "parking" || ownerAreaKind === "building") {
+          return true;
+        }
+        if (pfKeepSmallCandidateDespiteGiantOwner(c, oid, polysSorted, polyById)) {
+          return true;
+        }
+        return false;
+      }
       return true;
     });
-    const candidates = candidatesAll.filter((c) => bandIdSet.has(c.id));
+    // 사이트 외곽(거대 폴리) 안의 작은 P/F만 전부 제외되면 후보가 0이 될 수 있음 → 풍무 등에서 PF1~3이 안 잡히는 경우 방지.
+    if (!candidatesAll.length && pfCandidates.length) {
+      candidatesAll = pfCandidates;
+    }
+    let candidates = candidatesAll.filter((c) => bandIdSet.has(c.id));
+    // 높이 밴드(작은/큰)만 잡히면 후보가 0이 될 수 있음(예: 양수 높이 P/F가 1개뿐이면 전부 '큰' 쪽만).
+    // 풍무 등 PF1·PF2만 있는 도면에서 '작은 글자만' 선택 시 목록이 통째로 비는 것을 막는다.
+    if (!candidates.length && candidatesAll.length) {
+      candidates = candidatesAll;
+    }
     const candGrid = buildPfCandidateGrid(candidates);
     const jobs = [];
-    polysSorted.forEach((poly) => {
+    effectivePolysForMatching.forEach((poly) => {
       const baseMax = getPfMatchMaxDistanceForPolyline(poly.vertices);
       const maxD =
         band === "small"
@@ -4817,8 +5126,7 @@ function inferOpenRectangleVertices(vertices) {
       for (let ni = 0; ni < nearIdx.length; ni += 1) {
         const cand = candidates[nearIdx[ni]];
         if (!cand) continue;
-        const ownerId = ownerPolylineIdByPfCandId.get(cand.id);
-        if (ownerId != null && ownerId !== String(poly.id)) continue;
+        if (!pfOwnerAllowsCandForPoly(cand, poly, ownerPolylineIdByPfCandId, polyById)) continue;
         const sc = scorePfCandidateForPoly(cand, poly.vertices);
         if (sc.distance > maxD) continue;
         const nk = normalizePfLabelKey(cand.text);
@@ -4867,7 +5175,15 @@ function inferOpenRectangleVertices(vertices) {
               insideSmallDominantNk,
             )
           : fullSorted;
-      jobs.push({ poly, maxD, geoSorted, fullSorted, consensusNk, pfInsideSupport });
+      jobs.push({
+        poly,
+        maxD,
+        geoSorted,
+        fullSorted,
+        consensusNk,
+        pfInsideSupport,
+        hasInsideSmallCandidate: insideRanked.length > 0,
+      });
     });
 
     const usedTextIds = new Set();
@@ -4879,7 +5195,13 @@ function inferOpenRectangleVertices(vertices) {
       }
       global.usedTextIds.forEach((id) => usedTextIds.add(id));
     } else {
-      jobs.forEach((job, ji) => {
+      // 텍스트 id 는 도면 전체에서 한 번씩만 쓰므로, 면적 오름차순(작은 폴리 먼저)이면
+      // 기둥·작은 구멍이 PF1~3 을 먼저 가져가 지하주차장 큰 판이 비는 경우가 많다 → 큰 윤곽부터 배정.
+      const greedyOrder = jobs
+        .map((job, ji) => ({ ji, area: polygonArea(job.poly.vertices) }))
+        .sort((a, b) => a.area - b.area);
+      greedyOrder.forEach(({ ji }) => {
+        const job = jobs[ji];
         const best = pickFirstUnusedPfGeoSorted(job.geoSorted, usedTextIds);
         if (!best) return;
         usedTextIds.add(best.cand.id);
@@ -4896,9 +5218,19 @@ function inferOpenRectangleVertices(vertices) {
       candidatesAll,
       smallIds,
       largeIds,
+      polyById,
     );
 
-    tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId);
+    tryImprovePfAssignmentsByPairwiseSwap(jobs, assignment, ownerPolylineIdByPfCandId, polyById);
+
+    supplementMissingPfNormalizedLabelAssignments(
+      jobs,
+      assignment,
+      usedTextIds,
+      ownerPolylineIdByPfCandId,
+      candidatesAll,
+      polyById,
+    );
 
     const rows = [];
     let consensusMismatchCount = 0;
@@ -5617,7 +5949,7 @@ function inferOpenRectangleVertices(vertices) {
     if (!constructionFoundationPfHeightHint) return;
     const th = getPfHeightSplitThreshold();
     constructionFoundationPfHeightHint.textContent =
-      `매칭: P/F를 높이 순으로 나눠 아래쪽 절반만(높이 미기록 포함) 또는 위쪽 절반만 사용합니다. 근접 검토 표는 여전히 중앙값 ${formatMetric(th, 3)} 기준으로 큰/작은을 구분합니다.`;
+      `매칭: 양수 높이 P/F만 모아 높이 순으로 두 그룹(작은/큰)으로 나눕니다. 인접 높이 차이가 가장 큰 지점을 우선 경계로 쓰고, 차이가 거의 없으면 높이 중앙값으로 나눕니다. 전부 같은 높이면 양쪽 밴드에 모두 포함됩니다. 높이 미기록(0)은 항상 작은 쪽. 선택 밴드에 아무도 없으면 전체 P/F로 매칭합니다. 근접 검토 표는 중앙값 ${formatMetric(th, 3)} 기준입니다.`;
   }
 
   function renderFoundationPfProximityReview() {
@@ -7567,6 +7899,10 @@ function inferOpenRectangleVertices(vertices) {
     const file = event.target?.files?.[0];
     importWorkbookFile(file);
   });
+  if (constructionReportFieldsToggle) {
+    constructionReportFieldsToggle.addEventListener("click", toggleReportFields);
+  }
+  syncReportFieldsToggle();
 
   constructionOverlayMode.addEventListener("change", () => {
     constructionState.overlayMode = constructionOverlayMode.value || "status";

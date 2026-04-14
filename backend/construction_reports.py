@@ -33,7 +33,16 @@ HEADER_ALIASES: Dict[str, Sequence[str]] = {
     "pile_type": ("파일종류", "파일 종류", "파일형식"),
     "construction_method": ("시공공법", "시공 공법", "공법"),
     "location": ("시공위치", "시공 위치", "위치", "동"),
-    "pile_number": ("파일번호", "파일 번호", "파일no", "파일 no", "pile no", "pile number"),
+    "pile_number": (
+        "파일번호",
+        "파일 번호",
+        "파일no",
+        "파일 no",
+        "pile no",
+        "pile number",
+        "기초번호",
+        "기초 번호",
+    ),
     "pile_diameter": ("파일규격", "파일규격d", "파일규격(d)", "직경"),
     "pile_classification_single": ("파일구분단본", "파일구분 단본", "단본"),
     "pile_classification_total": ("파일구분합계", "파일구분 합계", "합계"),
@@ -351,7 +360,7 @@ def _resolve_field_mapping(headers: Sequence[str]) -> Dict[str, str]:
                     if (
                         field == "sequence_no"
                         and alias == "번호"
-                        and "파일" in normalized
+                        and ("파일" in normalized or "기초" in normalized)
                     ):
                         continue
                     return header
@@ -1953,6 +1962,13 @@ def _build_date_series(
 
 def _build_method_matrix(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     latest = _latest_records_by_pile(records)
+    # 필터 칩(_option_items)과 동일: 열 이름이 값으로 박힌 행은 매트릭스 집계에서 제외
+    latest = [
+        item
+        for item in latest
+        if not _cell_matches_column_header_echo(item.get("construction_method"), "construction_method")
+        and not _cell_matches_column_header_echo(item.get("pile_type"), "pile_type")
+    ]
     methods = sorted({_normalize_construction_method(item.get("construction_method")) or "미분류" for item in latest})
     pile_types = sorted({_cell_text(item.get("pile_type")) or "미분류" for item in latest})
     cells: List[Dict[str, Any]] = []
@@ -2081,6 +2097,14 @@ def _is_parking_like_placeholder_location(value: Any) -> bool:
     return "주차장" in compact or "지하" in compact
 
 
+def _is_tower_area_location(value: Any) -> bool:
+    """도면·윤곽 부위 정규화 결과가 타워(T1, T2, …)이면 True."""
+    loc = _normalize_location(value)
+    if not loc or loc == "미지정":
+        return False
+    return bool(re.fullmatch(r"T\d+", loc, flags=re.IGNORECASE))
+
+
 def _allow_globally_unique_pile_alias_fallback(
     *,
     circle_location_display: Any,
@@ -2091,10 +2115,13 @@ def _allow_globally_unique_pile_alias_fallback(
 
     `N동` 도면은 동 구분이 필수라서(같은 파일번호가 여러 동에 존재할 수 있음) 전역 유일 폴백을 쓰지 않는다.
     지하주차(Bn)·주차장 추론 경로는 건드리지 않는다.
+    타워(Tn)도 동과 같이 부위가 PDAM과 반드시 맞아야 하며, 파일번호 접미(예: T7-9→9)만으로 다른 부위 행과 엮지 않는다.
     """
     if circle_kind == "dong":
         return False
     if circle_kind == "basement":
+        return False
+    if _is_tower_area_location(circle_location_display):
         return False
     if parking_unified_location is None and _is_parking_like_placeholder_location(circle_location_display):
         return False

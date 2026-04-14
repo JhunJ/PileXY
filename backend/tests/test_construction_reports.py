@@ -43,6 +43,14 @@ def test_sequence_no_does_not_alias_pile_number_column():
     assert resolved.get("sequence_no") is None
 
 
+def test_header_mapping_kicho_number_maps_to_pile_number_not_sequence():
+    """열명이 '기초번호'일 때 순번(번호)이 아니라 파일번호로 인식해야 한다."""
+    headers = ["시공일", "시공위치", "기초번호"]
+    resolved = construction_reports._resolve_field_mapping(headers)
+    assert resolved.get("pile_number") == "기초번호"
+    assert resolved.get("sequence_no") is None
+
+
 def _sample_workbook_bytes() -> bytes:
     rows = [
         ["번호", "시공일", "시공장비", "파일종류", "시공공법", "시공위치", "파일번호", "파일구분", "", "천공깊이(M)", "관입깊이(M)", "파일잔량(M)", "공삭공(M)"],
@@ -528,6 +536,60 @@ def test_map_records_to_circles_globally_unique_pile_alias_when_non_dong_locatio
     assert mapping["pendingCircleCount"] == 0
     assert mapping["circleMappings"][0]["matchType"] == "globally_unique_pile_alias"
     assert mapping["circleMappings"][0]["status"] == "installed"
+
+
+def test_map_records_to_circles_tower_does_not_globally_unique_match_other_location():
+    """타워(Tn) 원은 동·다른 부위 PDAM 행과 파일번호 접미만 같다고 전역 유일 폴백으로 연결하지 않는다."""
+    records = [
+        {
+            "location": "108동",
+            "pile_number": "8-9",
+            "construction_date": "2026-04-07",
+            "row_number": 35,
+            "construction_month": "2026-04",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "DRA",
+            "pile_remaining": 0.3,
+            "penetration_depth": 7.7,
+            "boring_depth": 7.7,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [{"id": "C1049", "building_name": "T7", "matched_text": {"text": "T7-9"}}]
+    mapping = construction_reports.map_records_to_circles(records, circles)
+    assert mapping["matchedCircleCount"] == 0
+    assert mapping["pendingCircleCount"] == 1
+    assert mapping["circleMappings"][0]["matchType"] == "pending"
+    assert mapping["circleMappings"][0]["status"] == "pending"
+
+
+def test_map_records_to_circles_tower_exact_location_match_still_works():
+    """타워는 PDAM 시공위치가 Tn으로 일치할 때 (파일번호) exact 매칭은 그대로 된다."""
+    records = [
+        {
+            "location": "T7",
+            "pile_number": "7-9",
+            "construction_date": "2026-04-07",
+            "row_number": 10,
+            "construction_month": "2026-04",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "DRA",
+            "pile_remaining": 0.0,
+            "penetration_depth": 7.0,
+            "boring_depth": 7.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [{"id": "C1", "building_name": "T7", "matched_text": {"text": "T7-9"}}]
+    mapping = construction_reports.map_records_to_circles(records, circles)
+    assert mapping["matchedCircleCount"] == 1
+    assert mapping["circleMappings"][0]["matchType"] == "exact"
+    assert mapping["circleMappings"][0]["status"] == "installed"
+    assert mapping["circleMappings"][0]["locationNormalized"] == "T7"
 
 
 def test_map_records_single_parking_unifies_pdam_labels_with_parking_keyword():
@@ -1454,3 +1516,32 @@ def test_build_filter_options_excludes_column_header_echo_rows():
     assert [x["value"] for x in opts["equipments"]] == ["1호기"]
     assert [x["value"] for x in opts["methods"]] == ["DRA"]
     assert [x["value"] for x in opts["locations"]] == ["108동"]
+
+
+def test_build_method_matrix_excludes_construction_method_header_echo():
+    """공법이 열 이름(시공공법 등)과 동일한 최신 행은 매트릭스에서 제외한다."""
+    records = [
+        {
+            "construction_date": "2025-01-01",
+            "row_number": 1,
+            "pile_number": "1",
+            "location": "101동",
+            "pile_type": "PHC",
+            "construction_method": "시공공법",
+            "installed": True,
+        },
+        {
+            "construction_date": "2025-01-02",
+            "row_number": 2,
+            "pile_number": "2",
+            "location": "101동",
+            "pile_type": "PHC",
+            "construction_method": "DRA",
+            "installed": True,
+        },
+    ]
+    matrix = construction_reports._build_method_matrix(records)
+    assert "시공공법" not in matrix["rows"]
+    assert matrix["rows"] == ["DRA"]
+    cell = next(c for c in matrix["cells"] if c["row"] == "DRA" and c["column"] == "PHC")
+    assert cell["count"] == 1
