@@ -330,7 +330,7 @@
    * false(기본): 3072 선표시 뒤 8192로 교체(이중 요청 순차). */
   const MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES = false;
   /** true: 저해상 선표시 없이 고화질(max_edge=8192) 단일 1회만 요청. */
-  const MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY = true;
+  const MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY = false;
   /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
   const MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY = false;
   /** true면 <img src> 직접 경로 사용, false면 API fetch→blob 경로만 사용(안정 우선). */
@@ -7015,8 +7015,8 @@
    * 서버가 고해상만 404이고 저해상 캐시만 있을 때 3/3 재시도까지 모두 실패하던 구멍을 막음.
    */
   const MEISSA_ORTHOPHOTO_FULL_IMAGE_FALLBACK_EDGES = [6144, 4096, MEISSA_ORTHOPHOTO_PREVIEW_EDGE];
-  /** 확대 뷰 crop 패치 — 메인 정사와 동일 max_edge */
-  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_EDGE = MEISSA_ORTHOPHOTO_FULL_MAX_EDGE;
+  /** 확대 뷰 crop 패치 — base 정사보다 더 높은 edge를 허용해 줌 선명도 확보 */
+  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_EDGE = 16384;
   /** 고해상 orthophoto-preview GET — PNG가 커서 여유 있게 둠 */
   const MEISSA_ORTHOPHOTO_HIGH_FETCH_MS = 600000;
   /**
@@ -7045,6 +7045,13 @@
     } catch (_) {
       return /[?&]max_edge=(6144|4096|3072|2048|1024)\b/.test(s);
     }
+  }
+
+  /** 버튼 URL(export/orthophoto) 계열은 모바일 브라우저 내부 다운샘플로 줌 블러를 유발하기 쉬움. */
+  function meissa2dOrthophotoUrlIsButtonExport(url) {
+    const s = String(url || "").trim().toLowerCase();
+    if (!s) return false;
+    return s.includes("/export/orthophoto/") || /orthophoto_\d+x\.png/.test(s);
   }
 
   function meissa2dSignedUrlIsExpired(url) {
@@ -13167,6 +13174,15 @@
     state.meissa2dLoadFailHint = "";
     // 이미 큰 원본을 받은 스냅샷이라도 좌표 정합/디테일 갱신은 타일 모자이크를 기준으로 유지한다.
     let cachedRaw = meissa2dRawUrlBySnapshot.get(sid);
+    if (cachedRaw && meissa2dOrthophotoUrlIsButtonExport(cachedRaw)) {
+      pushMeissa2dLoadLine("세션 캐시(raw) 버튼 URL은 줌 블러 가능성이 있어 재요청합니다.");
+      try {
+        meissa2dRawUrlBySnapshot.delete(sid);
+      } catch (_) {
+        /* ignore */
+      }
+      cachedRaw = null;
+    }
     if (cachedRaw && meissa2dOrthophotoUrlIsSubFullTier(cachedRaw)) {
       pushMeissa2dLoadLine(
         `세션 캐시가 저해상(max_edge<${MEISSA_ORTHOPHOTO_FULL_MAX_EDGE}) URL이라 무시하고 고해상으로 다시 받습니다.`
