@@ -6520,6 +6520,19 @@ tr.meissa-result-data-row {
     0 0 8px rgba(34, 211, 238, 0.72);
 }
 
+.meissa-dom-overlay-circle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--circle-size, 6px);
+  height: var(--circle-size, 6px);
+  border-radius: 999px;
+  border: 1px solid rgba(8, 47, 73, 0.9);
+  background: rgba(34, 211, 238, 0.18);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.56) inset,
+    0 0 8px rgba(34, 211, 238, 0.42);
+}
+
 .meissa-dom-overlay-label {
   position: absolute;
   transform: translate(6px, -10px);

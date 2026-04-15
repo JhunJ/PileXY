@@ -11284,24 +11284,10 @@
         : [];
       let best = "";
       if (ordered.length) {
-        try {
-          const probeOrdered = ordered
-            .slice(0, Math.min(8, ordered.length))
-            .filter((url) => !meissaDomOverlayUrlInCooldown(url));
-          for (const candidate of probeOrdered) {
-            const ok = await probeImageUrl(
-              candidate,
-              Math.max(700, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS) || 1500)
-            );
-            if (ok) {
-              best = candidate;
-              break;
-            }
-            markMeissaDomOverlayUrlFailed(candidate);
-          }
-        } catch (_) {
-          /* ignore */
-        }
+        // 대체뷰는 품질 우선: 짧은 probe(1s대)로 25k PNG를 탈락시키지 않는다.
+        // 큰 파일은 실제 img 로드 경로에서 디코드되게 두고, 실패 이벤트에서 폴백 처리한다.
+        const filtered = ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url));
+        best = String(pickBestMeissaOrthoButtonUrlForSharpness(filtered) || "").trim();
       }
       if (!best) {
         const fallback = String(
@@ -11431,8 +11417,9 @@
       const marker = document.createElement("div");
       if (Number.isFinite(rDom) && rDom > 1.4) {
         marker.className = "meissa-dom-overlay-circle";
-        marker.style.width = `${rDom * 2}px`;
-        marker.style.height = `${rDom * 2}px`;
+        const inv = 1 / Math.max(1e-9, meissaDomOverlayScale);
+        const dia = Math.max(2.4, Math.min(stageMaxR * 2, rDom * 2 * inv));
+        marker.style.setProperty("--circle-size", `${dia}px`);
       } else {
         marker.className = "meissa-dom-overlay-dot";
         const inv = 1 / Math.max(1e-9, meissaDomOverlayScale);
@@ -11515,6 +11502,7 @@
       meissaDomOverlayTy = sy - (sy - meissaDomOverlayTy) * k;
       meissaDomOverlayScale = n;
       applyMeissaDomOverlayTransform();
+      scheduleRenderMeissaDomOverlay();
     };
 
     stage.addEventListener(
@@ -11563,6 +11551,7 @@
         meissaDomOverlayTx += evt.clientX - prev.x;
         meissaDomOverlayTy += evt.clientY - prev.y;
         applyMeissaDomOverlayTransform();
+        scheduleRenderMeissaDomOverlay();
       }
       evt.preventDefault();
     });
