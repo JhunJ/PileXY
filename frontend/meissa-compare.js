@@ -8694,6 +8694,10 @@
   /** 메인 <img>가 이미 full max_edge 급이면 crop 캔버스는 이중 합성으로 깨짐·번짐만 유발 */
   function meissa2dOrthoViewportHiRedundantWithMainImg(imgEl) {
     if (!imgEl || !MEISSA_2D_SIMPLE_ORTHO || MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES) return false;
+    const srcKind = getMeissa2dImageDataSource(imgEl);
+    // 버튼 URL(export PNG)은 모바일 브라우저에서 내부 다운샘플될 수 있어
+    // naturalWidth가 커도 뷰포트 패치 fetch를 유지한다.
+    if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") return false;
     const nw = Math.round(Number(imgEl.naturalWidth || 0));
     const nh = Math.round(Number(imgEl.naturalHeight || 0));
     if (nw < 32 || nh < 32) return false;
@@ -9559,7 +9563,19 @@
     const a = String(imgEl?.getAttribute?.("data-meissa-2d-source") || "").trim();
     if (a) return a;
     const src = String(imgEl?.getAttribute?.("src") || "").trim();
-    if (src.includes("cs.carta.is") && src.includes("/orthophoto/")) return "carta-tile";
+    if (!src) return "";
+    try {
+      const u = new URL(src, window.location.origin);
+      const p = String(u.pathname || "").toLowerCase();
+      // 슬리피 타일 경로 (/universal/orthophoto/{z}/{x}/{y}.png)만 타일로 본다.
+      if (p.includes("/universal/orthophoto/")) return "carta-tile";
+      // export/orthophoto/{filename}.png 는 전체 정사 이미지다(타일 아님).
+      if (p.includes("/export/orthophoto/")) return "orthophoto-export";
+    } catch (_) {
+      const low = src.toLowerCase();
+      if (low.includes("/universal/orthophoto/")) return "carta-tile";
+      if (low.includes("/export/orthophoto/")) return "orthophoto-export";
+    }
     return "";
   }
 
@@ -9570,7 +9586,16 @@
   function useFullGeorefForOverlayImage(imgEl) {
     const s = getMeissa2dImageDataSource(imgEl);
     if (s === "carta-tile") return false;
-    if (s === "orthophoto-tif" || s === "raw" || s === "raw-cache" || s === "data-url") return true;
+    if (
+      s === "orthophoto-tif" ||
+      s === "raw" ||
+      s === "raw-cache" ||
+      s === "data-url" ||
+      s === "orthophoto-export" ||
+      s === "orthophoto-button-url"
+    ) {
+      return true;
+    }
     const iw = Number(imgEl?.naturalWidth || 0);
     const ih = Number(imgEl?.naturalHeight || 0);
     /** 저해상 프리뷰도 전역 bbox letterbox면 georef 매핑 가능. 예전: 512 미만이면 분기 스킵 → 심플 모드에서 점 0개 */
@@ -12689,6 +12714,7 @@
         try {
           setMeissa2dRawUrlForSnapshot(String(sid).trim(), src);
           imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+          imgEl.setAttribute("data-meissa-2d-source", "orthophoto-button-url");
           imgEl.src = src;
         } catch (_) {
           finish(false);
@@ -12707,9 +12733,12 @@
       );
       meissa2dOrthoInteractReady = true;
       meissa2dOrthoApplyWrapLoadingPhase("idle");
+      const srcKind = getMeissa2dImageDataSource(imgEl) || "unknown";
+      const georefMode = useFullGeorefForOverlayImage(imgEl) ? "full" : "tile";
       pushMeissa2dLoadLine(
         `정사: 버튼 URL 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
       );
+      pushMeissa2dLoadLine(`정사: 소스 판별 ${srcKind} · georef ${georefMode}`);
       void meissa2dPrimeAnalysisImageFromDisplayedSrc("button-url");
       return { ok: true };
     } finally {
