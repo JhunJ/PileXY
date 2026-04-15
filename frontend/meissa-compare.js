@@ -12970,7 +12970,7 @@
     clearMeissa2dLoadLog();
     pushMeissa2dLoadLine("2D 배경 로드 시작");
     pushMeissa2dLoadLine(
-      `로더모드 direct=${MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM ? "on" : "off"} · singleHigh=${MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY ? "on" : "off"} · highRes=${MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES ? "off" : "on"}`
+      `로더모드 direct=${MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM ? "on" : "off"} · singleHigh=${MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY ? "on" : "off"} · highRes=${MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES ? "off" : "on"} · viewportHi=${MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI ? "off" : "on"}`
     );
     const perfStartedAt = Date.now();
     let perfLastAt = perfStartedAt;
