@@ -207,9 +207,9 @@
   let meissa2dPointTileCacheSid = "";
   let meissa2dPointsRaf = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MS = 1800;
-  const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 180;
+  const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
   /** 확대 배율이 충분히 크면 warmup 중에도 라벨/피킹을 유지(줌인 시 좌표 미표시 체감 완화). */
-  const MEISSA_2D_OVERLAY_WARMUP_LABELS_SCALE_THRESHOLD = 1.55;
+  const MEISSA_2D_OVERLAY_WARMUP_LABELS_SCALE_THRESHOLD = 1.2;
   let meissa2dOverlayWarmUntil = 0;
   /** @type {Array<{x:number,y:number,r:number,circle:Record<string, unknown>,tooltip?:string,fit?:Record<string, unknown>|null}>} */
   let meissa2dPickHits = [];
