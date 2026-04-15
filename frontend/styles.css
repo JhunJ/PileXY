@@ -6461,6 +6461,71 @@ tr.meissa-result-data-row {
   color: #64748b;
 }
 
+.meissa-dom-overlay-wrap {
+  margin-top: 0.45rem;
+}
+
+.meissa-dom-overlay-wrap > summary {
+  cursor: pointer;
+}
+
+.meissa-dom-overlay-stage {
+  position: relative;
+  width: 100%;
+  min-height: 280px;
+  max-height: 58vh;
+  height: min(42vh, 560px);
+  margin-top: 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.meissa-dom-overlay-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  display: block;
+  background: #0f172a;
+}
+
+.meissa-dom-overlay-points {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.meissa-dom-overlay-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  margin-top: -3.5px;
+  border-radius: 999px;
+  background: #22d3ee;
+  box-shadow:
+    0 0 0 1px rgba(8, 47, 73, 0.88),
+    0 0 8px rgba(34, 211, 238, 0.72);
+}
+
+.meissa-dom-overlay-label {
+  position: absolute;
+  transform: translate(6px, -10px);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  white-space: nowrap;
+}
+
 .meissa-cloud-2d-mosaic-local {
   position: absolute;
   inset: 0;

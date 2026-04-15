@@ -52,6 +52,18 @@
     snapshotId: document.getElementById("meissa-snapshot-id"),
     meissaCloud3dFrame: document.getElementById("meissa-cloud-3d-frame"),
     meissaCloud2dImageLocal: document.getElementById("meissa-cloud-2d-image-local"),
+    meissaDomOverlayStage:
+      document.getElementById("meissa-dom-overlay-stage") ||
+      document.getElementById("meissa-2d-url-overlay-wrap"),
+    meissaDomOverlayImage:
+      document.getElementById("meissa-dom-overlay-image") ||
+      document.getElementById("meissa-2d-url-overlay-img"),
+    meissaDomOverlayPoints:
+      document.getElementById("meissa-dom-overlay-points") ||
+      document.getElementById("meissa-2d-url-overlay-points"),
+    meissaDomOverlayStatus:
+      document.getElementById("meissa-dom-overlay-status") ||
+      document.getElementById("meissa-2d-url-overlay-status"),
     meissaCloud3dPlaceholder: document.getElementById("meissa-cloud-3d-placeholder"),
     meissaOpen3dTab: document.getElementById("meissa-open-3d-tab"),
     meissaCloudSessionPrime: document.getElementById("meissa-cloud-session-prime"),
@@ -208,6 +220,7 @@
   let meissa2dPointTileCache = new Map();
   let meissa2dPointTileCacheSid = "";
   let meissa2dPointsRaf = 0;
+  let meissaDomOverlayRaf = 0;
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
   const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
@@ -11162,10 +11175,108 @@
     meissa2dPointsRaf = requestAnimationFrame(() => {
       meissa2dPointsRaf = 0;
       renderMeissa2dPointsOverlay();
+      scheduleRenderMeissaDomOverlay();
       if (meissa2dColorModeValue() === "ortho_pdam" && !meissa2dDragging) {
         const hasAnalysis = meissa2dHasReadyOrthoAnalysisImage();
         scheduleMeissaOrthoOffsetPanelRefresh(hasAnalysis ? 320 : 520);
       }
+    });
+  }
+
+  function syncMeissaDomOverlayImageFromMain() {
+    const domImg = els.meissaDomOverlayImage;
+    const mainImg = els.meissaCloud2dImageLocal;
+    if (!domImg || !mainImg) return false;
+    const src = String(mainImg.getAttribute("src") || "").trim();
+    if (!src) {
+      try {
+        domImg.removeAttribute("src");
+      } catch (_) {
+        /* ignore */
+      }
+      return false;
+    }
+    if (String(domImg.getAttribute("src") || "").trim() !== src) {
+      try {
+        domImg.src = src;
+      } catch (_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 대체 뷰: URL 이미지 + DOM 좌표 오버레이.
+   * 기존 캔버스 렌더와 독립적으로 좌표를 얹어, 이미지 로드가 되는 순간 빠르게 가시화한다.
+   */
+  function renderMeissaDomOverlay() {
+    const stage = els.meissaDomOverlayStage;
+    const domImg = els.meissaDomOverlayImage;
+    const pointsLayer = els.meissaDomOverlayPoints;
+    const status = els.meissaDomOverlayStatus;
+    const mainImg = els.meissaCloud2dImageLocal;
+    if (!stage || !domImg || !pointsLayer || !mainImg) return;
+    const hasMain = hasRenderableOverlayImage(mainImg);
+    const synced = syncMeissaDomOverlayImageFromMain();
+    if (!hasMain || !synced) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 표시 가능한 URL 이미지가 아직 없습니다.";
+      return;
+    }
+    const domRect = getDisplayedImageRectInWrap(domImg, stage);
+    if (!(domRect.w > 2 && domRect.h > 2)) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 이미지 디코드 대기 중...";
+      return;
+    }
+    const mainRect = getMeissa2dOrthoLetterboxInPan(mainImg);
+    if (!(mainRect.w > 2 && mainRect.h > 2)) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 좌표 정합 대기 중...";
+      return;
+    }
+    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const showLabels = circles.length <= 260;
+    const frag = document.createDocumentFragment();
+    let shown = 0;
+    for (const c of circles) {
+      if (!meissa2dCirclePassesRemainingFilter(c)) continue;
+      const m = meissa2dComputeFileToContentPx(c?.center_x, c?.center_y);
+      if (!m || !Number.isFinite(m.px) || !Number.isFinite(m.py)) continue;
+      const nx = (m.px - mainRect.x) / Math.max(1e-9, mainRect.w);
+      const ny = (m.py - mainRect.y) / Math.max(1e-9, mainRect.h);
+      if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+      if (nx < -0.05 || nx > 1.05 || ny < -0.05 || ny > 1.05) continue;
+      const px = domRect.x + nx * domRect.w;
+      const py = domRect.y + ny * domRect.h;
+      const dot = document.createElement("div");
+      dot.className = "meissa-dom-overlay-dot";
+      dot.style.left = `${px}px`;
+      dot.style.top = `${py}px`;
+      dot.title = `ID ${String(c?.id ?? "")} · (${Number(c?.center_x || 0).toFixed(3)}, ${Number(c?.center_y || 0).toFixed(3)})`;
+      frag.appendChild(dot);
+      if (showLabels) {
+        const lb = document.createElement("div");
+        lb.className = "meissa-dom-overlay-label";
+        lb.style.left = `${px}px`;
+        lb.style.top = `${py}px`;
+        lb.textContent = String(c?.id ?? "");
+        frag.appendChild(lb);
+      }
+      shown += 1;
+    }
+    pointsLayer.replaceChildren(frag);
+    if (status) {
+      status.textContent = `대체 뷰: URL 이미지 위 좌표 ${shown}개 표시${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
+    }
+  }
+
+  function scheduleRenderMeissaDomOverlay() {
+    if (meissaDomOverlayRaf) cancelAnimationFrame(meissaDomOverlayRaf);
+    meissaDomOverlayRaf = requestAnimationFrame(() => {
+      meissaDomOverlayRaf = 0;
+      renderMeissaDomOverlay();
     });
   }
 
