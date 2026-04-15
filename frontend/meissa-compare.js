@@ -14739,6 +14739,7 @@
       syncMeissa3dEmbed();
     }
     bindMeissa2dOverlayInteractions();
+    bindMeissaDomOverlayInteractions();
     meissaDatasetBindToolbar();
     bindMeissaCloudInboundMessages();
     if (!state.circles?.length) requestCirclesFromMainOrOpener(true);

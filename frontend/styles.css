@@ -6492,6 +6492,9 @@ tr.meissa-result-data-row {
   object-position: center center;
   display: block;
   background: #0f172a;
+  touch-action: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .meissa-dom-overlay-points {
