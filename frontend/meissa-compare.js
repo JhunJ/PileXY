@@ -342,6 +342,8 @@
   const MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE = 3072;
   /** 정사 preview 대기 상한(ms) — 지연 시 빠르게 RAW/JSON 폴백으로 넘어가 체감 정지를 줄인다. */
   const MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS = 18000;
+  /** 버튼 URL 단일 모드: 한 URL 다운로드/디코드 최대 대기(ms). 초과 시 멈춤 대신 실패로 전환. */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS = 95000;
   /** true: 정사·시공 적합도에서 RGB/형태 분석 실패를 planD(평면)로 초록 승격하지 않고 미판정으로 유지 */
   const MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS = true;
   /**
@@ -12915,6 +12917,7 @@
       }
       pushMeissa2dLoadLine("정사: 버튼 URL 응답 대기 중(브라우저 직접 다운로드)");
       const reqSetAt = Date.now();
+      const timeoutMs = Math.max(25000, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS) || 95000);
       const decoded = await new Promise((resolve) => {
         let done = false;
         const finish = (ok) => {
@@ -12935,7 +12938,21 @@
         };
         const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
         const onErr = () => finish(false);
-        const tm = window.setTimeout(() => finish(false), 180000);
+        const tm = window.setTimeout(() => {
+          try {
+            pushMeissa2dLoadLine(
+              `정사: 버튼 URL 다운로드 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — 현재 요청 중단 후 실패 처리`
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.src = "";
+          } catch (_) {
+            /* ignore */
+          }
+          finish(false);
+        }, timeoutMs);
         imgEl.addEventListener("load", onLoad);
         imgEl.addEventListener("error", onErr);
         try {
@@ -13311,15 +13328,19 @@
     let orthoPrecachePromise = null;
     if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess) {
       try {
-        const orthoUrlParallel = MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
-          ? buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE)
-          : buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_FULL_MAX_EDGE);
-        orthoPrecachePromise = fetchWithTimeout(
-          orthoUrlParallel,
-          { headers: { Authorization: `JWT ${meissaAccess}` } },
-          MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS
-        );
-        pushMeissa2dLoadLine("정사 서버 요청 선시작(지오 조회와 병렬)");
+        if (!isMeissa2dButtonUrlOnlySingleMode()) {
+          const orthoUrlParallel = MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
+            ? buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE)
+            : buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_FULL_MAX_EDGE);
+          orthoPrecachePromise = fetchWithTimeout(
+            orthoUrlParallel,
+            { headers: { Authorization: `JWT ${meissaAccess}` } },
+            MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS
+          );
+          pushMeissa2dLoadLine("정사 서버 요청 선시작(지오 조회와 병렬)");
+        } else {
+          pushMeissa2dLoadLine("버튼 URL 단일 모드: orthophoto-preview 선요청 생략");
+        }
       } catch (_) {
         orthoPrecachePromise = null;
       }
