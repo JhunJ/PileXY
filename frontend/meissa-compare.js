@@ -13178,6 +13178,17 @@
       }
       cachedRaw = null;
     }
+    if (cachedRaw && meissa2dImageLikelyDownsampledByBrowser(cachedRaw, img)) {
+      pushMeissa2dLoadLine(
+        "세션 캐시(raw) 이미지가 URL 기대 해상도 대비 낮게 디코드되어 재요청합니다(줌 블러 완화)."
+      );
+      try {
+        meissa2dRawUrlBySnapshot.delete(sid);
+      } catch (_) {
+        /* ignore */
+      }
+      cachedRaw = null;
+    }
     if (cachedRaw && meissa2dSignedUrlIsExpired(cachedRaw)) {
       pushMeissa2dLoadLine("세션 캐시(raw) URL 만료(Expires)로 재요청합니다.");
       try {
