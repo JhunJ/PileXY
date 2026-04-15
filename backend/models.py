@@ -395,9 +395,12 @@ class MeissaLoginRequest(BaseModel):
         otp = (self.verification_code or "").strip()
         if otp:
             otp = re.sub(r"\s+", "", otp)
-            if not re.fullmatch(r"\d{6,12}", otp):
-                raise ValueError("인증코드는 이메일로 받은 숫자 6자리 이상을 입력하세요.")
-            self.verification_code = otp
+            if re.fullmatch(r"\d{6,12}", otp):
+                self.verification_code = otp
+            else:
+                # OTP 입력란이 숨겨진 상태에서 브라우저 자동완성 문자열이 들어온 경우는 2FA 시도로 보지 않는다.
+                otp = ""
+                self.verification_code = None
         em = (self.email or "").strip()
         pw = self.password if self.password is not None else ""
         if otp:
