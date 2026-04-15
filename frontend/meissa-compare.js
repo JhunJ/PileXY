@@ -11208,6 +11208,16 @@
     return String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
   }
 
+  function meissaDomOverlayDesiredHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const [projectId, sid] = key.split(":");
+    if (!projectId || !sid) return "";
+    const guessed = buildCartaOrthoDirectUrl(projectId, sid, "orthophoto_25000x.png");
+    const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    return guessed || cached;
+  }
+
   async function ensureMeissaDomOverlayHiUrl() {
     const key = meissaDomOverlayCurrentSnapshotKey();
     if (!key || !meissaAccess) return;
@@ -11236,7 +11246,7 @@
     const domImg = els.meissaDomOverlayImage;
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
-    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+    const hiUrl = meissaDomOverlayDesiredHiUrl();
     const mainSrc = String(mainImg.getAttribute("src") || "").trim();
     const src = hiUrl || mainSrc;
     if (!src) {
@@ -11274,6 +11284,14 @@
     if (!hasMain || !synced) {
       pointsLayer.replaceChildren();
       if (status) status.textContent = "대체 뷰: 표시 가능한 URL 이미지가 아직 없습니다.";
+      return;
+    }
+    const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
+    const hiTarget = String(meissaDomOverlayDesiredHiUrl() || "").trim();
+    const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+    if (hiTarget && !hiResolved && domSrcNow !== hiTarget) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 고화질 URL 준비 중...";
       return;
     }
     const domRect = getDisplayedImageRectInWrap(domImg, stage);
@@ -11328,6 +11346,9 @@
         marker.style.height = `${rDom * 2}px`;
       } else {
         marker.className = "meissa-dom-overlay-dot";
+        const inv = 1 / Math.max(1e-9, meissaDomOverlayScale);
+        const sizePx = Math.max(2.2, Math.min(16, 6 * inv));
+        marker.style.setProperty("--dot-size", `${sizePx}px`);
       }
       marker.style.left = `${center.px}px`;
       marker.style.top = `${center.py}px`;
