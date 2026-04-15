@@ -188,6 +188,7 @@
   let meissa2dRecenterTimer = null;
   let meissa2dViewSettleTimer = 0;
   let meissa2dOrthoViewportHiLocalRaf = 0;
+  let meissa2dOrthoViewportHiLocalLastLogTs = 0;
   let meissa2dTileState = {
     snapshotId: "",
     projectId: "",
@@ -8559,6 +8560,7 @@
       }
       meissa2dOrthoViewportHiLocalRaf = 0;
     }
+    meissa2dOrthoViewportHiLocalLastLogTs = 0;
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoHiBadgeProgTimer) {
@@ -8640,6 +8642,7 @@
       }
       meissa2dOrthoViewportHiLocalRaf = 0;
     }
+    meissa2dOrthoViewportHiLocalLastLogTs = 0;
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoViewportHiTimer) {
@@ -8818,6 +8821,13 @@
       } catch (_) {
         /* ignore */
       }
+    }
+    const now = Date.now();
+    if (now - Number(meissa2dOrthoViewportHiLocalLastLogTs || 0) > 1200) {
+      meissa2dOrthoViewportHiLocalLastLogTs = now;
+      pushMeissa2dLoadLine(
+        `정사: 줌 캔버스 재갱신 view ${Math.round(visW)}×${Math.round(visH)} · back ${bw}×${bh} · scale×${sPan.toFixed(2)}`
+      );
     }
   }
 
