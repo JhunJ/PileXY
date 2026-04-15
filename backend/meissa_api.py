@@ -3040,6 +3040,100 @@ def _meissa_orthophoto_request_headers(access_token: str) -> List[Dict[str, str]
     return rows
 
 
+def _meissa_orthophoto_preview_from_resource_urls(
+    access_token: str,
+    snapshot_id: str,
+    edge_lim: int,
+    cap: int,
+    pt_cap: int,
+    headers_try: List[Dict[str, str]],
+    timeout: Tuple[int, int],
+) -> Optional[Dict[str, Any]]:
+    """
+    export/orthophoto 고정 경로가 실패할 때,
+    snapshot resources/detail에 담긴 서명 URL(다운로드 버튼 링크)을 추적해 PNG를 가져온다.
+    """
+    sid = str(snapshot_id).strip()
+    if not sid:
+        return None
+    try:
+        resources = meissa_list_snapshot_resources(access_token, sid)
+    except Exception:
+        resources = []
+    if not resources:
+        return None
+
+    candidates: List[Tuple[int, str]] = []
+    seen_urls: set[str] = set()
+    for r in resources[:32]:
+        rid = r.get("id")
+        name_l = str(r.get("name") or "").lower()
+        type_l = str(r.get("type") or "").lower()
+        urls: List[str] = []
+        urls.extend(_resource_urls_from_payload(r))
+        raw = r.get("raw")
+        if isinstance(raw, dict):
+            urls.extend(_resource_urls_from_payload(raw))
+        if rid is not None:
+            for path in _resource_detail_candidates(sid, str(rid)):
+                d = _meissa_get_soft(path, access_token)
+                if d is None:
+                    continue
+                urls.extend(_resource_urls_from_payload(d))
+                urls.extend(_resource_urls_from_payload(_unwrap_result(d)))
+        for u in urls:
+            us = str(u or "").strip()
+            if not us or not us.startswith("http") or us in seen_urls:
+                continue
+            seen_urls.add(us)
+            lu = us.lower()
+            score = 0
+            if "/export/orthophoto/" in lu:
+                score += 40
+            if "orthophoto_25000x.png" in lu:
+                score += 60
+            if "orthophoto" in lu:
+                score += 20
+            if "signature=" in lu and "expires=" in lu:
+                score += 10
+            if "orthophoto" in name_l:
+                score += 8
+            if "ortho" in type_l or "raster" in type_l:
+                score += 4
+            if score > 0:
+                candidates.append((score, us))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    for _, url in candidates[:16]:
+        for headers in headers_try:
+            res = _meissa_carta_stream_to_tempfile(url, headers, cap, ".png", timeout)
+            tag = res[0]
+            if tag != "ok":
+                continue
+            path, total = res[1], int(res[2])
+            pstr = str(path)
+            wh = _png_ihdr_dimensions(pstr)
+            preview = _meissa_raster_file_to_preview_png_bytes(
+                pstr,
+                edge_lim,
+                source_label="resource-signed-url",
+                png_passthrough=bool(wh and max(wh) <= edge_lim and total <= pt_cap),
+            )
+            if preview and preview.get("ok"):
+                return {
+                    "ok": True,
+                    "snapshotId": sid,
+                    "body": preview["body"],
+                    "width": preview["width"],
+                    "height": preview["height"],
+                    "source": f"{preview.get('source', 'resource-signed-url')}",
+                    "sourceUrl": url,
+                }
+    return None
+
+
 def _meissa_orthophoto_pillow_resample() -> Any:
     """MEISSA_ORTHOPHOTO_RESAMPLE: quality(기본·LANCZOS)|bicubic|fast — 화질 우선, 속도는 fast."""
     from PIL import Image
@@ -3432,6 +3526,20 @@ def meissa_get_carta_orthophoto_preview_png(
                     "snapshotId": sid,
                     "projectId": pid,
                 }
+
+    signed_fallback = _meissa_orthophoto_preview_from_resource_urls(
+        access_token,
+        sid,
+        edge_lim,
+        cap,
+        pt_cap,
+        headers_try,
+        ortho_timeout,
+    )
+    if signed_fallback and signed_fallback.get("ok"):
+        out_fb = dict(signed_fallback)
+        out_fb["projectId"] = pid
+        return out_fb
 
     if not _meissa_orthophoto_tif_fallback_enabled():
         msg = (

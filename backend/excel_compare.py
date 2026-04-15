@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -86,10 +87,40 @@ def _normalize_building(value: Any) -> str:
     return text or DEFAULT_BUILDING_NAME
 
 
+def _is_parking_building_name(value: Any) -> bool:
+    text = _normalize_building(value).replace(" ", "").lower()
+    if not text:
+        return False
+    if "주차장" in text:
+        return True
+    if text.startswith("b") and len(text) >= 2 and text[1:].isdigit():
+        return True
+    return False
+
+
+def _single_parking_building_name(
+    lookup: Dict[Tuple[str, str], List[Dict[str, Any]]],
+) -> Optional[str]:
+    names = {
+        building_name
+        for (building_name, _number) in lookup.keys()
+        if _is_parking_building_name(building_name)
+    }
+    if len(names) != 1:
+        return None
+    return next(iter(names))
+
+
 def _normalize_number(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
+    raw = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw)
+    raw = re.sub(r"\s+", "", raw)
+    hyphen_match = re.fullmatch(r"(\d+)-(\d+)", raw)
+    if hyphen_match:
+        # 동-번호 표기는 뒤 번호를 실제 파일 번호로 본다. (예: 1-1 -> 1)
+        return str(int(hyphen_match.group(2)))
     if raw.endswith(".0"):
         try:
             return str(int(float(raw)))
@@ -102,13 +133,9 @@ def _number_aliases(value: Any) -> List[str]:
     normalized = _normalize_number(value)
     if not normalized:
         return []
-    aliases = [normalized]
-    if "-" not in normalized:
-        return aliases
-    suffix = _normalize_number(normalized.rsplit("-", 1)[-1])
-    if suffix and suffix != normalized:
-        aliases.insert(0, suffix)
-    return aliases
+    # 엑셀/도면 모두 _normalize_number로 동일 정규화 후 비교하므로
+    # 별도 별칭 확장은 하지 않고 "좌표번호" 1개 키로만 매칭한다.
+    return [normalized]
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -177,10 +204,20 @@ def _pick_best_circle(
     number: str,
     x: float,
     y: float,
+    *,
+    single_parking_building: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
+    normalized_building = _normalize_building(building_name)
     for alias in _number_aliases(number):
-        candidates.extend(lookup.get((_normalize_building(building_name), alias), []))
+        candidates.extend(lookup.get((normalized_building, alias), []))
+    if (
+        not candidates
+        and single_parking_building
+        and _is_parking_building_name(normalized_building)
+    ):
+        for alias in _number_aliases(number):
+            candidates.extend(lookup.get((single_parking_building, alias), []))
     if not candidates:
         return None
     return min(candidates, key=lambda circle: _excel_cad_axis_distance(circle, x, y))
@@ -259,6 +296,8 @@ def _compare_single_sheet(
 
     summary = _empty_summary()
     issues: List[Dict[str, Any]] = []
+    single_parking_building_a = _single_parking_building_name(lookup_a)
+    single_parking_building_b = _single_parking_building_name(lookup_b)
 
     for data_index, row in df.iterrows():
         number = _normalize_number(row.get(resolved_number_column))
@@ -275,8 +314,22 @@ def _compare_single_sheet(
 
         summary["totalRows"] += 1
 
-        circle_a = _pick_best_circle(lookup_a, building_name, number, x, y)
-        circle_b = _pick_best_circle(lookup_b, building_name, number, x, y)
+        circle_a = _pick_best_circle(
+            lookup_a,
+            building_name,
+            number,
+            x,
+            y,
+            single_parking_building=single_parking_building_a,
+        )
+        circle_b = _pick_best_circle(
+            lookup_b,
+            building_name,
+            number,
+            x,
+            y,
+            single_parking_building=single_parking_building_b,
+        )
         match_a = circle_a is not None and _excel_cad_axis_distance(circle_a, x, y) <= coord_tolerance
         match_b = circle_b is not None and _excel_cad_axis_distance(circle_b, x, y) <= coord_tolerance
 
@@ -312,15 +365,19 @@ def _compare_single_sheet(
                 "excelX": x,
                 "excelY": y,
                 "oldCircle": {
-                    "x": float(circle_a.get("center_x")),
-                    "y": float(circle_a.get("center_y")),
+                    # 표 표시 좌표는 엑셀과 동일한 X,Y 순서로 노출한다.
+                    # (CAD center_x/center_y를 그대로 내보내면 축이 반대로 보인다)
+                    "x": float(circle_a.get("center_y")),
+                    "y": float(circle_a.get("center_x")),
+                    "number": _match_number(circle_a),
                     "distance": _excel_cad_axis_distance(circle_a, x, y),
                 }
                 if circle_a
                 else None,
                 "newCircle": {
-                    "x": float(circle_b.get("center_x")),
-                    "y": float(circle_b.get("center_y")),
+                    "x": float(circle_b.get("center_y")),
+                    "y": float(circle_b.get("center_x")),
+                    "number": _match_number(circle_b),
                     "distance": _excel_cad_axis_distance(circle_b, x, y),
                 }
                 if circle_b

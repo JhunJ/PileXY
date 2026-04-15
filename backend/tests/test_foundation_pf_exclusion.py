@@ -47,6 +47,23 @@ class FoundationPfExclusionTest(unittest.TestCase):
 
         self.assertEqual(_count_non_foundation_texts(texts), 2)
 
+    def test_build_match_errors_marks_ambiguous_numeric_hyphen(self) -> None:
+        circles = [{"id": "c1", "matched_text_id": "t_bad"}]
+        texts = [{"id": "t_bad", "text": "250-1", "height": 0.8}]
+        errors = build_match_errors(circles, texts, {"t_bad": ["c1"]})
+
+        self.assertTrue(any(e.error_type == "NUMERIC_HYPHEN_FORMAT_INVALID" for e in errors))
+        self.assertTrue(texts[0]["has_error"])
+        self.assertIn("NUMERIC_HYPHEN_FORMAT_INVALID", circles[0]["error_codes"])
+
+    def test_build_match_errors_keeps_tc_tower_format_valid(self) -> None:
+        circles = [{"id": "c1", "matched_text_id": "t_tc"}]
+        texts = [{"id": "t_tc", "text": "TC10-1", "height": 0.8}]
+        errors = build_match_errors(circles, texts, {"t_tc": ["c1"]})
+
+        self.assertFalse(any(e.error_type == "NUMERIC_HYPHEN_FORMAT_INVALID" for e in errors))
+        self.assertFalse(texts[0]["has_error"])
+
 
 if __name__ == "__main__":
     unittest.main()

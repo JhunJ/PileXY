@@ -209,6 +209,7 @@ class MatchError(BaseModel):
         "CIRCLE_NO_MATCH",
         "MATCH_DISTANCE_EXCEEDED",
         "SAME_BUILDING_NUMBER_DUPLICATE",
+        "NUMERIC_HYPHEN_FORMAT_INVALID",
     ]
     text_id: Optional[str] = None
     text_value: Optional[str] = None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import heapq
 import io
 import json
@@ -11,6 +12,7 @@ import os
 import statistics
 import re
 import shutil
+import subprocess
 import tempfile
 import uuid
 from collections import defaultdict, deque
@@ -133,10 +135,14 @@ LABEL_DIRECTION_MANUAL_VOTE_EQUIV = 3.0
 MANUAL_PRUNE_MAX_CENTER_FACTOR = 1.25
 MANUAL_PRUNE_MIN_DISTANCE_IMPROVEMENT = 0.04
 NUMERIC_LABEL_PATTERN = re.compile(r"^\d+$")
+NUMERIC_HYPHEN_AMBIGUOUS_PATTERN = re.compile(r"^\d{3,}-\d+$")
+TOWER_CRANE_PILE_PATTERN = re.compile(r"^(?:T|TC)\d+-\d+$", flags=re.IGNORECASE)
 DEFAULT_CLUSTER_CONFIG = ClusterConfig()
 PILE_NO_HEADER = "말뚝 NO."
 PILE_X_HEADER = "X좌표(도면)"
 PILE_Y_HEADER = "Y좌표(도면)"
+SUPPORTED_DXF_UPLOAD_EXTENSIONS = {".dxf", ".dwg"}
+ODA_CONVERTER_TIMEOUT_SECONDS = 180
 
 # 프로젝트 루트: 실행 경로(cwd)와 무관하게 main.py 위치 기준으로 고정 (저장 데이터 경로 일관성)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -325,6 +331,97 @@ def _remove_saved_setting(
         except Exception:
             pass
     return False
+
+
+# ---------- 엑셀 좌표 비교 결과 캐시 (프로젝트+파일 기준, 서버 공용) ----------
+EXCEL_COMPARE_CACHE_DIR = os.path.join(_PROJECT_ROOT, "data", "excel_compare_cache")
+
+
+def _ensure_excel_compare_cache_dir() -> str:
+    os.makedirs(EXCEL_COMPARE_CACHE_DIR, exist_ok=True)
+    return EXCEL_COMPARE_CACHE_DIR
+
+
+def _normalize_excel_compare_file_signature(file_signature: Optional[str]) -> str:
+    return str(file_signature or "").strip()
+
+
+def _excel_compare_cache_key(project_name: str, file_signature: str) -> str:
+    raw = f"{normalize_project_name(project_name)}::{_normalize_excel_compare_file_signature(file_signature)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _excel_compare_cache_path(project_name: str, file_signature: str) -> str:
+    key = _excel_compare_cache_key(project_name, file_signature)
+    return os.path.join(EXCEL_COMPARE_CACHE_DIR, f"{key}.json")
+
+
+def _get_excel_compare_cache(project_name: str, file_signature: str) -> Optional[Dict[str, Any]]:
+    sig = _normalize_excel_compare_file_signature(file_signature)
+    if not sig:
+        return None
+    _ensure_excel_compare_cache_dir()
+    path = _excel_compare_cache_path(project_name, sig)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _get_latest_excel_compare_cache(project_name: str) -> Optional[Dict[str, Any]]:
+    _ensure_excel_compare_cache_dir()
+    target_project = normalize_project_name(project_name)
+    latest_payload: Optional[Dict[str, Any]] = None
+    latest_saved_at = ""
+    try:
+        for filename in os.listdir(EXCEL_COMPARE_CACHE_DIR):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(EXCEL_COMPARE_CACHE_DIR, filename)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if normalize_project_name(payload.get("projectContext")) != target_project:
+                continue
+            saved_at = str(payload.get("savedAt") or "")
+            if not latest_payload or saved_at > latest_saved_at:
+                latest_payload = payload
+                latest_saved_at = saved_at
+    except Exception:
+        return None
+    return latest_payload
+
+
+def _put_excel_compare_cache(
+    project_name: str,
+    file_signature: str,
+    result: Dict[str, Any],
+) -> None:
+    sig = _normalize_excel_compare_file_signature(file_signature)
+    if not sig:
+        return
+    _ensure_excel_compare_cache_dir()
+    path = _excel_compare_cache_path(project_name, sig)
+    payload = {
+        "projectContext": normalize_project_name(project_name),
+        "fileSignature": sig,
+        "savedAt": pd.Timestamp.utcnow().isoformat(),
+        "result": result,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
 
 
 app.add_middleware(
@@ -569,6 +666,28 @@ def _is_foundation_pf_text_item(text: Any) -> bool:
     if bool(getattr(text, "foundation_pf_only", False)):
         return True
     return foundation_pf_only_flag(str(getattr(text, "text", "") or ""))
+
+
+def _normalize_pile_text_hyphens(value: Any) -> str:
+    return (
+        str(value or "")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+
+
+def _is_numeric_hyphen_ambiguous_text(value: Any) -> bool:
+    """
+    250-1, 250-2 같은 OCR 혼동 패턴(긴 숫자-숫자)을 숫자 포맷 에러로 분류한다.
+    T/TC 형식은 타워크레인 번호로 간주해 제외.
+    """
+    compact = re.sub(r"\s+", "", _normalize_pile_text_hyphens(value))
+    if not compact:
+        return False
+    if TOWER_CRANE_PILE_PATTERN.fullmatch(compact):
+        return False
+    return bool(NUMERIC_HYPHEN_AMBIGUOUS_PATTERN.fullmatch(compact))
 
 
 def _count_non_foundation_texts(texts: List[Any]) -> int:
@@ -1602,8 +1721,22 @@ def build_match_errors(
             continue
         circle_ids = text_links.get(text["id"], [])
         text["matched_circle_ids"] = circle_ids
+        has_error = False
+        if _is_numeric_hyphen_ambiguous_text(text.get("text")):
+            has_error = True
+            errors.append(
+                MatchError(
+                    error_type="NUMERIC_HYPHEN_FORMAT_INVALID",
+                    text_id=text["id"],
+                    text_value=text["text"],
+                    circle_ids=circle_ids,
+                    message=f"TEXT {text['text']} has ambiguous numeric hyphen format (expected pure number).",
+                )
+            )
+            for cid in circle_ids:
+                circle_errors[cid].append("NUMERIC_HYPHEN_FORMAT_INVALID")
         if len(circle_ids) > 1:
-            text["has_error"] = True
+            has_error = True
             errors.append(
                 MatchError(
                     error_type="TEXT_MULTI_MATCH",
@@ -1616,7 +1749,7 @@ def build_match_errors(
             for cid in circle_ids:
                 circle_errors[cid].append("TEXT_MULTI_MATCH")
         elif not circle_ids:
-            text["has_error"] = True
+            has_error = True
             errors.append(
                 MatchError(
                     error_type="TEXT_NO_MATCH",
@@ -1626,8 +1759,7 @@ def build_match_errors(
                     message=f"TEXT {text['text']} has no matching circle.",
                 )
             )
-        else:
-            text["has_error"] = False
+        text["has_error"] = has_error
 
     for circle in circles:
         codes = list(circle_errors.get(circle["id"], []))
@@ -2584,6 +2716,121 @@ def _log_upload_failure(temp_path: Optional[str]) -> None:
         logger.debug("Could not read temp file for diagnostic: %s", e)
 
 
+def _get_upload_extension(filename: str) -> str:
+    return os.path.splitext((filename or "").strip())[1].lower()
+
+
+def _resolve_oda_converter_executable() -> Optional[str]:
+    candidates: List[str] = []
+    for env_key in ("ODA_FILE_CONVERTER_PATH", "ODA_FILE_CONVERTER", "TEIGHA_FILE_CONVERTER"):
+        value = (os.getenv(env_key) or "").strip()
+        if value:
+            candidates.append(value)
+    candidates.extend(
+        [
+            "ODAFileConverter",
+            "ODAFileConverter.exe",
+            "TeighaFileConverter",
+            "TeighaFileConverter.exe",
+        ]
+    )
+    for candidate in candidates:
+        expanded = os.path.expandvars(os.path.expanduser(candidate))
+        if os.path.isfile(expanded):
+            return expanded
+        found = shutil.which(expanded)
+        if found:
+            return found
+    windows_roots = [
+        r"C:\Program Files\ODA",
+        r"C:\Program Files (x86)\ODA",
+        r"C:\Program Files\Teigha",
+        r"C:\Program Files (x86)\Teigha",
+    ]
+    exe_names = ("ODAFileConverter.exe", "TeighaFileConverter.exe")
+    for root in windows_roots:
+        if not os.path.isdir(root):
+            continue
+        for current_root, _, files in os.walk(root):
+            lower_files = {file.lower(): file for file in files}
+            for exe_name in exe_names:
+                matched = lower_files.get(exe_name.lower())
+                if matched:
+                    return os.path.join(current_root, matched)
+    return None
+
+
+def _find_converted_dxf_file(output_dir: str, input_basename: str) -> Optional[str]:
+    target_name = f"{os.path.splitext(input_basename)[0]}.dxf".lower()
+    direct_path = os.path.join(output_dir, target_name)
+    if os.path.isfile(direct_path):
+        return direct_path
+    for root, _, files in os.walk(output_dir):
+        for file in files:
+            if file.lower() == target_name:
+                return os.path.join(root, file)
+    return None
+
+
+def _convert_dwg_to_dxf_via_oda(source_dwg_path: str) -> str:
+    oda_executable = _resolve_oda_converter_executable()
+    if not oda_executable:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "DWG 업로드를 처리하려면 ODA File Converter가 필요합니다. "
+                "ODA를 설치한 뒤 ODA_FILE_CONVERTER_PATH(또는 ODA_FILE_CONVERTER) "
+                "환경변수에 실행 파일 경로를 설정해 주세요."
+            ),
+        )
+    input_dir = os.path.dirname(source_dwg_path)
+    input_basename = os.path.basename(source_dwg_path)
+    output_dir = tempfile.mkdtemp(prefix="pilexy_oda_")
+    try:
+        command = [
+            oda_executable,
+            input_dir,
+            output_dir,
+            "ACAD2018",
+            "DXF",
+            "0",
+            "1",
+            input_basename,
+        ]
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=ODA_CONVERTER_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
+            detail_msg = stderr or stdout or f"exit code {result.returncode}"
+            raise HTTPException(
+                status_code=400,
+                detail=f"DWG -> DXF 변환(ODA) 실패: {detail_msg}",
+            )
+        converted_path = _find_converted_dxf_file(output_dir, input_basename)
+        if not converted_path or not os.path.isfile(converted_path):
+            raise HTTPException(
+                status_code=400,
+                detail="DWG -> DXF 변환(ODA) 결과 파일을 찾지 못했습니다.",
+            )
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp_dxf:
+            converted_temp_path = tmp_dxf.name
+        shutil.copy2(converted_path, converted_temp_path)
+        return converted_temp_path
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DWG -> DXF 변환(ODA) 시간 초과 ({ODA_CONVERTER_TIMEOUT_SECONDS}초).",
+        ) from exc
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
 @app.get("/")
 async def root():
     if os.path.exists(FRONTEND_INDEX_PATH):
@@ -2615,8 +2862,12 @@ async def upload_dxf(
         description="저장 작업 ID. 지정 시 해당 버전의 수동 매칭만 재사용.",
     ),
 ) -> CircleResponse:
-    if not filename or not filename.lower().endswith(".dxf"):
-        raise HTTPException(status_code=400, detail="Only DXF files are supported (query param: filename=...).")
+    file_ext = _get_upload_extension(filename or "")
+    if not filename or file_ext not in SUPPORTED_DXF_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Only DXF/DWG files are supported (query param: filename=...).",
+        )
 
     validate_range("Diameter", min_diameter, max_diameter)
     if min_area is not None and max_area is not None:
@@ -2627,12 +2878,13 @@ async def upload_dxf(
             status_code=400, detail="Max match distance must be greater than zero."
         )
     temp_path = None
+    parse_input_path = None
     try:
         # 스트리밍으로 본문 수신: 서버가 청크 단위로 읽어야 클라이언트 진행률이 올라감.
         # (Starlette/FastAPI UploadFile.read()는 전체 업로드 완료까지 대기하는 동작이라 진행률이 1%에서 멈춤)
         # N청크마다만 yield해 버퍼를 더 빨리 소비. 프록시(nginx) 사용 시 proxy_request_buffering off 권장.
         YIELD_EVERY_CHUNKS = 32
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext or ".dxf") as tmp:
             temp_path = tmp.name
             total = 0
             chunk_count = 0
@@ -2655,9 +2907,13 @@ async def upload_dxf(
             temp_path = None
             raise HTTPException(
                 status_code=400,
-                detail="업로드된 파일이 비어 있습니다. DXF 파일을 선택했는지 확인하세요.",
+                detail="업로드된 파일이 비어 있습니다. DXF/DWG 파일을 선택했는지 확인하세요.",
             )
         logger.info("upload temp size: %d", total)
+        parse_input_path = temp_path
+        if file_ext == ".dwg":
+            parse_input_path = _convert_dwg_to_dxf_via_oda(temp_path)
+            logger.info("DWG converted to DXF via ODA: %s", parse_input_path)
 
         # DXF 파싱은 CPU 부하가 크므로 스레드 풀에서 실행.
         loop = asyncio.get_event_loop()
@@ -2665,27 +2921,27 @@ async def upload_dxf(
             circles, texts, polylines = await loop.run_in_executor(
                 None,
                 lambda: parse_dxf_entities(
-                    temp_path, text_height_min, text_height_max
+                    parse_input_path, text_height_min, text_height_max
                 ),
             )
         except (ezdxf.DXFStructureError, ezdxf.DXFError) as dxf_err:
             msg = str(dxf_err) if dxf_err else "DXF 파일 형식이 올바르지 않습니다."
             if "is not a DXF file" in msg or "not a DXF" in msg.lower():
-                _log_upload_failure(temp_path)
+                _log_upload_failure(parse_input_path or temp_path)
                 size_hint = f" (수신: {total} bytes)"
                 raise HTTPException(
                     status_code=400,
-                    detail="선택한 파일이 DXF 형식이 아니거나 손상되었습니다. CAD에서 '다른 이름으로 저장' → DXF(R12/LT2 또는 최신 ASCII)로 다시 저장한 뒤 시도해 보세요." + size_hint,
+                    detail="선택한 파일(DXF/DWG)이 유효하지 않거나 손상되었습니다. CAD에서 '다른 이름으로 저장' → DXF(R12/LT2 또는 최신 ASCII)로 다시 저장한 뒤 시도해 보세요." + size_hint,
                 ) from dxf_err
             raise HTTPException(status_code=400, detail=f"DXF 파싱 오류: {msg}") from dxf_err
         except Exception as parse_err:
             msg = (str(parse_err) or "").lower()
             if "is not a dxf file" in msg or "not a dxf" in msg:
-                _log_upload_failure(temp_path)
+                _log_upload_failure(parse_input_path or temp_path)
                 size_hint = f" (수신: {total} bytes)"
                 raise HTTPException(
                     status_code=400,
-                    detail="선택한 파일이 DXF 형식이 아니거나 손상되었습니다. CAD에서 '다른 이름으로 저장' → DXF(R12/LT2 또는 최신 ASCII)로 다시 저장한 뒤 시도해 보세요." + size_hint,
+                    detail="선택한 파일(DXF/DWG)이 유효하지 않거나 손상되었습니다. CAD에서 '다른 이름으로 저장' → DXF(R12/LT2 또는 최신 ASCII)로 다시 저장한 뒤 시도해 보세요." + size_hint,
                 ) from parse_err
             raise
         logger.info(f"Parsed DXF: {len(circles) if circles else 0} circles, {len(texts) if texts else 0} texts, {len(polylines) if polylines else 0} polylines")
@@ -2717,7 +2973,7 @@ async def upload_dxf(
         # 새 파일을 영구적으로 저장 (재파싱용)
         import uuid as uuid_module
         saved_file_path = os.path.join(tempfile.gettempdir(), f"dxf_upload_{uuid_module.uuid4().hex}.dxf")
-        shutil.copy2(temp_path, saved_file_path)
+        shutil.copy2(parse_input_path, saved_file_path)
         last_dxf_file_path = saved_file_path
 
         filters = FilterSettings(
@@ -2744,6 +3000,8 @@ async def upload_dxf(
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+        if parse_input_path and parse_input_path != temp_path and os.path.exists(parse_input_path):
+            os.remove(parse_input_path)
 
 
 # Cloudflare Tunnel 등에서 대용량 본문이 1~2MB만 전달된 뒤 끊길 때 사용. 파일을 잘라 여러 요청으로 보냄.
@@ -2786,8 +3044,9 @@ async def upload_dxf_chunk(
     ),
 ):
     """대용량 DXF를 1MB 단위로 잘라 보낼 때 사용. 마지막 청크 수신 시 병합 후 파싱해 CircleResponse 반환."""
-    if not filename.lower().endswith(".dxf"):
-        raise HTTPException(status_code=400, detail="Only DXF files are supported.")
+    file_ext = _get_upload_extension(filename or "")
+    if file_ext not in SUPPORTED_DXF_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only DXF/DWG files are supported.")
     validate_range("Diameter", min_diameter, max_diameter)
     if min_area is not None and max_area is not None:
         validate_range("Area", min_area, max_area)
@@ -2803,8 +3062,9 @@ async def upload_dxf_chunk(
         return {"ok": True, "chunk": chunk_index + 1, "total_chunks": total_chunks}
     # 마지막 청크: 병합 후 파싱
     merge_path = None
+    parse_input_path = None
     try:
-        merge_path = os.path.join(tempfile.gettempdir(), f"dxf_merge_{uuid.uuid4().hex}.dxf")
+        merge_path = os.path.join(tempfile.gettempdir(), f"dxf_merge_{uuid.uuid4().hex}{file_ext or '.dxf'}")
         with open(merge_path, "wb") as out:
             for i in range(total_chunks):
                 p = os.path.join(chunk_dir, f"{i}.bin")
@@ -2821,10 +3081,14 @@ async def upload_dxf_chunk(
             os.rmdir(chunk_dir)
         except Exception:
             pass
+        parse_input_path = merge_path
+        if file_ext == ".dwg":
+            parse_input_path = _convert_dwg_to_dxf_via_oda(merge_path)
+            logger.info("Chunked DWG converted to DXF via ODA: %s", parse_input_path)
         loop = asyncio.get_event_loop()
         circles, texts, polylines = await loop.run_in_executor(
             None,
-            lambda: parse_dxf_entities(merge_path, text_height_min, text_height_max),
+            lambda: parse_dxf_entities(parse_input_path, text_height_min, text_height_max),
         )
         global last_raw_circles, last_raw_texts, last_raw_polylines, building_definitions, last_dxf_file_path
         last_raw_circles = circles if circles is not None else []
@@ -2848,7 +3112,7 @@ async def upload_dxf_chunk(
             except Exception:
                 pass
         saved_file_path = os.path.join(tempfile.gettempdir(), f"dxf_upload_{uuid.uuid4().hex}.dxf")
-        shutil.copy2(merge_path, saved_file_path)
+        shutil.copy2(parse_input_path, saved_file_path)
         last_dxf_file_path = saved_file_path
         filters = FilterSettings(
             min_diameter=min_diameter,
@@ -2870,6 +3134,11 @@ async def upload_dxf_chunk(
         if merge_path and os.path.exists(merge_path):
             try:
                 os.remove(merge_path)
+            except Exception:
+                pass
+        if parse_input_path and parse_input_path != merge_path and os.path.exists(parse_input_path):
+            try:
+                os.remove(parse_input_path)
             except Exception:
                 pass
 
@@ -4027,6 +4296,45 @@ async def inspect_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Failed to inspect Excel file: {exc}") from exc
 
 
+@app.get("/api/excel/compare-cache")
+async def get_excel_compare_cache(
+    project_context: Optional[str] = Query(None, alias="project_context"),
+    file_signature: str = Query(..., alias="file_signature"),
+) -> Dict[str, Any]:
+    project_name = normalize_project_name(project_context) if project_context else DEFAULT_PROJECT_NAME
+    cached = _get_excel_compare_cache(project_name, file_signature)
+    if not cached:
+        raise HTTPException(status_code=404, detail="Saved excel compare result not found.")
+    result = cached.get("result")
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=404, detail="Saved excel compare result is invalid.")
+    return {
+        "projectContext": project_name,
+        "fileSignature": _normalize_excel_compare_file_signature(file_signature),
+        "savedAt": cached.get("savedAt"),
+        "result": result,
+    }
+
+
+@app.get("/api/excel/compare-cache/latest")
+async def get_latest_excel_compare_cache(
+    project_context: Optional[str] = Query(None, alias="project_context"),
+) -> Dict[str, Any]:
+    project_name = normalize_project_name(project_context) if project_context else DEFAULT_PROJECT_NAME
+    cached = _get_latest_excel_compare_cache(project_name)
+    if not cached:
+        raise HTTPException(status_code=404, detail="Saved excel compare result not found.")
+    result = cached.get("result")
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=404, detail="Saved excel compare result is invalid.")
+    return {
+        "projectContext": project_name,
+        "fileSignature": _normalize_excel_compare_file_signature(cached.get("fileSignature")),
+        "savedAt": cached.get("savedAt"),
+        "result": result,
+    }
+
+
 @app.post("/api/excel/compare")
 async def compare_excel_coordinates(
     file: UploadFile = File(...),
@@ -4044,6 +4352,8 @@ async def compare_excel_coordinates(
     building_source_mode: Optional[str] = Form(None),
     use_sheet_name_as_building: Optional[bool] = Form(True),
     coord_tolerance: float = Form(0.01),
+    project_context: Optional[str] = Form(None),
+    file_signature: Optional[str] = Form(None),
     version_a_label: Optional[str] = Form(None),
     version_b_label: Optional[str] = Form(None),
 ) -> Dict[str, Any]:
@@ -4091,6 +4401,10 @@ async def compare_excel_coordinates(
         "old": version_a_label or "이전 버전",
         "new": version_b_label or "현재 버전",
     }
+    project_name = normalize_project_name(project_context) if project_context else DEFAULT_PROJECT_NAME
+    normalized_file_signature = _normalize_excel_compare_file_signature(file_signature)
+    if normalized_file_signature:
+        _put_excel_compare_cache(project_name, normalized_file_signature, result)
     return result
 
 
