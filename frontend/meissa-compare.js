@@ -12664,13 +12664,18 @@
     if (lu.includes("/export/orthophoto/")) score += 50;
     // 버튼 URL은 디코더 안정성이 높은 PNG만 우선한다.
     if (!/\.png(?:\?|$)/i.test(lu)) return -1000;
-    // 속도 우선: 초고해상(25k)보다 중간 해상도(7k/12k)를 먼저 시도.
-    if (lu.includes("orthophoto_7000x.png")) score += 260;
-    else if (lu.includes("orthophoto_12000x.png")) score += 210;
-    else if (lu.includes("orthophoto_25000x.png")) score += 120;
+    // 품질 우선: 확대 선명도를 위해 장변이 큰 정사 PNG를 더 높게 점수화.
+    if (lu.includes("orthophoto_25000x.png")) score += 360;
+    else if (lu.includes("orthophoto_12000x.png")) score += 240;
+    else if (lu.includes("orthophoto_7000x.png")) score += 150;
     else if (lu.includes("orthophoto_700x.png")) score += 80;
     else if (lu.includes("orthophoto")) {
       score += 10;
+    }
+    const nominalEdge = meissa2dOrthoNominalLongEdgeFromImgSrc(s);
+    if (Number.isFinite(nominalEdge) && nominalEdge > 0) {
+      // 파일명·쿼리에 장변 정보가 있으면 최종 선택에서 해상도 우선이 되도록 보너스 부여.
+      score += Math.min(520, Math.round(nominalEdge / 60));
     }
     if (lu.includes("signature=") && lu.includes("expires=")) score += 30;
     const remain = meissaSignedUrlExpiresInSec(s);
@@ -12701,6 +12706,28 @@
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score);
     return scored.map((x) => x.s);
+  }
+
+  function pickBestMeissaOrthoButtonUrlForSharpness(urls) {
+    const list = Array.isArray(urls) ? urls : [];
+    let best = "";
+    let bestEdge = -1;
+    let bestScore = -Infinity;
+    for (const raw of list) {
+      const s = normalizeMeissaSignedUrl(raw);
+      if (!s) continue;
+      const edge = Number(meissa2dOrthoNominalLongEdgeFromImgSrc(s)) || 0;
+      const score = Number(_scoreMeissaOrthoButtonUrl(s)) || 0;
+      if (
+        edge > bestEdge + 1e-6 ||
+        (Math.abs(edge - bestEdge) <= 1e-6 && score > bestScore)
+      ) {
+        best = s;
+        bestEdge = edge;
+        bestScore = score;
+      }
+    }
+    return best;
   }
 
   async function resolveMeissaOrthoButtonUrls(snapshotId, projectId) {
@@ -13359,9 +13386,7 @@
         perfMark("버튼 URL 조회 시작");
         const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
         perfMark("버튼 URL 조회 완료");
-        const singleUrl = String(
-          (Array.isArray(signedOrthoUrls) ? signedOrthoUrls.find((u) => String(u || "").trim()) : "") || ""
-        ).trim();
+        const singleUrl = String(pickBestMeissaOrthoButtonUrlForSharpness(signedOrthoUrls) || "").trim();
         if (singleUrl) {
           orthoImgLoadPromise = (async () => {
             const fn = (() => {
@@ -13373,7 +13398,10 @@
                 return "orthophoto";
               }
             })();
-            pushMeissa2dLoadLine(`정사: 버튼 URL 단일 1회 요청 (${fn || "orthophoto"})`);
+            const expectedEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(singleUrl)) || 0);
+            pushMeissa2dLoadLine(
+              `정사: 버튼 URL 단일 1회 요청 (${fn || "orthophoto"}${expectedEdge > 0 ? ` · 기대 장변≈${expectedEdge}px` : ""})`
+            );
             const r = await loadMeissa2dSingleHighFromButtonUrl(img, singleUrl, loadSeq, sid);
             if (r && r.ok) return r;
             return { ok: false, message: "button-url-single-failed" };
