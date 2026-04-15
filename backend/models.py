@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -392,6 +393,11 @@ class MeissaLoginRequest(BaseModel):
     @model_validator(mode="after")
     def _meissa_login_pair(self) -> "MeissaLoginRequest":
         otp = (self.verification_code or "").strip()
+        if otp:
+            otp = re.sub(r"\s+", "", otp)
+            if not re.fullmatch(r"\d{6,12}", otp):
+                raise ValueError("인증코드는 이메일로 받은 숫자 6자리 이상을 입력하세요.")
+            self.verification_code = otp
         em = (self.email or "").strip()
         pw = self.password if self.password is not None else ""
         if otp:
