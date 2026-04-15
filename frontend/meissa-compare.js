@@ -353,8 +353,10 @@
   const MEISSA_3D_EXCLUDED = true;
   /** false: 공식 Meissa 화면을 페이지 안 iframe에 띄우지 않고 새 탭 링크만 맞춤(임베드 3D·로그인 뷰 제거). */
   const MEISSA_CLOUD_3D_FRAME_VISIBLE = true;
-  /** true: Carta 타일·모자이크·휠 타일 z/recenter 제거. 정사(orthophoto/raw/dataUrl)+georef만 매칭, 확대는 CSS matrix만. */
+  /** true: 심플 2D 모드 활성화(대체뷰·정사 이미지 중심). */
   const MEISSA_2D_SIMPLE_ORTHO = true;
+  /** true: 심플 모드에서도 타일(피라미드) 우선으로 즉시 표시해 초기 체감속도를 높인다. */
+  const MEISSA_2D_SIMPLE_TILE_FIRST_MODE = true;
   /** true: orthophoto-preview 를 max_edge=저해상(3072) 단일만 사용(속도 우선).
    * false(기본): 3072 선표시 뒤 8192로 교체(이중 요청 순차). */
   const MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES = false;
@@ -10032,17 +10034,21 @@
 
   /** 모자이크와 정사영상 img를 같은 정사각 프레임에 두어 점·배경 기준을 일치 */
   function syncMeissa2dSquareMapFrameLayout() {
+    const { w: pw, h: ph } = getOverlayWrapSize();
     const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
     const img = els.meissaCloud2dImageLocal;
     if (MEISSA_2D_SIMPLE_ORTHO) {
-      meissa2dMapViewport = { offX: 0, offY: 0, side: 0 };
+      const mapSideSimple = Math.min(pw, ph);
+      const mOffXSimple = (pw - mapSideSimple) / 2;
+      const mOffYSimple = (ph - mapSideSimple) / 2;
+      meissa2dMapViewport = { offX: mOffXSimple, offY: mOffYSimple, side: mapSideSimple };
       if (mosaic) {
         mosaic.style.position = "absolute";
-        mosaic.style.inset = "0";
-        mosaic.style.left = "0";
-        mosaic.style.top = "0";
-        mosaic.style.width = "100%";
-        mosaic.style.height = "100%";
+        mosaic.style.inset = "auto";
+        mosaic.style.left = `${mOffXSimple}px`;
+        mosaic.style.top = `${mOffYSimple}px`;
+        mosaic.style.width = `${mapSideSimple}px`;
+        mosaic.style.height = `${mapSideSimple}px`;
       }
       if (img) {
         img.style.position = "absolute";
@@ -10053,16 +10059,15 @@
         ) {
           applyMeissa2dIntrinsicImgLayout(img);
         } else {
-          img.style.inset = "0";
-          img.style.left = "0";
-          img.style.top = "0";
-          img.style.width = "100%";
-          img.style.height = "100%";
+          img.style.inset = "auto";
+          img.style.left = `${mOffXSimple}px`;
+          img.style.top = `${mOffYSimple}px`;
+          img.style.width = `${mapSideSimple}px`;
+          img.style.height = `${mapSideSimple}px`;
         }
       }
       return;
     }
-    const { w: pw, h: ph } = getOverlayWrapSize();
     const mapSide = Math.min(pw, ph);
     const mOffX = (pw - mapSide) / 2;
     const mOffY = (ph - mapSide) / 2;
@@ -10411,7 +10416,7 @@
       const m = mapFileToGeorefPx(fxx, fyy, false);
       return m ? { px: m.px, py: m.py } : null;
     }
-    if (MEISSA_2D_SIMPLE_ORTHO) return null;
+    if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive()) return null;
     if (imageVisible && getMeissa2dImageDataSource(imgEl) === "carta-tile") {
       const snapKey = `${projectId}:${sid}`;
       const hint = meissa2dSnapshotTileHints[snapKey];
@@ -10947,7 +10952,7 @@
       }
       return;
     }
-    if (MEISSA_2D_SIMPLE_ORTHO) {
+    if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive()) {
       const overlayOnOrthoEff = imageVisible || orthoHasSrc;
       renderMeissa2dPointsOverlayInFileSpace(ctx, w, h, circles, pxScale, {
         overlayOnOrtho: overlayOnOrthoEff,
@@ -11805,7 +11810,7 @@
   }
 
   function renderMeissa2dMosaic(snapshotId, options) {
-    if (MEISSA_2D_SIMPLE_ORTHO) return false;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) return false;
     const sid = String(snapshotId || "").trim();
     if (!sid) return false;
     const projectId =
@@ -11892,7 +11897,7 @@
 
   function setMeissa2dLayerVisibility(opts) {
     const o = { ...(opts || {}) };
-    if (MEISSA_2D_SIMPLE_ORTHO) o.showMosaic = false;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) o.showMosaic = false;
     const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
     const img = els.meissaCloud2dImageLocal;
     if (mosaic) mosaic.hidden = !o.showMosaic;
@@ -11988,7 +11993,7 @@
   }
 
   function resetMeissa2dViewTransform() {
-    if (MEISSA_2D_SIMPLE_ORTHO) {
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) {
       return;
     }
     meissa2dViewScale = 1;
@@ -11998,7 +12003,7 @@
   }
 
   function scheduleMeissa2dRecenterRefresh(allowPanShift, allowZoomStep) {
-    if (MEISSA_2D_SIMPLE_ORTHO) return;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) return;
     if (meissa2dRecenterTimer) window.clearTimeout(meissa2dRecenterTimer);
     const delay = allowPanShift ? 40 : meissa2dViewScale >= 1.7 ? 120 : 180;
     meissa2dRecenterTimer = window.setTimeout(() => {
@@ -13744,7 +13749,8 @@
     const applyPreferred2dVisibility = () => {
       const hasImg = hasRenderableOverlayImage(img);
       if (MEISSA_2D_SIMPLE_ORTHO) {
-        setMeissa2dLayerVisibility({ showMosaic: false, showImage: hasImg });
+        // 심플 모드도 타일 피라미드를 기본 표시로 사용한다.
+        setMeissa2dLayerVisibility({ showMosaic: true, showImage: hasImg });
         return;
       }
       if (preferGeorefImage()) {
@@ -14083,7 +14089,9 @@
       scheduleMeissa2dOrthoViewportHiFetch();
     }
     let quickMosaic = false;
-    if (!MEISSA_2D_SIMPLE_ORTHO) {
+    const enableTileMosaicNow =
+      !MEISSA_2D_SIMPLE_ORTHO || (MEISSA_2D_SIMPLE_ORTHO && MEISSA_2D_SIMPLE_TILE_FIRST_MODE);
+    if (enableTileMosaicNow) {
       const snapHint = meissa2dSnapshotTileHints[snapKey];
       const focusCenter = focusToTileCenter(projectId, 20);
       const focusNow = getFocusCenterFromFileCoords();
@@ -14101,7 +14109,7 @@
       } else if (snapHint && Number.isFinite(Number(snapHint.x)) && Number.isFinite(Number(snapHint.y))) {
         meissa2dFallbackTileCenter = { x: Number(snapHint.x), y: Number(snapHint.y) };
       }
-      const baseRadius = computeMosaicRadiusForScale(1);
+      const baseRadius = computeMosaicRadiusForScale(Math.max(1, Number(meissa2dViewScale) || 1));
       quickMosaic = Boolean(renderMeissa2dMosaic(sid, { z: 20, radius: baseRadius }));
       if (quickMosaic) {
         pushMeissa2dLoadLine("타일 모자이크(저해상) 선표시");
