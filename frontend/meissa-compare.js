@@ -206,7 +206,8 @@
   let meissa2dPointTileCache = new Map();
   let meissa2dPointTileCacheSid = "";
   let meissa2dPointsRaf = 0;
-  const MEISSA_2D_OVERLAY_WARMUP_MS = 1800;
+  /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
+  const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
   /** 확대 배율이 충분히 크면 warmup 중에도 라벨/피킹을 유지(줌인 시 좌표 미표시 체감 완화). */
   const MEISSA_2D_OVERLAY_WARMUP_LABELS_SCALE_THRESHOLD = 1.2;
@@ -7131,6 +7132,17 @@
     }
   }
 
+  /** URL 쿼리(max_edge) 또는 파일명(orthophoto_25000x.png)에서 기대 장변(px) 추정 */
+  function meissa2dOrthoNominalLongEdgeFromImgSrc(imgSrc) {
+    const me = meissa2dOrthoMaxEdgeFromImgSrc(imgSrc);
+    if (Number.isFinite(me) && me > 0) return me;
+    const u = String(imgSrc || "");
+    const m = u.match(/orthophoto_(\d+)x\.png/i);
+    if (!m) return NaN;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : NaN;
+  }
+
   /** 메인 <img>가 잘못된 캐시 엔트리를 물지 않게(고해상 URL만) */
   function withOrthophotoImgCacheBust(url) {
     const s = String(url || "").trim();
@@ -9022,18 +9034,34 @@
 
     let guessFullW = Number(geo.width);
     let guessFullH = Number(geo.height);
+    const srcKind = getMeissa2dImageDataSource(img);
+    const nominalLong = meissa2dOrthoNominalLongEdgeFromImgSrc(img?.src || "");
     const geoHasLarger =
       Number.isFinite(guessFullW) &&
       Number.isFinite(guessFullH) &&
       guessFullW > nw * 1.12 &&
       guessFullH > nh * 1.12;
     if (!geoHasLarger) {
-      if (nw > MEISSA_ORTHOPHOTO_FULL_MAX_EDGE + 256) {
-        setMeissa2dOrthoHiBadge("", "idle");
-        return { t: "clear" };
+      if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") {
+        const targetLong = Number.isFinite(nominalLong)
+          ? nominalLong
+          : Math.max(MEISSA_ORTHOPHOTO_FULL_MAX_EDGE * 2, Math.max(nw, nh));
+        const ar = nw / Math.max(1, nh);
+        if (ar >= 1) {
+          guessFullW = Math.min(56000, Math.max(nw, targetLong));
+          guessFullH = Math.min(56000, Math.max(nh, Math.round(guessFullW / Math.max(1e-9, ar))));
+        } else {
+          guessFullH = Math.min(56000, Math.max(nh, targetLong));
+          guessFullW = Math.min(56000, Math.max(nw, Math.round(guessFullH * ar)));
+        }
+      } else {
+        if (nw > MEISSA_ORTHOPHOTO_FULL_MAX_EDGE + 256) {
+          setMeissa2dOrthoHiBadge("", "idle");
+          return { t: "clear" };
+        }
+        guessFullW = Math.min(56000, Math.max(nw * 4, nw));
+        guessFullH = Math.min(56000, Math.round(nh * (guessFullW / Math.max(nw, 1))));
       }
-      guessFullW = Math.min(56000, Math.max(nw * 4, nw));
-      guessFullH = Math.min(56000, Math.round(nh * (guessFullW / Math.max(nw, 1))));
     }
     const cached = meissa2dOrthoFullPxBySnapshot[snapKey];
     let effFullW = Number(cached?.w) > 0 ? Number(cached.w) : guessFullW;
@@ -10354,8 +10382,7 @@
     const circles = Array.isArray(state.circles) ? state.circles : [];
     const overlayWarm =
       Date.now() < meissa2dOverlayWarmUntil && circles.length >= MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES;
-    const effectiveOverlayWarm =
-      overlayWarm && (Number(meissa2dViewScale || 1) < MEISSA_2D_OVERLAY_WARMUP_LABELS_SCALE_THRESHOLD);
+    const effectiveOverlayWarm = false;
     const renderFitCache = new Map();
     const getOrthoFitForRender = (circle) => {
       if (meissa2dColorModeValue() !== "ortho_pdam") return null;
