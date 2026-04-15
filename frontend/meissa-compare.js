@@ -13643,6 +13643,43 @@
       );
     }
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+    if (!orthophotoOk && MEISSA_2D_SIMPLE_ORTHO && projectId && sid) {
+      pushMeissa2dLoadLine("정사: orthophoto-preview 실패 → 버튼 URL 고화질 폴백 시도");
+      try {
+        const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
+        const tries = Array.isArray(signedOrthoUrls) ? signedOrthoUrls.slice(0, 8) : [];
+        for (let i = 0; i < tries.length; i++) {
+          if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+          const u = String(tries[i] || "").trim();
+          if (!u) continue;
+          const fn = (() => {
+            try {
+              const p = new URL(u, window.location.origin).pathname || "";
+              const idx = p.lastIndexOf("/");
+              return idx >= 0 ? p.slice(idx + 1) : p;
+            } catch (_) {
+              return "orthophoto";
+            }
+          })();
+          pushMeissa2dLoadLine(`정사: 버튼 URL 폴백 ${i + 1}/${tries.length} (${fn || "orthophoto"})`);
+          const r = await loadMeissa2dSingleHighFromButtonUrl(img, u, loadSeq, sid);
+          if (r && r.ok && isMeissa2dLoadCurrent(loadSeq, sid)) {
+            orthophotoOk = true;
+            orthophotoHttpStatus = 200;
+            img.setAttribute("data-meissa-2d-ok", "1");
+            img.setAttribute("data-meissa-2d-source", "orthophoto-button-url");
+            meissa2dEnsureOrthoAnalysisImage();
+            scheduleRenderMeissa2dPointsOverlay();
+            pushMeissa2dLoadLine(
+              `정사: 버튼 URL 폴백 성공 · ${Math.round(Number(img.naturalWidth || 0))}×${Math.round(Number(img.naturalHeight || 0))}`
+            );
+            break;
+          }
+        }
+      } catch (e) {
+        pushMeissa2dLoadLine(`정사: 버튼 URL 폴백 예외 ${String(e?.message || e).slice(0, 90)}`);
+      }
+    }
     if (orthophotoOk) {
       perfMark("정사 렌더 준비 완료");
       syncMeissa2dSquareMapFrameLayout();
