@@ -345,6 +345,10 @@
   const MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS = 18000;
   /** 버튼 URL 단일 모드: 한 URL 다운로드/디코드 최대 대기(ms). 초과 시 멈춤 대신 실패로 전환. */
   const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS = 95000;
+  /** 버튼 URL 단일 모드: 죽은 URL 선별용 짧은 도달성 점검(ms). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS = 1300;
+  /** 버튼 URL 단일 모드: 실패 시 후보 재시도 최대 횟수(속도·안정 절충). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES = 3;
   /** true: 정사·시공 적합도에서 RGB/형태 분석 실패를 planD(평면)로 초록 승격하지 않고 미판정으로 유지 */
   const MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS = true;
   /**
@@ -12905,11 +12909,15 @@
     return all;
   }
 
-  async function loadMeissa2dSingleHighFromButtonUrl(imgEl, signedUrl, loadSeq, sid) {
+  async function loadMeissa2dSingleHighFromButtonUrl(imgEl, signedUrl, loadSeq, sid, options) {
     if (!imgEl) return { ok: false };
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
     const src = normalizeMeissaSignedUrl(signedUrl);
     if (!src) return { ok: false };
+    const timeoutMs = Math.max(
+      20000,
+      Number(options?.timeoutMs) || MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS
+    );
     meissa2dOrthoApplyWrapLoadingPhase("loading");
     meissa2dOrthoInteractReady = false;
     const startedAt = Date.now();
@@ -13489,6 +13497,7 @@
     }
 
     let orthoImgLoadPromise = null;
+    let buttonOnlyAllowFallbackViews = false;
     if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess && MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM) {
       try {
         img.removeAttribute("data-meissa-2d-ortho-tier");
@@ -13540,27 +13549,65 @@
         perfMark("버튼 URL 조회 시작");
         const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
         perfMark("버튼 URL 조회 완료");
-        const singleUrl = String(pickBestMeissaOrthoButtonUrlForSharpness(signedOrthoUrls) || "").trim();
-        if (singleUrl) {
+        const orderedCandidates = Array.isArray(signedOrthoUrls)
+          ? signedOrthoUrls.map((u) => String(u || "").trim()).filter(Boolean)
+          : [];
+        let tryUrls = [];
+        if (orderedCandidates.length) {
+          try {
+            const probePool = orderedCandidates
+              .slice(0, Math.min(6, orderedCandidates.length))
+              .map((url) => ({ url }));
+            const winner = await firstReachableTile(probePool, {
+              timeoutMs: MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS,
+              batchSize: Math.min(3, probePool.length || 1),
+              maxChecks: probePool.length || 1,
+            });
+            const wu = String(winner?.url || "").trim();
+            if (wu) {
+              tryUrls.push(wu);
+              pushMeissa2dLoadLine("정사: 버튼 URL 선확인 성공(빠른 응답 URL 우선 사용)");
+            }
+          } catch (_) {
+            // ignore probe failures; keep ordered fallback list
+          }
+          for (const u of orderedCandidates) {
+            if (!u || tryUrls.includes(u)) continue;
+            tryUrls.push(u);
+            if (tryUrls.length >= Math.max(1, MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES)) break;
+          }
+        }
+        if (tryUrls.length) {
           orthoImgLoadPromise = (async () => {
-            const fn = (() => {
-              try {
-                const p = new URL(singleUrl, window.location.origin).pathname || "";
-                const idx = p.lastIndexOf("/");
-                return idx >= 0 ? p.slice(idx + 1) : p;
-              } catch (_) {
-                return "orthophoto";
-              }
-            })();
-            const expectedEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(singleUrl)) || 0);
-            pushMeissa2dLoadLine(
-              `정사: 버튼 URL 단일 1회 요청 (${fn || "orthophoto"}${expectedEdge > 0 ? ` · 기대 장변≈${expectedEdge}px` : ""})`
-            );
-            const r = await loadMeissa2dSingleHighFromButtonUrl(img, singleUrl, loadSeq, sid);
-            if (r && r.ok) return r;
-            return { ok: false, message: "button-url-single-failed" };
+            for (let i = 0; i < tryUrls.length; i++) {
+              const u = String(tryUrls[i] || "").trim();
+              if (!u) continue;
+              const fn = (() => {
+                try {
+                  const p = new URL(u, window.location.origin).pathname || "";
+                  const idx = p.lastIndexOf("/");
+                  return idx >= 0 ? p.slice(idx + 1) : p;
+                } catch (_) {
+                  return "orthophoto";
+                }
+              })();
+              const expectedEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(u)) || 0);
+              pushMeissa2dLoadLine(
+                `정사: 버튼 URL 시도 ${i + 1}/${tryUrls.length} (${fn || "orthophoto"}${expectedEdge > 0 ? ` · 기대 장변≈${expectedEdge}px` : ""})`
+              );
+              const r = await loadMeissa2dSingleHighFromButtonUrl(img, u, loadSeq, sid, {
+                timeoutMs:
+                  i === 0
+                    ? MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS
+                    : Math.max(26000, Math.round(MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS * 0.55)),
+              });
+              if (r && r.ok) return r;
+            }
+            return { ok: false, message: "button-url-all-candidates-failed" };
           })();
-          pushMeissa2dLoadLine("정사: 단일 요청(버튼 URL 1회 · orthophoto-preview 미사용)");
+          pushMeissa2dLoadLine(
+            `정사: 단일 요청(버튼 URL 후보 ${tryUrls.length}개 내 순차 재시도 · orthophoto-preview 미사용)`
+          );
         } else if (MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
           orthoImgLoadPromise = Promise.resolve({ ok: false, message: "button-url-not-found" });
           pushMeissa2dLoadLine("정사: 버튼 URL(orthophoto_25000x.png)을 찾지 못해 중단");
@@ -13597,11 +13644,10 @@
           orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
           perfMark("georef·지오설정·버튼URL 병렬 완료");
           if (!orthoParallelResult?.ok) {
-            pushMeissa2dLoadLine("정사: 버튼 URL 실패로 georef 대기를 건너뜁니다.");
-            pushMeissa2dLoadLine("중단: 버튼 URL 단일 모드에서 정사 표시 실패(다른 폴백 미사용)");
-            setMeissa2dLayerVisibility({ showMosaic: false, showImage: false });
-            perfDone("실패(버튼 URL 단일 모드)");
-            return false;
+            buttonOnlyAllowFallbackViews = true;
+            pushMeissa2dLoadLine(
+              "정사: 버튼 URL 단일 경로 실패 — 대체 뷰(raw/json/carta) 탐색으로 전환합니다."
+            );
           }
         } else {
           const oP = orthoImgLoadPromise || Promise.resolve({ ok: false, skip: true });
@@ -13885,7 +13931,12 @@
       perfDone("완료(정사)");
       return true;
     }
-    if (MEISSA_2D_SIMPLE_ORTHO && MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY && MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
+    if (
+      MEISSA_2D_SIMPLE_ORTHO &&
+      MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY &&
+      MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY &&
+      !buttonOnlyAllowFallbackViews
+    ) {
       pushMeissa2dLoadLine("중단: 버튼 URL 단일 모드에서 정사 표시 실패(다른 폴백 미사용)");
       setMeissa2dLayerVisibility({ showMosaic: false, showImage: false });
       perfDone("실패(버튼 URL 단일 모드)");
