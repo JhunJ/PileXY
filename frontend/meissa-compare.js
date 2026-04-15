@@ -226,6 +226,11 @@
   let meissaDomOverlayTx = 0;
   let meissaDomOverlayTy = 0;
   let meissaDomOverlayPinchLastDist = 0;
+  /** @type {Map<string, string>} project:snapshot -> preferred high-res URL */
+  let meissaDomOverlayHiUrlBySnapshot = new Map();
+  let meissaDomOverlayHiResolveInFlight = false;
+  let meissaDomOverlayHiLastResolveTs = 0;
+  const MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS = 7000;
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
   const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
@@ -11188,11 +11193,52 @@
     });
   }
 
+  function meissaDomOverlayCurrentSnapshotKey() {
+    const projectId =
+      (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
+    const sid =
+      (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
+    if (!projectId || !sid) return "";
+    return `${projectId}:${sid}`;
+  }
+
+  function meissaDomOverlayCurrentPreferredHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    return String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+  }
+
+  async function ensureMeissaDomOverlayHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key || !meissaAccess) return;
+    const now = Date.now();
+    const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    if (cached && now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS) return;
+    if (meissaDomOverlayHiResolveInFlight) return;
+    const [projectId, sid] = key.split(":");
+    if (!projectId || !sid) return;
+    meissaDomOverlayHiResolveInFlight = true;
+    meissaDomOverlayHiLastResolveTs = now;
+    try {
+      const urls = await resolveMeissaOrthoButtonUrls(sid, projectId);
+      const best = String(pickBestMeissaOrthoButtonUrlForSharpness(urls) || "").trim();
+      if (best) {
+        meissaDomOverlayHiUrlBySnapshot.set(key, best);
+      }
+    } catch (_) {
+      /* ignore */
+    } finally {
+      meissaDomOverlayHiResolveInFlight = false;
+    }
+  }
+
   function syncMeissaDomOverlayImageFromMain() {
     const domImg = els.meissaDomOverlayImage;
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
-    const src = String(mainImg.getAttribute("src") || "").trim();
+    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+    const mainSrc = String(mainImg.getAttribute("src") || "").trim();
+    const src = hiUrl || mainSrc;
     if (!src) {
       try {
         domImg.removeAttribute("src");
@@ -11222,6 +11268,7 @@
     const status = els.meissaDomOverlayStatus;
     const mainImg = els.meissaCloud2dImageLocal;
     if (!stage || !domImg || !pointsLayer || !mainImg) return;
+    void ensureMeissaDomOverlayHiUrl();
     const hasMain = hasRenderableOverlayImage(mainImg);
     const synced = syncMeissaDomOverlayImageFromMain();
     if (!hasMain || !synced) {
@@ -11242,30 +11289,58 @@
       return;
     }
     const circles = Array.isArray(state.circles) ? state.circles : [];
-    const showLabels = circles.length <= 260;
+    const showLabels = circles.length <= 180 && meissaDomOverlayScale <= 1.4;
     const frag = document.createDocumentFragment();
     let shown = 0;
+    const mapMainPxToDom = (mx, my) => {
+      const nx = (Number(mx) - mainRect.x) / Math.max(1e-9, mainRect.w);
+      const ny = (Number(my) - mainRect.y) / Math.max(1e-9, mainRect.h);
+      if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
+      if (nx < -0.2 || nx > 1.2 || ny < -0.2 || ny > 1.2) return null;
+      return { px: domRect.x + nx * domRect.w, py: domRect.y + ny * domRect.h };
+    };
+    const stageMaxR = Math.max(8, Math.min(stage.clientWidth, stage.clientHeight) * 0.28);
     for (const c of circles) {
       if (!meissa2dCirclePassesRemainingFilter(c)) continue;
       const m = meissa2dComputeFileToContentPx(c?.center_x, c?.center_y);
       if (!m || !Number.isFinite(m.px) || !Number.isFinite(m.py)) continue;
-      const nx = (m.px - mainRect.x) / Math.max(1e-9, mainRect.w);
-      const ny = (m.py - mainRect.y) / Math.max(1e-9, mainRect.h);
-      if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
-      if (nx < -0.05 || nx > 1.05 || ny < -0.05 || ny > 1.05) continue;
-      const px = domRect.x + nx * domRect.w;
-      const py = domRect.y + ny * domRect.h;
-      const dot = document.createElement("div");
-      dot.className = "meissa-dom-overlay-dot";
-      dot.style.left = `${px}px`;
-      dot.style.top = `${py}px`;
-      dot.title = `ID ${String(c?.id ?? "")} · (${Number(c?.center_x || 0).toFixed(3)}, ${Number(c?.center_y || 0).toFixed(3)})`;
-      frag.appendChild(dot);
+      const center = mapMainPxToDom(m.px, m.py);
+      if (!center) continue;
+      const fx = Number(c?.center_x);
+      const fy = Number(c?.center_y);
+      const radFile = meissa2dPileRadiusFileUnits(c);
+      let rDom = NaN;
+      if (Number.isFinite(fx) && Number.isFinite(fy) && Number.isFinite(radFile) && radFile > 1e-9) {
+        const mx = meissa2dComputeFileToContentPx(fx + radFile, fy);
+        const my = meissa2dComputeFileToContentPx(fx, fy + radFile);
+        const dx = mx ? mapMainPxToDom(mx.px, mx.py) : null;
+        const dy = my ? mapMainPxToDom(my.px, my.py) : null;
+        if (dx && dy) {
+          const rx = Math.hypot(dx.px - center.px, dx.py - center.py);
+          const ry = Math.hypot(dy.px - center.px, dy.py - center.py);
+          rDom = Math.min(stageMaxR, Math.max(1.2, (rx + ry) * 0.5));
+        }
+      }
+      const marker = document.createElement("div");
+      if (Number.isFinite(rDom) && rDom > 1.4) {
+        marker.className = "meissa-dom-overlay-circle";
+        marker.style.width = `${rDom * 2}px`;
+        marker.style.height = `${rDom * 2}px`;
+      } else {
+        marker.className = "meissa-dom-overlay-dot";
+      }
+      marker.style.left = `${center.px}px`;
+      marker.style.top = `${center.py}px`;
+      marker.title = `ID ${String(c?.id ?? "")} · (${Number(c?.center_x || 0).toFixed(3)}, ${Number(c?.center_y || 0).toFixed(3)})`;
+      frag.appendChild(marker);
       if (showLabels) {
         const lb = document.createElement("div");
         lb.className = "meissa-dom-overlay-label";
-        lb.style.left = `${px}px`;
-        lb.style.top = `${py}px`;
+        lb.style.left = `${center.px}px`;
+        lb.style.top = `${center.py}px`;
+        const inv = 1 / Math.max(1, meissaDomOverlayScale);
+        lb.style.transform = `translate(6px, -10px) scale(${inv.toFixed(3)})`;
+        lb.style.transformOrigin = "0 0";
         lb.textContent = String(c?.id ?? "");
         frag.appendChild(lb);
       }
@@ -11273,7 +11348,10 @@
     }
     pointsLayer.replaceChildren(frag);
     if (status) {
-      status.textContent = `대체 뷰: URL 이미지 위 좌표 ${shown}개 표시${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
+      const srcNow = String(domImg.currentSrc || domImg.src || "").trim();
+      const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
+      const hiHint = edge > 0 ? `고화질 URL(장변≈${edge}px)` : "URL 이미지";
+      status.textContent = `대체 뷰: ${hiHint} 위 좌표 ${shown}개 표시${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
     }
   }
 
