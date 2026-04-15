@@ -368,6 +368,8 @@
   const MEISSA_2D_ZOOM_MOSAIC_CSS_MAX = 5.5;
   /** 정사 letterbox 대비 점 매핑 엄격 클리핑 여유(px). ±2만 쓰면 저해상·부동소수에서 점이 전부 탈락할 수 있음 */
   const MEISSA_2D_IMG_EDGE_MARGIN_CSS = 20;
+  /** georef 매핑이 경계에서 과도하게 탈락할 때 사용할 느슨 클리핑 여유(px). */
+  const MEISSA_2D_IMG_EDGE_MARGIN_CSS_RELAXED = 220;
   /** false: 스냅샷 선택 시 Meissa 점군 API·누적 로더를 돌리지 않음(정사·2D 점만). 수동 디버그 버튼은 예외. */
   const MEISSA_POINT_CLOUD_AUTOLOAD = false;
   /** Carta/Meissa 타일 z 범위 — 모자이크 휠 줌은 정수 z만 바꾸고 CSS scale은 1로 둔다(구글맵식 격자 정합). */
@@ -10555,11 +10557,14 @@
           if (!loose) {
             const ax0 = imgRect.x;
             const ay0 = imgRect.y;
+            const clipMargin = loose
+              ? MEISSA_2D_IMG_EDGE_MARGIN_CSS_RELAXED
+              : MEISSA_2D_IMG_EDGE_MARGIN_CSS;
             if (
-              px < ax0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-              px > ax0 + imgRect.w + MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-              py < ay0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-              py > ay0 + imgRect.h + MEISSA_2D_IMG_EDGE_MARGIN_CSS
+              px < ax0 - clipMargin ||
+              px > ax0 + imgRect.w + clipMargin ||
+              py < ay0 - clipMargin ||
+              py > ay0 + imgRect.h + clipMargin
             ) {
               continue;
             }
@@ -10653,6 +10658,26 @@
         if (k) georefPointByKey.set(k, { px, py });
         georefDrawItems.push({ c, px, py });
       });
+      if (dbgGeorefFiltered >= 40 && dbgGeorefDrawn <= 1 && dbgGeorefNullMap >= dbgGeorefFiltered * 0.9) {
+        // 확대/오프셋 경계 케이스에서 strict 클립이 전량 탈락하면 느슨 매핑으로 한번 더 시도한다.
+        circles.forEach((c) => {
+          if (!meissa2dCirclePassesRemainingFilter(c)) return;
+          const mLoose = mapFileToGeorefPx(c?.center_x, c?.center_y, true);
+          if (!mLoose) return;
+          const key = georefCircleDrawKey(c);
+          if (key && georefPointByKey.has(key)) return;
+          const { px, py } = mLoose;
+          const fit = getOrthoFitForRender(c);
+          const paint = meissa2dDotPaintForCircle(c, fit);
+          const dotR = meissa2dOverlayDotRadiusCssPx(2.15) * (paint.dotRScale || 1);
+          meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, false);
+          meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
+          if (!effectiveOverlayWarm) {
+            meissa2dPushPickHit(px, py, Math.max(dotR + 8, 12), c, fit);
+            meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+          }
+        });
+      }
       if (
         meissa2dColorModeValue() === "ortho_pdam" &&
         meissaOrthoPdamDebugLineFromUi() &&
@@ -10703,6 +10728,12 @@
         });
       }
       if (shouldLogStats && statCount > 0) {
+        const mapNullRatePct = dbgGeorefFiltered > 0 ? (100 * dbgGeorefNullMap) / dbgGeorefFiltered : 0;
+        if (mapNullRatePct >= 85) {
+          pushMeissa2dLoadLine(
+            `정사 georef map 낮은 적중률: drawn ${dbgGeorefDrawn}/${dbgGeorefFiltered} · null ${(mapNullRatePct).toFixed(0)}%`
+          );
+        }
         meissa2dDebugLastGeorefStatsTs = nowTs;
       }
       return;
