@@ -8709,6 +8709,99 @@
     return el;
   }
 
+  /**
+   * 버튼 URL 단일 모드 전용: orthophoto-preview 네트워크 없이
+   * 현재 메인 <img>에서 보이는 영역만 고해상 캔버스로 즉시 재표본화한다.
+   * (CSS transform에 고정된 저해상 텍스처가 확대되는 느낌을 줄임)
+   */
+  function renderMeissa2dOrthoViewportHiFromMainImageLocal() {
+    if (!MEISSA_2D_SIMPLE_ORTHO) return;
+    const img = els.meissaCloud2dImageLocal;
+    const wrap = document.querySelector(".meissa-2d-overlay-wrap");
+    if (!img || !wrap || !hasRenderableOverlayImage(img)) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    if (img.getAttribute("data-meissa-2d-intrinsic-layout") !== "1") {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const nw = Math.round(Number(img.naturalWidth || 0));
+    const nh = Math.round(Number(img.naturalHeight || 0));
+    if (nw < 32 || nh < 32) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const sPan = meissa2dPanzoomScaleSanitized();
+    const tx = Number(meissa2dViewTx) || 0;
+    const ty = Number(meissa2dViewTy) || 0;
+    const ww = Math.max(1, Number(wrap.clientWidth || 1));
+    const wh = Math.max(1, Number(wrap.clientHeight || 1));
+    const viewLeft = -tx / sPan;
+    const viewTop = -ty / sPan;
+    const viewW = Math.max(1, ww / sPan);
+    const viewH = Math.max(1, wh / sPan);
+    const ix0 = Math.max(0, Math.floor(viewLeft));
+    const iy0 = Math.max(0, Math.floor(viewTop));
+    const ix1 = Math.min(nw, Math.ceil(viewLeft + viewW));
+    const iy1 = Math.min(nh, Math.ceil(viewTop + viewH));
+    const visW = Math.max(1, ix1 - ix0);
+    const visH = Math.max(1, iy1 - iy0);
+    if (visW < 8 || visH < 8) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const vpPx = meissa2dOverlayPixelScaleForViewportCanvas(ww, wh, sPan);
+    const cnv = ensureMeissa2dOrthoViewportHiCanvas();
+    if (!cnv) return;
+    const ctx = cnv.getContext("2d");
+    if (!ctx) return;
+    const bw = Math.max(1, Math.round(visW * vpPx));
+    const bh = Math.max(1, Math.round(visH * vpPx));
+    if (cnv.width !== bw || cnv.height !== bh) {
+      cnv.width = bw;
+      cnv.height = bh;
+    }
+    meissa2dOrthoViewportHiLayoutMeta = {
+      type: "local-main-image",
+      left: ix0,
+      top: iy0,
+      width: visW,
+      height: visH,
+      pxScale: vpPx,
+    };
+    cnv.style.display = "block";
+    cnv.style.position = "absolute";
+    cnv.style.zIndex = "2";
+    syncMeissa2dOrthoViewportHiLayout();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, bw, bh);
+    ctx.setTransform(vpPx, 0, 0, vpPx, 0, 0);
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    let prevQuality = "low";
+    try {
+      if ("imageSmoothingQuality" in ctx) prevQuality = ctx.imageSmoothingQuality;
+    } catch (_) {
+      /* ignore */
+    }
+    ctx.imageSmoothingEnabled = true;
+    try {
+      if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, ix0, iy0, visW, visH, 0, 0, visW, visH);
+    } finally {
+      ctx.imageSmoothingEnabled = prevSmooth;
+      try {
+        if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = prevQuality;
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
   function syncMeissa2dOrthoViewportHiLayout() {
     const hi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
     if (!hi || hi.style.display === "none" || hi.tagName !== "CANVAS") return;
@@ -8809,7 +8902,7 @@
   function scheduleMeissa2dOrthoViewportHiFetch() {
     if (!MEISSA_2D_SIMPLE_ORTHO) return;
     if (isMeissa2dButtonUrlOnlySingleMode()) {
-      shutdownMeissa2dOrthoViewportHiOnly();
+      renderMeissa2dOrthoViewportHiFromMainImageLocal();
       return;
     }
     if (MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI) {
