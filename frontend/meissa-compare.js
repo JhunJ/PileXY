@@ -221,6 +221,11 @@
   let meissa2dPointTileCacheSid = "";
   let meissa2dPointsRaf = 0;
   let meissaDomOverlayRaf = 0;
+  let meissaDomOverlayPointers = new Map();
+  let meissaDomOverlayScale = 1;
+  let meissaDomOverlayTx = 0;
+  let meissaDomOverlayTy = 0;
+  let meissaDomOverlayPinchLastDist = 0;
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
   const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
@@ -11277,6 +11282,124 @@
     meissaDomOverlayRaf = requestAnimationFrame(() => {
       meissaDomOverlayRaf = 0;
       renderMeissaDomOverlay();
+    });
+  }
+
+  function applyMeissaDomOverlayTransform() {
+    const img = els.meissaDomOverlayImage;
+    const pts = els.meissaDomOverlayPoints;
+    const tf = `matrix(${meissaDomOverlayScale},0,0,${meissaDomOverlayScale},${meissaDomOverlayTx},${meissaDomOverlayTy})`;
+    if (img) {
+      img.style.transformOrigin = "0 0";
+      img.style.transform = tf;
+    }
+    if (pts) {
+      pts.style.transformOrigin = "0 0";
+      pts.style.transform = tf;
+    }
+  }
+
+  function resetMeissaDomOverlayTransform() {
+    meissaDomOverlayScale = 1;
+    meissaDomOverlayTx = 0;
+    meissaDomOverlayTy = 0;
+    meissaDomOverlayPinchLastDist = 0;
+    applyMeissaDomOverlayTransform();
+  }
+
+  function bindMeissaDomOverlayInteractions() {
+    const stage = els.meissaDomOverlayStage;
+    if (!stage || stage.dataset.meissaDomOverlayBound === "1") return;
+    stage.dataset.meissaDomOverlayBound = "1";
+    stage.style.touchAction = "none";
+    stage.style.cursor = "grab";
+
+    const pointerInStage = (clientX, clientY) => {
+      const r = stage.getBoundingClientRect();
+      return { x: clientX - r.left, y: clientY - r.top };
+    };
+    const zoomAt = (nextScale, sx, sy) => {
+      const prev = meissaDomOverlayScale;
+      const n = Math.max(0.35, Math.min(12, Number(nextScale) || 1));
+      if (Math.abs(n - prev) < 1e-8) return;
+      const k = n / prev;
+      meissaDomOverlayTx = sx - (sx - meissaDomOverlayTx) * k;
+      meissaDomOverlayTy = sy - (sy - meissaDomOverlayTy) * k;
+      meissaDomOverlayScale = n;
+      applyMeissaDomOverlayTransform();
+    };
+
+    stage.addEventListener(
+      "wheel",
+      (evt) => {
+        evt.preventDefault();
+        const p = pointerInStage(evt.clientX, evt.clientY);
+        const next = meissaDomOverlayScale * Math.exp(-evt.deltaY * 0.0012);
+        zoomAt(next, p.x, p.y);
+      },
+      { passive: false }
+    );
+
+    stage.addEventListener("pointerdown", (evt) => {
+      meissaDomOverlayPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+      try {
+        stage.setPointerCapture(evt.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      if (meissaDomOverlayPointers.size === 1) {
+        stage.style.cursor = "grabbing";
+        stage.classList.add("is-panning");
+      } else if (meissaDomOverlayPointers.size >= 2) {
+        const pts = [...meissaDomOverlayPointers.values()];
+        meissaDomOverlayPinchLastDist = Math.max(
+          1,
+          Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+        );
+      }
+      evt.preventDefault();
+    });
+
+    stage.addEventListener("pointermove", (evt) => {
+      if (!meissaDomOverlayPointers.has(evt.pointerId)) return;
+      const prev = meissaDomOverlayPointers.get(evt.pointerId);
+      meissaDomOverlayPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+      if (meissaDomOverlayPointers.size >= 2) {
+        const pts = [...meissaDomOverlayPointers.values()];
+        const dist = Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y));
+        const ratio = dist / Math.max(1, meissaDomOverlayPinchLastDist || dist);
+        meissaDomOverlayPinchLastDist = dist;
+        const mid = pointerInStage((pts[0].x + pts[1].x) * 0.5, (pts[0].y + pts[1].y) * 0.5);
+        zoomAt(meissaDomOverlayScale * ratio, mid.x, mid.y);
+      } else if (meissaDomOverlayPointers.size === 1 && prev) {
+        meissaDomOverlayTx += evt.clientX - prev.x;
+        meissaDomOverlayTy += evt.clientY - prev.y;
+        applyMeissaDomOverlayTransform();
+      }
+      evt.preventDefault();
+    });
+
+    const onPointerUp = (evt) => {
+      if (meissaDomOverlayPointers.has(evt.pointerId)) {
+        meissaDomOverlayPointers.delete(evt.pointerId);
+      }
+      try {
+        stage.releasePointerCapture(evt.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      if (meissaDomOverlayPointers.size < 2) meissaDomOverlayPinchLastDist = 0;
+      if (meissaDomOverlayPointers.size === 0) {
+        stage.style.cursor = "grab";
+        stage.classList.remove("is-panning");
+      }
+    };
+    stage.addEventListener("pointerup", onPointerUp);
+    stage.addEventListener("pointercancel", onPointerUp);
+    stage.addEventListener("pointerleave", onPointerUp);
+
+    stage.addEventListener("dblclick", () => {
+      resetMeissaDomOverlayTransform();
     });
   }
 

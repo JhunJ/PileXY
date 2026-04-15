@@ -6480,6 +6480,7 @@ tr.meissa-result-data-row {
   border-radius: 8px;
   overflow: hidden;
   background: #0f172a;
+  touch-action: none;
 }
 
 .meissa-dom-overlay-image {
@@ -6497,6 +6498,10 @@ tr.meissa-result-data-row {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.meissa-dom-overlay-stage--dragging {
+  cursor: grabbing;
 }
 
 .meissa-dom-overlay-dot {
