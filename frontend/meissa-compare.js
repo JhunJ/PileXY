@@ -231,6 +231,10 @@
   let meissaDomOverlayHiResolveInFlight = false;
   let meissaDomOverlayHiLastResolveTs = 0;
   const MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS = 7000;
+  /** 실패한 URL은 잠시 재시도를 미뤄 메인 이미지로 안정 폴백한다. */
+  const MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS = 120000;
+  /** @type {Map<string, number>} url -> retryAfterTs */
+  let meissaDomOverlayBadUrlUntil = new Map();
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
   const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
@@ -11205,17 +11209,55 @@
   function meissaDomOverlayCurrentPreferredHiUrl() {
     const key = meissaDomOverlayCurrentSnapshotKey();
     if (!key) return "";
-    return String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    const raw = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    if (!raw) return "";
+    if (meissaDomOverlayUrlInCooldown(raw)) return "";
+    return raw;
   }
 
   function meissaDomOverlayDesiredHiUrl() {
     const key = meissaDomOverlayCurrentSnapshotKey();
     if (!key) return "";
-    const [projectId, sid] = key.split(":");
-    if (!projectId || !sid) return "";
-    const guessed = buildCartaOrthoDirectUrl(projectId, sid, "orthophoto_25000x.png");
     const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
-    return guessed || cached;
+    return cached;
+  }
+
+  function meissaDomOverlayUrlInCooldown(url) {
+    const s = String(url || "").trim();
+    if (!s) return false;
+    const until = Number(meissaDomOverlayBadUrlUntil.get(s) || 0);
+    if (!(until > Date.now())) {
+      if (until > 0) meissaDomOverlayBadUrlUntil.delete(s);
+      return false;
+    }
+    return true;
+  }
+
+  function markMeissaDomOverlayUrlFailed(url) {
+    const s = String(url || "").trim();
+    if (!s) return;
+    meissaDomOverlayBadUrlUntil.set(
+      s,
+      Date.now() + Math.max(20000, Number(MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS) || 120000)
+    );
+  }
+
+  function bindMeissaDomOverlayImageFallback() {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg || domImg.dataset.meissaDomOverlayImgBound === "1") return;
+    domImg.dataset.meissaDomOverlayImgBound = "1";
+    domImg.addEventListener("error", () => {
+      const failed = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      markMeissaDomOverlayUrlFailed(failed);
+      const status = els.meissaDomOverlayStatus;
+      if (status) status.textContent = "대체 뷰: 고화질 URL 로드 실패 → 기본 이미지로 전환 중...";
+      scheduleRenderMeissaDomOverlay();
+    });
+    domImg.addEventListener("load", () => {
+      const loaded = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      if (loaded) meissaDomOverlayBadUrlUntil.delete(loaded);
+      scheduleRenderMeissaDomOverlay();
+    });
   }
 
   async function ensureMeissaDomOverlayHiUrl() {
@@ -11223,7 +11265,13 @@
     if (!key || !meissaAccess) return;
     const now = Date.now();
     const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
-    if (cached && now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS) return;
+    if (
+      cached &&
+      !meissaDomOverlayUrlInCooldown(cached) &&
+      now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS
+    ) {
+      return;
+    }
     if (meissaDomOverlayHiResolveInFlight) return;
     const [projectId, sid] = key.split(":");
     if (!projectId || !sid) return;
@@ -11231,7 +11279,45 @@
     meissaDomOverlayHiLastResolveTs = now;
     try {
       const urls = await resolveMeissaOrthoButtonUrls(sid, projectId);
-      const best = String(pickBestMeissaOrthoButtonUrlForSharpness(urls) || "").trim();
+      const ordered = Array.isArray(urls)
+        ? urls.map((u) => String(u || "").trim()).filter(Boolean)
+        : [];
+      let best = "";
+      if (ordered.length) {
+        try {
+          const probeOrdered = ordered
+            .slice(0, Math.min(8, ordered.length))
+            .filter((url) => !meissaDomOverlayUrlInCooldown(url));
+          for (const candidate of probeOrdered) {
+            const ok = await probeImageUrl(
+              candidate,
+              Math.max(700, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS) || 1500)
+            );
+            if (ok) {
+              best = candidate;
+              break;
+            }
+            markMeissaDomOverlayUrlFailed(candidate);
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      if (!best) {
+        const fallback = String(
+          pickBestMeissaOrthoButtonUrlForSharpness(
+            ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url))
+          ) || ""
+        ).trim();
+        if (fallback) {
+          const ok = await probeImageUrl(
+            fallback,
+            Math.max(900, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS) || 1500)
+          );
+          if (ok) best = fallback;
+          else markMeissaDomOverlayUrlFailed(fallback);
+        }
+      }
       if (best) {
         meissaDomOverlayHiUrlBySnapshot.set(key, best);
       }
@@ -11246,7 +11332,9 @@
     const domImg = els.meissaDomOverlayImage;
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
-    const hiUrl = meissaDomOverlayDesiredHiUrl();
+    bindMeissaDomOverlayImageFallback();
+    const hiCandidate = meissaDomOverlayDesiredHiUrl();
+    const hiUrl = meissaDomOverlayUrlInCooldown(hiCandidate) ? "" : hiCandidate;
     const mainSrc = String(mainImg.getAttribute("src") || "").trim();
     const src = hiUrl || mainSrc;
     if (!src) {
@@ -11287,9 +11375,10 @@
       return;
     }
     const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
-    const hiTarget = String(meissaDomOverlayDesiredHiUrl() || "").trim();
+    const hiCandidate = String(meissaDomOverlayDesiredHiUrl() || "").trim();
+    const hiTarget = meissaDomOverlayUrlInCooldown(hiCandidate) ? "" : hiCandidate;
     const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
-    if (hiTarget && !hiResolved && domSrcNow !== hiTarget) {
+    if (hiTarget && !hiResolved && domSrcNow !== hiTarget && meissaDomOverlayHiResolveInFlight) {
       pointsLayer.replaceChildren();
       if (status) status.textContent = "대체 뷰: 고화질 URL 준비 중...";
       return;
@@ -14839,6 +14928,7 @@
     }
     bindMeissa2dOverlayInteractions();
     bindMeissaDomOverlayInteractions();
+    bindMeissaDomOverlayImageFallback();
     meissaDatasetBindToolbar();
     bindMeissaCloudInboundMessages();
     if (!state.circles?.length) requestCirclesFromMainOrOpener(true);
