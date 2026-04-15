@@ -13528,8 +13528,13 @@
       try {
         const buttonOnlyMode = isMeissa2dButtonUrlOnlySingleMode();
         if (buttonOnlyMode && orthoImgLoadPromise) {
-          orthoParallelResult = await orthoImgLoadPromise;
-          perfMark("버튼 URL 정사 완료");
+          const parts = await Promise.all([
+            loadMeissa2dGeoref(sid, projectId).catch(() => {}),
+            detectGeoConfigForSnapshot(projectId, sid).catch(() => {}),
+            orthoImgLoadPromise,
+          ]);
+          orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
+          perfMark("georef·지오설정·버튼URL 병렬 완료");
           if (!orthoParallelResult?.ok) {
             pushMeissa2dLoadLine("정사: 버튼 URL 실패로 georef 대기를 건너뜁니다.");
             pushMeissa2dLoadLine("중단: 버튼 URL 단일 모드에서 정사 표시 실패(다른 폴백 미사용)");
@@ -13537,11 +13542,6 @@
             perfDone("실패(버튼 URL 단일 모드)");
             return false;
           }
-          await Promise.all([
-            loadMeissa2dGeoref(sid, projectId).catch(() => {}),
-            detectGeoConfigForSnapshot(projectId, sid).catch(() => {}),
-          ]);
-          perfMark("georef·지오설정 조회 완료");
         } else {
           const oP = orthoImgLoadPromise || Promise.resolve({ ok: false, skip: true });
           const parts = await Promise.all([
