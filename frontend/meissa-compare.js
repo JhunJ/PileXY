@@ -187,6 +187,7 @@
   let meissa2dOrthoHiPendingBadgeTicker = 0;
   let meissa2dRecenterTimer = null;
   let meissa2dViewSettleTimer = 0;
+  let meissa2dOrthoViewportHiLocalRaf = 0;
   let meissa2dTileState = {
     snapshotId: "",
     projectId: "",
@@ -8548,6 +8549,14 @@
   }
 
   function clearMeissa2dOrthoViewportHi() {
+    if (meissa2dOrthoViewportHiLocalRaf) {
+      try {
+        window.cancelAnimationFrame(meissa2dOrthoViewportHiLocalRaf);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dOrthoViewportHiLocalRaf = 0;
+    }
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoHiBadgeProgTimer) {
@@ -8621,6 +8630,14 @@
 
   /** 뷰패치만 끄고 배지(replay·고화질 줄)는 건드리지 않음 */
   function shutdownMeissa2dOrthoViewportHiOnly() {
+    if (meissa2dOrthoViewportHiLocalRaf) {
+      try {
+        window.cancelAnimationFrame(meissa2dOrthoViewportHiLocalRaf);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dOrthoViewportHiLocalRaf = 0;
+    }
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoViewportHiTimer) {
@@ -8802,6 +8819,16 @@
     }
   }
 
+  function scheduleMeissa2dOrthoViewportHiFromMainImageLocal() {
+    if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+    if (meissa2dOrthoViewportHiLocalRaf) return;
+    meissa2dOrthoViewportHiLocalRaf = window.requestAnimationFrame(() => {
+      meissa2dOrthoViewportHiLocalRaf = 0;
+      if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+      renderMeissa2dOrthoViewportHiFromMainImageLocal();
+    });
+  }
+
   function syncMeissa2dOrthoViewportHiLayout() {
     const hi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
     if (!hi || hi.style.display === "none" || hi.tagName !== "CANVAS") return;
@@ -8902,7 +8929,7 @@
   function scheduleMeissa2dOrthoViewportHiFetch() {
     if (!MEISSA_2D_SIMPLE_ORTHO) return;
     if (isMeissa2dButtonUrlOnlySingleMode()) {
-      renderMeissa2dOrthoViewportHiFromMainImageLocal();
+      scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
       return;
     }
     if (MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI) {
@@ -11488,6 +11515,9 @@
       } else {
         // 드래그 중에는 transform만 갱신하고 고해상 패치 재계산/요청은 멈춰 체감 버벅임을 줄인다.
         syncMeissa2dOrthoViewportHiLayout();
+        if (isMeissa2dButtonUrlOnlySingleMode()) {
+          scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
+        }
       }
     }
   }
