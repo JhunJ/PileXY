@@ -2834,16 +2834,16 @@ def meissa_get_snapshot_overlay_2d_georef(access_token: str, snapshot_id: Any) -
 
 
 def _meissa_orthophoto_max_download_bytes() -> int:
-    """Carta orthophoto.tif 상한. 기본 450MB — 현장 정사가 150MB를 넘는 경우가 많음."""
+    """Carta orthophoto export(특히 orthophoto_25000x.png) 상한. 기본 900MB — 450MB 초과 정사가 흔함."""
     try:
         raw_b = (os.environ.get("MEISSA_ORTHOPHOTO_MAX_DOWNLOAD_BYTES") or "").strip()
         if raw_b:
             v = int(raw_b)
             return max(32 * 1024 * 1024, min(3 * 1024 * 1024 * 1024, v))
-        mb = int(os.environ.get("MEISSA_ORTHOPHOTO_MAX_DOWNLOAD_MB", "450"))
+        mb = int(os.environ.get("MEISSA_ORTHOPHOTO_MAX_DOWNLOAD_MB", "900"))
         return max(64, min(3072, mb)) * 1024 * 1024
     except ValueError:
-        return 450 * 1024 * 1024
+        return 900 * 1024 * 1024
 
 
 def _meissa_orthophoto_preview_max_edge() -> int:
@@ -2867,6 +2867,46 @@ def meissa_orthophoto_effective_preview_edge(query_max_edge: Optional[int]) -> i
         except (TypeError, ValueError):
             pass
     return _meissa_orthophoto_preview_max_edge()
+
+
+def _meissa_orthophoto_carta_stream_timeout() -> Tuple[int, int]:
+    """
+    Carta export(orthophoto PNG/TIF 등) HTTP 스트리밍 타임아웃 (connect, read) 초.
+    read 가 지나치게 길면(예: 900초) Starlette 스레드 풀·소켓이 장시간 점유되어
+    다른 API·재기동 후에도 서버가 먹통처럼 보일 수 있다.
+
+    기본 read 180초 — 느린 현장은 MEISSA_ORTHOPHOTO_CARTA_READ_SEC 로 상향(최대 900).
+    """
+    try:
+        c = int((os.environ.get("MEISSA_ORTHOPHOTO_CARTA_CONNECT_SEC") or "60").strip())
+    except ValueError:
+        c = 60
+    try:
+        r = int((os.environ.get("MEISSA_ORTHOPHOTO_CARTA_READ_SEC") or "180").strip())
+    except ValueError:
+        r = 180
+    c = max(5, min(120, c))
+    r = max(30, min(900, r))
+    return (c, r)
+
+
+def meissa_orthophoto_worker_deadline_sec() -> float:
+    """
+    orthophoto-preview 가 run_in_threadpool 에서 돌아가는 최대 대기(초).
+    asyncio 레벨에서 클라이언트에 504을 주기 위함(내부 스레드는 즉시 강제 종료되지 않을 수 있음).
+
+    MEISSA_ORTHOPHOTO_WORKER_TOTAL_SEC 가 있으면 우선(120~3600).
+    없으면 Carta read 상한 + Pillow 처리 여유(기본 +300초).
+    """
+    raw = (os.environ.get("MEISSA_ORTHOPHOTO_WORKER_TOTAL_SEC") or "").strip()
+    if raw:
+        try:
+            v = int(raw)
+            return float(max(120, min(3600, v)))
+        except ValueError:
+            pass
+    _c, read_sec = _meissa_orthophoto_carta_stream_timeout()
+    return float(read_sec + 300)
 
 
 def meissa_orthophoto_preview_transcode_png_bytes_to_mime(body: bytes, fmt: str) -> Tuple[bytes, str]:
@@ -2904,7 +2944,8 @@ def meissa_orthophoto_preview_transcode_png_bytes_to_mime(body: bytes, fmt: str)
         if f == "webp":
             if im.mode not in ("RGB", "RGBA"):
                 im = im.convert("RGBA")
-            im.save(buf, format="WEBP", quality=82, method=4)
+            # method=0~1: 압축 품질은 비슷하게 두고 인코딩 시간을 크게 줄임(대형 정사 PNG→WEBP 시 체감 속도)
+            im.save(buf, format="WEBP", quality=82, method=1)
             return buf.getvalue(), "image/webp"
     except Exception:
         return body, "image/png"
@@ -3404,10 +3445,33 @@ def meissa_get_carta_orthophoto_preview_png(
     headers_try = _meissa_orthophoto_request_headers(access_token)
     last_status: Optional[int] = None
     last_err: Optional[str] = None
-    ortho_timeout = (60, 900)
+    ortho_timeout = _meissa_orthophoto_carta_stream_timeout()
     head_timeout = (5, 20)
     base_export = f"https://cs.carta.is/carta/workspace/{quote(pid, safe='')}/{quote(sid, safe='')}/export/orthophoto/"
 
+    # asyncio.wait_for(…orthophoto…) 와 별개로, 동기 본문이 스레드 풀에서 끝까지 돌면
+    # Carta 장시간 GET·Pillow 처리로 다른 API까지 먹통처럼 보일 수 있다. 벽시계 예산으로 조기 종료.
+    _ortho_t0 = time.monotonic()
+    _ortho_budget = float(meissa_orthophoto_worker_deadline_sec()) - 15.0
+    if _ortho_budget < 45.0:
+        _ortho_budget = 45.0
+
+    def _ortho_fail_budget(where: str) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "message": (
+                f"orthophoto 처리 시간 예산 초과({where}). "
+                "Carta 대용량·동시 요청 시 스레드 풀 점유를 줄이기 위해 중단했습니다. "
+                "MEISSA_ORTHOPHOTO_WORKER_TOTAL_SEC·MEISSA_ORTHOPHOTO_CARTA_READ_SEC 를 조정하세요."
+            ),
+            "snapshotId": sid,
+            "projectId": pid,
+        }
+
+    def _ortho_check_budget(where: str) -> Optional[Dict[str, Any]]:
+        if (time.monotonic() - _ortho_t0) > _ortho_budget:
+            return _ortho_fail_budget(where)
+        return None
 
     # full_export 디스크 캐시가 있으면 Carta GET 생략(저해상·고해상 재요청 속도).
     if not resize_export:
@@ -3460,9 +3524,16 @@ def meissa_get_carta_orthophoto_preview_png(
                             "source": preview_dc.get("source", "disk-cache-full-export"),
                         }
 
+    maybe_budget = _ortho_check_budget("pre-export-loop")
+    if maybe_budget:
+        return maybe_budget
+
     for png_name in _meissa_orthophoto_export_png_filenames():
         png_url = f"{base_export}{png_name}"
         for hi, headers in enumerate(headers_try):
+            maybe_budget = _ortho_check_budget(f"before-carta-png:{png_name}")
+            if maybe_budget:
+                return maybe_budget
             # Carta export URL은 HEAD 가 404 인데 GET 은 200 인 경우가 많아, HEAD 실패 시에도 GET 을 시도한다.
             if not _meissa_carta_export_head_ok(png_url, headers, head_timeout):
                 last_status = 404
@@ -3569,6 +3640,10 @@ def meissa_get_carta_orthophoto_preview_png(
                     "projectId": pid,
                 }
 
+    maybe_budget = _ortho_check_budget("before-resource-url-fallback")
+    if maybe_budget:
+        return maybe_budget
+
     signed_fallback = _meissa_orthophoto_preview_from_resource_urls(
         access_token,
         sid,
@@ -3593,9 +3668,16 @@ def meissa_get_carta_orthophoto_preview_png(
             msg = f"{msg} ({last_err})"
         return {"ok": False, "message": msg, "snapshotId": sid, "projectId": pid}
 
+    maybe_budget = _ortho_check_budget("before-tif-fallback")
+    if maybe_budget:
+        return maybe_budget
+
     tif_url = f"{base_export}orthophoto.tif"
 
     for hi, headers in enumerate(headers_try):
+        maybe_budget = _ortho_check_budget("before-carta-tif")
+        if maybe_budget:
+            return maybe_budget
         if not _meissa_carta_export_head_ok(tif_url, headers, head_timeout):
             last_status = 404
         res = _meissa_carta_stream_to_tempfile(tif_url, headers, cap, ".tif", ortho_timeout)
@@ -3661,6 +3743,14 @@ def _meissa_orthophoto_disk_cache_dir() -> str:
     return os.path.normpath(
         os.path.join(os.path.dirname(__file__), "..", "data", "meissa_orthophoto_cache")
     )
+
+
+def meissa_orthophoto_resolved_disk_cache_dir() -> str:
+    """
+    MEISSA_ORTHOPHOTO_DISK_CACHE_DIR 또는 기본 backend/../data/meissa_orthophoto_cache.
+    디버깅·로그용(실제 PNG/WebP 캐시는 Carta 다운로드·처리 성공 후에만 기록됨).
+    """
+    return _meissa_orthophoto_disk_cache_dir()
 
 
 def _meissa_orthophoto_disk_cache_ttl_sec() -> int:
@@ -3791,7 +3881,20 @@ def meissa_orthophoto_write_disk_cache(
         with open(tmp, "wb") as wf:
             wf.write(body)
         os.replace(tmp, path)
-    except OSError:
+        try:
+            logger.info(
+                "orthophoto PNG cache wrote %s (%s bytes, edge=%s)",
+                path,
+                len(body),
+                el,
+            )
+        except Exception:
+            pass
+    except OSError as exc:
+        try:
+            logger.warning("orthophoto PNG cache write failed %s: %s", path, exc)
+        except Exception:
+            pass
         try:
             if os.path.isfile(tmp):
                 os.unlink(tmp)
@@ -3826,7 +3929,21 @@ def meissa_orthophoto_write_disk_cache_encoded(
         with open(tmp, "wb") as wf:
             wf.write(body)
         os.replace(tmp, path)
-    except OSError:
+        try:
+            logger.info(
+                "orthophoto encoded cache wrote %s fmt=%s (%s bytes, edge=%s)",
+                path,
+                f,
+                len(body),
+                el,
+            )
+        except Exception:
+            pass
+    except OSError as exc:
+        try:
+            logger.warning("orthophoto encoded cache write failed %s: %s", path, exc)
+        except Exception:
+            pass
         try:
             if os.path.isfile(tmp):
                 os.unlink(tmp)

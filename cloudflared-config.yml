@@ -1,4 +1,7 @@
+# Public Hostnames in Cloudflare Zero Trust must include each hostname below for the same tunnel.
 ingress:
-  - hostname: pilexy.yeobaekstudio.com
+  - hostname: pilexy1.yeobaekstudio.com
     service: http://localhost:8001
+  - hostname: pilexy.yeobaekstudio.com
+    service: http://localhost:3001
   - service: http_status:404
