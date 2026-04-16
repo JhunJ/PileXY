@@ -9866,6 +9866,7 @@
     if (s === "carta-tile") return false;
     if (
       s === "orthophoto-tif" ||
+      s === "orthophoto-preview" ||
       s === "raw" ||
       s === "raw-cache" ||
       s === "data-url" ||
@@ -11426,9 +11427,29 @@
     let probe = "none";
     let convertStatus = "unknown";
     try {
-      const res = await fetch(u, { method: "HEAD", cache: "no-store" });
+      let res = await fetch(u, { method: "HEAD", cache: "no-store" });
+      if (Number(res.status) === 405 || Number(res.status) === 501) {
+        probe = "get-fallback";
+        try {
+          res = await fetch(u, {
+            method: "GET",
+            cache: "no-store",
+            headers: { Range: "bytes=0-0" },
+          });
+          try {
+            if (res?.body && typeof res.body.cancel === "function") {
+              res.body.cancel();
+            }
+          } catch (_) {
+            /* ignore */
+          }
+        } catch (_) {
+          res = null;
+        }
+      }
+      if (!res) throw new Error("probe-response-empty");
       httpStatus = Number(res.status) || 0;
-      probe = "head";
+      if (probe !== "get-fallback") probe = "head";
       if (res.ok) {
         encodedAs = String(res.headers.get("X-Ortho-Encoded-As") || "").trim().toLowerCase();
         source = String(res.headers.get("X-Ortho-Source") || "").trim();
@@ -13757,6 +13778,88 @@
     }
   }
 
+  async function loadMeissa2dSingleHighFromUnifiedApi(imgEl, apiUrl, loadSeq, sid, options) {
+    if (!imgEl) return { ok: false };
+    if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+    const src = String(apiUrl || "").trim();
+    if (!src) return { ok: false };
+    const timeoutMs = Math.max(30000, Number(options?.timeoutMs) || 180000);
+    meissa2dOrthoApplyWrapLoadingPhase("loading");
+    meissa2dOrthoInteractReady = false;
+    const startedAt = Date.now();
+    const ticker = window.setInterval(() => {
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return;
+      const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      pushMeissa2dLoadLine(`정사: 단일 WEBP 다운로드 진행중… ${sec}s 경과`);
+    }, 5000);
+    try {
+      pushMeissa2dLoadLine("정사: 단일 WEBP 응답 대기 중(브라우저 직접 다운로드)");
+      const reqSetAt = Date.now();
+      const decoded = await new Promise((resolve) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.clearTimeout(tm);
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.removeEventListener("load", onLoad);
+            imgEl.removeEventListener("error", onErr);
+          } catch (_) {
+            /* ignore */
+          }
+          resolve(Boolean(ok));
+        };
+        const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
+        const onErr = () => finish(false);
+        const tm = window.setTimeout(() => {
+          try {
+            pushMeissa2dLoadLine(
+              `정사: 단일 WEBP 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — 현재 요청 중단`
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          finish(false);
+        }, timeoutMs);
+        imgEl.addEventListener("load", onLoad);
+        imgEl.addEventListener("error", onErr);
+        try {
+          setMeissa2dRawUrlForSnapshot(String(sid || "").trim(), src);
+          imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+          imgEl.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+          imgEl.src = src;
+        } catch (_) {
+          finish(false);
+        }
+      });
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+      if (!decoded) {
+        pushMeissa2dLoadLine("정사: 단일 WEBP 로드는 시도했지만 화면 디코드에 실패했습니다.");
+        meissa2dOrthoApplyWrapLoadingPhase("idle");
+        return { ok: false };
+      }
+      pushMeissa2dLoadLine(
+        `정사: 단일 WEBP 응답+디코드 완료 ${Math.max(1, Math.round((Date.now() - reqSetAt) / 1000))}s`
+      );
+      meissa2dOrthoInteractReady = true;
+      meissa2dOrthoApplyWrapLoadingPhase("idle");
+      pushMeissa2dLoadLine(
+        `정사: 단일 WEBP 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
+      );
+      return { ok: true };
+    } finally {
+      try {
+        window.clearInterval(ticker);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
   async function loadMeissa2dSingleHighWithProgress(imgEl, urlHigh, loadSeq, sid) {
     if (!imgEl) return { ok: false };
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
@@ -14342,11 +14445,12 @@
             MEISSA_ORTHOPHOTO_UNIFIED_EDGE,
             MEISSA_ORTHOPHOTO_UNIFIED_FMT
           );
-          orthoImgLoadPromise = loadMeissa2dSingleHighWithProgress(
+          orthoImgLoadPromise = loadMeissa2dSingleHighFromUnifiedApi(
             img,
             unifiedWebpUrl,
             loadSeq,
-            sid
+            sid,
+            { timeoutMs: MEISSA_ORTHOPHOTO_HIGH_FETCH_MS }
           );
           pushMeissa2dLoadLine(
             `정사: 단일 요청(버튼 PNG→서버 ${String(MEISSA_ORTHOPHOTO_UNIFIED_FMT || "webp").toUpperCase()} 캐시 · max_edge=${MEISSA_ORTHOPHOTO_UNIFIED_EDGE})`
@@ -14597,7 +14701,11 @@
               );
             } else {
               orthophotoErrSnip = "img load error or empty";
-              pushMeissa2dLoadLine("정사 <img> 로드 실패 · 폴백 시도");
+              if (MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+                pushMeissa2dLoadLine("정사: 단일 WEBP 로드 실패");
+              } else {
+                pushMeissa2dLoadLine("정사 <img> 로드 실패 · 폴백 시도");
+              }
             }
           }
         } catch (e) {
@@ -14686,6 +14794,11 @@
       );
     }
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+    if (!orthophotoOk && MEISSA_2D_SIMPLE_ORTHO && projectId && sid && MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+      pushMeissa2dLoadLine("중단: 단일 WEBP 경로 실패(버튼URL/RAW/JSON/Carta 폴백 미사용)");
+      perfDone("실패(단일 WEBP 경로)");
+      return false;
+    }
     if (!orthophotoOk && MEISSA_2D_SIMPLE_ORTHO && projectId && sid) {
       pushMeissa2dLoadLine("정사: orthophoto-preview 실패 → 버튼 URL 고화질 폴백 시도");
       try {
