@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from .meissa_api import (
     Meissa2FARequired,
     meissa_get_carta_orthophoto_preview_png,
+    meissa_orthophoto_resolved_disk_cache_dir,
     meissa_orthophoto_disk_cache_best_valid_path_up_to,
     meissa_orthophoto_disk_cache_encoded_path_if_valid,
     meissa_orthophoto_disk_cache_full_export_path_if_valid,
@@ -38,6 +39,7 @@ from .meissa_api import (
     meissa_orthophoto_write_disk_cache_encoded,
     meissa_orthophoto_write_disk_cache,
     meissa_orthophoto_write_disk_cache_full_export,
+    meissa_orthophoto_worker_deadline_sec,
     meissa_orthophoto_full_export_crop_to_png_bytes,
     meissa_get_snapshot_overlay_2d_binary,
     meissa_get_snapshot_overlay_2d_image,
@@ -111,6 +113,15 @@ app = FastAPI(
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    logger.info(
+        "Orthophoto disk cache: %s (env MEISSA_ORTHOPHOTO_DISK_CACHE_DIR overrides default; "
+        "PNG/WebP files are written only after Carta orthophoto-preview succeeds)",
+        meissa_orthophoto_resolved_disk_cache_dir(),
+    )
+except Exception as exc:
+    logger.warning("Orthophoto disk cache directory could not be logged: %s", exc)
 
 # 직경 기본값: 도면 단위(m 등)에 맞춰 원형 폴리라인(예: Φ0.6)도 포함되도록 설정. 면적 필터와 연동.
 DEFAULT_MIN_DIAMETER = 0.5
@@ -4815,6 +4826,44 @@ def _read_orthophoto_png_file_bytes(path: str) -> Optional[bytes]:
     return None
 
 
+async def _orthophoto_try_fast_encoded_disk_response(
+    project_id: str,
+    snapshot_id: str,
+    edge_lim: int,
+    fmt: str,
+) -> Optional[Response]:
+    """
+    이미 디스크에 저장된 JPEG/WebP 캐시가 있으면 PNG를 읽지 않고 즉시 응답.
+    (요청 처리 중 PNG 로드 → Pillow 변환보다 먼저 시도)
+    """
+    f = (fmt or "").strip().lower()
+    if f not in ("jpeg", "webp"):
+        return None
+    path = await run_in_threadpool(
+        meissa_orthophoto_disk_cache_encoded_path_if_valid,
+        project_id,
+        snapshot_id,
+        int(edge_lim),
+        f,
+    )
+    if not path:
+        return None
+    body = await run_in_threadpool(_read_orthophoto_png_file_bytes, path)
+    if not body:
+        return None
+    headers: Dict[str, str] = {
+        "Cache-Control": "public, max-age=604800",
+        "X-Ortho-Requested-Fmt": f,
+        "X-Ortho-Encoded-As": f,
+        "X-Ortho-Convert-Status": "cached",
+        "X-Ortho-Encoded-Cache": "hit",
+        "X-Ortho-Source": "disk-cache-encoded",
+        "X-Ortho-Max-Edge": str(int(edge_lim)),
+    }
+    mime = "image/webp" if f == "webp" else "image/jpeg"
+    return Response(content=body, media_type=mime, headers=headers)
+
+
 async def _orthophoto_preview_response_from_png_body(
     body_bytes: bytes,
     headers: Dict[str, str],
@@ -4994,6 +5043,12 @@ async def api_meissa_orthophoto_preview(
             snapshot_id=snapshot_id,
             edge_lim=edge_eff,
         )
+    # WebP/JPEG: 디스크에 변환본이 이미 있으면 PNG(full/edge)를 읽지 않고 먼저 반환
+    fast_enc = await _orthophoto_try_fast_encoded_disk_response(
+        project_id, snapshot_id, int(edge_eff), fmt
+    )
+    if fast_enc is not None:
+        return fast_enc
     # full-export 디스크 캐시는 "최대 해상도" 요청에만 맞춘다. 그렇지 않으면 max_edge=6144 도
     # 동일한 원본 PNG가 나가 프론트의 저해상→고해상 2단계가 같은 픽셀이 되어 화면이 안 바뀐다.
     _ortho_full_edge = 16384
@@ -5053,13 +5108,28 @@ async def api_meissa_orthophoto_preview(
     except Exception:
         pass
     try:
-        data = await run_in_threadpool(
-            meissa_get_carta_orthophoto_preview_png,
-            token,
-            project_id,
-            snapshot_id,
-            max_edge=edge_eff,
+        data = await asyncio.wait_for(
+            run_in_threadpool(
+                meissa_get_carta_orthophoto_preview_png,
+                token,
+                project_id,
+                snapshot_id,
+                max_edge=edge_eff,
+            ),
+            timeout=meissa_orthophoto_worker_deadline_sec(),
         )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": (
+                    "orthophoto 처리 시간이 초과되었습니다(Carta 다운로드 또는 서버에서의 이미지 처리). "
+                    "잠시 후 재시도하거나 MEISSA_ORTHOPHOTO_CARTA_READ_SEC, MEISSA_ORTHOPHOTO_WORKER_TOTAL_SEC 를 조정하세요."
+                ),
+                "snapshotId": snapshot_id,
+                "projectId": project_id,
+            },
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not data.get("ok"):
@@ -5083,6 +5153,11 @@ async def api_meissa_orthophoto_preview(
                 if fr_fb is not None:
                     return fr_fb
             else:
+                fast_fb = await _orthophoto_try_fast_encoded_disk_response(
+                    project_id, snapshot_id, int(el_fb), fmt
+                )
+                if fast_fb is not None:
+                    return fast_fb
                 fb_b = await run_in_threadpool(_read_orthophoto_png_file_bytes, pth)
                 if fb_b:
                     return await _orthophoto_preview_response_from_png_body(
@@ -5123,6 +5198,11 @@ async def api_meissa_orthophoto_preview(
                 if fr_fb2 is not None:
                     return fr_fb2
             else:
+                fast_fb2 = await _orthophoto_try_fast_encoded_disk_response(
+                    project_id, snapshot_id, int(el_fb), fmt
+                )
+                if fast_fb2 is not None:
+                    return fast_fb2
                 fb2_b = await run_in_threadpool(_read_orthophoto_png_file_bytes, pth)
                 if fb2_b:
                     return await _orthophoto_preview_response_from_png_body(

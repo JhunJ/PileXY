@@ -29,8 +29,9 @@ project-root/
    ```
 2. Run FastAPI (CORS enabled):
    ```bash
-   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001
+   uvicorn backend.main:app --reload --host 0.0.0.0 --port 3001
    ```
+   Windows에서 `start_server.bat`는 기본 **3001**로 뜹니다. 실행 시 **이미 같은 포트를 쓰는 프로세스**(이전에 띄운 uvicorn 등)가 있으면 먼저 종료한 뒤 다시 띄웁니다. 다른 포트는 실행 전 `set PILEXY_PORT=8001`처럼 지정합니다. Node 등에서 흔한 전역 환경 변수 `PORT`는 이 배치에서 쓰지 않습니다(값이 8001로 박혀 있어도 기본 3001이 적용되도록 `PILEXY_PORT`만 사용).
 3. Key endpoints
    - `POST /api/upload-dxf` – multipart form with `file`, `min_diameter`, `max_diameter`, `text_height_min`, `text_height_max`. Parses DXF, filters entities, matches circles↔texts, detects duplicates, and returns summary/circles/texts/duplicates/filter information.
    - `GET /api/circles` – re-run server-side filters on the last uploaded DXF without re-uploading.
@@ -51,7 +52,7 @@ Notes:
 
 If you have a separate frontend, set `window.__API_BASE_URL__` to your backend URL before loading `frontend/app.js`.
 If frontend and backend are served from the same domain, the app will use the current site origin automatically.
-If you open `http://127.0.0.1:8001/`, the backend will now serve `frontend/index.html` directly.
+If you open `http://127.0.0.1:3001/`, the backend will now serve `frontend/index.html` directly.
 
 ## Cloudflare Tunnel
 
@@ -73,7 +74,7 @@ Use this when the backend runs on your own machine but you want the public domai
    cloudflared tunnel run pilexy
    ```
 
-This makes the public domain forward to `http://localhost:8001`, so the browser can keep calling the same origin without hardcoded localhost URLs.
+This makes the public domain forward to `http://localhost:3001`, so the browser can keep calling the same origin without hardcoded localhost URLs.
 
 **대용량 DXF(약 3MB 초과) 업로드:** Cloudflare Tunnel은 요청 본문을 한 번에 스트리밍하지 않고 버퍼링할 수 있어, 126MB 같은 파일을 한 번에 올리면 1% 근처에서 멈출 수 있습니다. 이 경우 앱이 자동으로 **청크 업로드**(1MB 단위로 잘라 여러 요청 전송)를 사용하므로, `https://pilexy.yeobaekstudio.com` 에서도 대용량 파일이 완료까지 진행됩니다.
 

@@ -242,8 +242,8 @@
   /** 대체뷰 고화질 프리로드 타임아웃(ms). */
   const MEISSA_DOM_OVERLAY_HI_PRELOAD_TIMEOUT_MS = 45000;
   /**
-   * true(기본): 대체뷰 <img>는 메인 정사(#meissa-cloud-2d-image-local)와 동일한 src만 사용.
-   * 별도 버튼 URL 선해결·히든 Image 프리로드·강제 고화질 src 교체를 하지 않아 체감 지연을 줄인다.
+   * true(기본): 대체뷰 <img>는 메인 정사(#meissa-cloud-2d-image-local)와 동일한 src만 사용(WEBP·max_edge 포함).
+   * orthophoto-preview 를 두 번(메인+대체뷰 각각 다른 max_edge) 받지 않는다.
    * false: 예전처럼 resolveMeissaOrthoButtonUrls 로 고선명 URL을 대체뷰에 직접 물림(느릴 수 있음).
    * 런타임 끄기: window.__MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE__ = false
    */
@@ -273,6 +273,22 @@
   })();
   /** 대체뷰는 고화질 단일 요청을 강제한다(초기 저화질 선표시 생략). */
   const MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE = 16384;
+  /**
+   * 정사 뷰포트 고해상 캔버스(#meissa-cloud-2d-ortho-viewport-hi): 대체뷰와 같이
+   * 메인 `#meissa-cloud-2d-image-local` 과 동일한 이미지 소스만 사용(보이는 영역만 재표본화).
+   * 서버 orthophoto 뷰포트 crop 추가 요청·타일 캐시 합성 없음.
+   * 끄고 예전 뷰패치 fetch: window.__MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN__ = false
+   */
+  const MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN__ === false) {
+        return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  })();
   function meissaDomOverlayUsesLossyApiPreview() {
     if (isMeissa2dButtonUrlOnlySingleMode()) return false;
     const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
@@ -435,6 +451,14 @@
   })();
   /** 디코드 실패·0×0 시 순차 재시도(고화질→가용 해상). */
   const MEISSA_ORTHOPHOTO_UNIFIED_EDGE_FALLBACKS = [MEISSA_ORTHOPHOTO_UNIFIED_EDGE, 6144, 4096, 3072];
+  /**
+   * 버튼 PNG→서버 WEBP 단일 경로: 타일 모자이크 저해상 선표시·이중 레이어를 쓰지 않는다.
+   * (대체뷰처럼 정사 한 장만 두어, 로드 직후 타일↔정사 전환 깜빡임을 줄인다.)
+   */
+  const MEISSA_ORTHO_SKIP_TILE_PREVIEW_FOR_UNIFIED_WEBP =
+    MEISSA_2D_SIMPLE_ORTHO &&
+    MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY &&
+    MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP;
   /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
   const MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY = true;
   /** true면 <img src> 직접 경로 사용, false면 API fetch→blob 경로만 사용(안정 우선). */
@@ -456,10 +480,49 @@
   /** true: 정사·시공 적합도에서 RGB/형태 분석 실패를 planD(평면)로 초록 승격하지 않고 미판정으로 유지 */
   const MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS = true;
   /**
-   * false(기본): 확대 시 뷰포트 고해상 crop 패치를 사용해 줌 블러를 줄인다.
-   * 강제로 끄려면 로드 전에 window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ = true
+   * true: 정사 <img> 위에 별도 캔버스로 뷰포트 crop 고해상 패치(서버 full 캐시) — 확대 시 선명하지만
+   * 팬·줌마다 네트워크/합성으로 어긋날 수 있음.
+   * false(기본): 대체뷰처럼 정사는 한 번만 받고 CSS 팬줌만 적용(안정 우선).
+   * 켜려면 로드 전 window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ = false
    */
-  const MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI = true;
+  const MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ === false) {
+        return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  })();
+  /**
+   * true: 점·폴리라인 오버레이를 “현재 화면 뷰포트”만 고해상 백킹 캔버스에 그림(줌 시 점 선명).
+   * false(기본): 대체뷰와 같이 뷰 전체 한 장 캔버스 + letterbox 매핑만 사용(팬·줌 시 깨짐·어긋남 완화).
+   */
+  const MEISSA_2D_POINTS_OVERLAY_VIEWPORT_SHARP = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_2D_POINTS_OVERLAY_VIEWPORT_SHARP__ === true) {
+        return true;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  })();
+  /**
+   * true: 정사 intrinsic 픽셀 크기(대형)로 점 캔버스 할당 — 메모리·GPU 부담 큼.
+   * false(기본): 컨테이너(뷰) 크기 캔버스만 사용.
+   */
+  const MEISSA_2D_POINTS_OVERLAY_FULL_INTRINSIC_CANVAS = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_2D_POINTS_OVERLAY_FULL_INTRINSIC_CANVAS__ === true) {
+        return true;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  })();
   /** PDAM 대시보드 POST — 무제한 대기 시 비교 UI가 멈춘 것처럼 보임 */
   const MEISSA_DASHBOARD_FETCH_MS = 180000;
   /** nearest-z 단건 — 한 건이 무한 대기면 전체 워커가 진행 불가 */
@@ -3218,19 +3281,24 @@
       seen.add(s);
       out.push({ url: s, source: String(source || "") });
     };
-    if (!isMeissa2dButtonUrlOnlySingleMode()) {
-      push(
-        buildOrthophotoPreviewImgUrl(
-          sid,
-          projectId,
-          meissaAccess,
-          MEISSA_ORTHOPHOTO_PREVIEW_EDGE
-        ),
-        "preview"
-      );
-    }
+    const imgLocal = els.meissaCloud2dImageLocal;
+    const mainAttr = String(imgLocal?.getAttribute?.("src") || "").trim();
+    const curShown = String(imgLocal?.currentSrc || imgLocal?.src || "").trim();
+    push(curShown || mainAttr, "img-src");
+    if (mainAttr && mainAttr !== (curShown || mainAttr)) push(mainAttr, "img-attr-src");
     push(meissa2dRawUrlBySnapshot.get(String(sid || "").trim()), "raw-cache");
-    push(els.meissaCloud2dImageLocal?.getAttribute?.("src"), "img-src");
+    if (!isMeissa2dButtonUrlOnlySingleMode()) {
+      const previewUrl = buildOrthophotoPreviewImgUrl(
+        sid,
+        projectId,
+        meissaAccess,
+        MEISSA_ORTHOPHOTO_PREVIEW_EDGE
+      );
+      const pv = String(previewUrl || "").trim();
+      if (pv && pv !== curShown && pv !== mainAttr) {
+        push(previewUrl, "preview");
+      }
+    }
     return out;
   }
 
@@ -3278,19 +3346,30 @@
   }
 
   /**
-   * 분석용 이미지는 전체 원본 재다운로드 대신 preview(max_edge=3072) blob으로 고정.
-   * 고해상 원본(예: 17k x 20k)을 다시 받아 분석 준비하는 비용/지연을 줄인다.
+   * ortho_pdam 등 분석용 픽셀 소스: 가능하면 **화면에 이미 디코드된** 정사(<img>)를 그대로 쓴다.
+   * 예전에는 HTTP src 여도 max_edge=3072 를 또 fetch 해 동일 스냅샷에 orthophoto-preview 가 2~3번 나갔음.
+   * 표시 이미지를 쓸 수 없을 때만 저해상 preview URL fetch 폴백.
    */
   async function meissa2dPrimeAnalysisImageFromDisplayedSrc(reason) {
     const key = meissa2dCurrentProjectSnapshotKey();
     const imgEl = els.meissaCloud2dImageLocal;
     if (!key || !imgEl) return false;
+    if (meissa2dHasReadyOrthoAnalysisImage()) return true;
     if (!hasRenderableOverlayImage(imgEl)) return false;
     if (!useFullGeorefForOverlayImage(imgEl)) return false;
     const srcShown = String(imgEl.currentSrc || imgEl.getAttribute("src") || "").trim();
     if (!srcShown) return false;
     if (srcShown.startsWith("blob:")) {
       return meissa2dAdoptVisibleOrthoImageForAnalysis(key);
+    }
+    if (meissa2dAdoptVisibleOrthoImageForAnalysis(key)) {
+      meissa2dOrthoAnalysisPrimeSig = `${key}|adopt-visible`;
+      try {
+        pushMeissa2dLoadLine(`정사 분석 소스: 표시 이미지와 동일(추가 다운로드 없음)${reason ? ` · ${reason}` : ""}`);
+      } catch (_) {
+        /* ignore */
+      }
+      return true;
     }
     const [projectId, sid] = key.split(":");
     if (!projectId || !sid || !meissaAccess) return false;
@@ -8577,6 +8656,14 @@
       }
       return lines.filter(Boolean).join("\n");
     }
+    if (MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) {
+      if (MEISSA_2D_SIMPLE_ORTHO && img) {
+        const ml = orthoMain8192BackgroundBadgeLine(img, wrap);
+        if (ml) lines.push(ml);
+      }
+      lines.push("뷰패치: 메인 정사와 동일 소스(재표본 · 서버 크롭 없음)");
+      return lines.filter(Boolean).join("\n");
+    }
     const bt = String(baseText || "").trim();
     if (bt) lines.push(bt);
     if (MEISSA_2D_SIMPLE_ORTHO && img) {
@@ -8847,9 +8934,9 @@
   }
 
   /**
-   * 버튼 URL 단일 모드 전용: orthophoto-preview 네트워크 없이
-   * 현재 메인 <img>에서 보이는 영역만 고해상 캔버스로 즉시 재표본화한다.
-   * (CSS transform에 고정된 저해상 텍스처가 확대되는 느낌을 줄임)
+   * orthophoto-preview 추가 요청 없이 메인 <img>와 동일 픽셀을 쓴다(대체뷰 미러와 동일 개념).
+   * 보이는 영역만 뷰포트 캔버스에 재표본화해 확대 시 저해상 뭉개짐을 줄인다.
+   * 버튼 URL 단일 모드 또는 MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN 일 때 사용.
    */
   function renderMeissa2dOrthoViewportHiFromMainImageLocal() {
     if (!MEISSA_2D_SIMPLE_ORTHO) return;
@@ -8858,6 +8945,12 @@
     if (!img || !wrap || !hasRenderableOverlayImage(img)) {
       const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
       if (hi0) hi0.style.display = "none";
+      return;
+    }
+    if (meissa2dOrthoViewportHiRedundantWithMainImg(img)) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      meissa2dOrthoViewportHiLayoutMeta = null;
       return;
     }
     if (img.getAttribute("data-meissa-2d-intrinsic-layout") !== "1") {
@@ -8937,6 +9030,24 @@
         /* ignore */
       }
     }
+    if (MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) {
+      try {
+        const projectId =
+          (els.meissaProjectSelect?.value || "").trim() ||
+          (els.projectId?.value || "").trim();
+        const sidv =
+          (els.meissaSnapshotSelect?.value || "").trim() ||
+          (els.snapshotId?.value || "").trim();
+        setMeissa2dOrthoHiBadgeForViewportHi("", "ok", {
+          projectId,
+          sid: sidv,
+          effFullW: 0,
+          effFullH: 0,
+        });
+      } catch (_) {
+        /* ignore */
+      }
+    }
     const now = Date.now();
     if (now - Number(meissa2dOrthoViewportHiLocalLastLogTs || 0) > 1200) {
       meissa2dOrthoViewportHiLocalLastLogTs = now;
@@ -8947,11 +9058,11 @@
   }
 
   function scheduleMeissa2dOrthoViewportHiFromMainImageLocal() {
-    if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+    if (!isMeissa2dButtonUrlOnlySingleMode() && !MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) return;
     if (meissa2dOrthoViewportHiLocalRaf) return;
     meissa2dOrthoViewportHiLocalRaf = window.requestAnimationFrame(() => {
       meissa2dOrthoViewportHiLocalRaf = 0;
-      if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+      if (!isMeissa2dButtonUrlOnlySingleMode() && !MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) return;
       renderMeissa2dOrthoViewportHiFromMainImageLocal();
     });
   }
@@ -8974,6 +9085,8 @@
     // 버튼 URL(export PNG)은 모바일 브라우저에서 내부 다운샘플될 수 있어
     // naturalWidth가 커도 뷰포트 패치 fetch를 유지한다.
     if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") return false;
+    // orthophoto-preview 는 max_edge 로 캡된 디코드일 수 있어(예: 8192) — 원본 래스터는 더 큼 → 패치 유지
+    if (srcKind === "orthophoto-preview") return false;
     const nw = Math.round(Number(imgEl.naturalWidth || 0));
     const nh = Math.round(Number(imgEl.naturalHeight || 0));
     if (nw < 32 || nh < 32) return false;
@@ -9066,6 +9179,32 @@
       } catch (_) {
         /* ignore */
       }
+      return;
+    }
+    if (MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) {
+      if (meissa2dOrthoViewportHiAbort) {
+        try {
+          meissa2dOrthoViewportHiAbort.abort();
+        } catch (_) {
+          /* ignore */
+        }
+        meissa2dOrthoViewportHiAbort = null;
+      }
+      meissa2dOrthoViewportHiFetchInFlight = false;
+      if (meissa2dOrthoViewportHiTimer) {
+        try {
+          window.clearTimeout(meissa2dOrthoViewportHiTimer);
+        } catch (_) {
+          /* ignore */
+        }
+        meissa2dOrthoViewportHiTimer = 0;
+      }
+      try {
+        clearMeissa2dOrthoViewportHiTileCache();
+      } catch (_) {
+        /* ignore */
+      }
+      scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
       return;
     }
     const img0 = els.meissaCloud2dImageLocal;
@@ -9308,10 +9447,17 @@
       guessFullW > nw * 1.12 &&
       guessFullH > nh * 1.12;
     if (!geoHasLarger) {
-      if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") {
+      if (
+        srcKind === "orthophoto-button-url" ||
+        srcKind === "orthophoto-export" ||
+        srcKind === "orthophoto-preview"
+      ) {
+        const baseLong = Math.max(nw, nh);
         const targetLong = Number.isFinite(nominalLong)
-          ? nominalLong
-          : Math.max(MEISSA_ORTHOPHOTO_FULL_MAX_EDGE * 2, Math.max(nw, nh));
+          ? srcKind === "orthophoto-preview"
+            ? Math.max(nominalLong * 2, baseLong * 3, MEISSA_ORTHOPHOTO_FULL_MAX_EDGE * 2)
+            : nominalLong
+          : Math.max(MEISSA_ORTHOPHOTO_FULL_MAX_EDGE * 2, baseLong * 3);
         const ar = nw / Math.max(1, nh);
         if (ar >= 1) {
           guessFullW = Math.min(56000, Math.max(nw, targetLong));
@@ -9425,6 +9571,10 @@
   /** 디바운스 대기 없이 타일 캐시가 있으면 즉시 페인트 — 줌/팬 중 레이아웃·합성 어긋남 완화 */
   function tryMeissa2dOrthoViewportHiPaintCachedSync() {
     if (MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI) return;
+    if (MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) {
+      renderMeissa2dOrthoViewportHiFromMainImageLocal();
+      return;
+    }
     const res = computeMeissa2dOrthoViewportHiFrameResult();
     if (res.t !== "ok") return;
     const fr = res.fr;
@@ -10720,6 +10870,7 @@
       const nhI = Math.round(Number(imgI?.naturalHeight || 0));
       const bigIntrinsic = nwI > 1 && nhI > 1 && nwI * nhI >= 1_200_000;
       const useVpSharp =
+        MEISSA_2D_POINTS_OVERLAY_VIEWPORT_SHARP &&
         MEISSA_2D_SIMPLE_ORTHO &&
         !isMosaicActive() &&
         imgI &&
@@ -10764,6 +10915,7 @@
         canvas.style.left = "0px";
         canvas.style.top = "0px";
         if (
+          MEISSA_2D_POINTS_OVERLAY_FULL_INTRINSIC_CANVAS &&
           MEISSA_2D_SIMPLE_ORTHO &&
           imgI &&
           imgI.getAttribute("data-meissa-2d-intrinsic-layout") === "1" &&
@@ -11648,7 +11800,14 @@
     const domFmt = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
     const mainSrcEarly = String(mainImg.getAttribute("src") || "").trim();
     let src = "";
-    if (domFmt === "jpeg" || domFmt === "webp") {
+    /**
+     * 기본(미러 ON): 메인 2D와 동일한 src — WEBP/JPEG 여부·max_edge 도 동일.
+     * 예전 동작: fmt=webp 일 때 여기서 max_edge=16384 로 *또* 요청해 이중 다운로드·깜빡임·지연이 났음.
+     * 미러 OFF 일 때만 별도 orthophoto-preview URL(고해상·fmt)을 쓴다.
+     */
+    if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
+      src = mainSrcEarly;
+    } else if (domFmt === "jpeg" || domFmt === "webp") {
       const projectId =
         (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
       const sid =
@@ -12330,7 +12489,7 @@
       } else {
         // 드래그 중에는 transform만 갱신하고 고해상 패치 재계산/요청은 멈춰 체감 버벅임을 줄인다.
         syncMeissa2dOrthoViewportHiLayout();
-        if (isMeissa2dButtonUrlOnlySingleMode()) {
+        if (isMeissa2dButtonUrlOnlySingleMode() || MEISSA_ORTHO_VIEWPORT_HI_MIRROR_MAIN) {
           scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
         }
       }
@@ -14323,8 +14482,12 @@
     const applyPreferred2dVisibility = () => {
       const hasImg = hasRenderableOverlayImage(img);
       if (MEISSA_2D_SIMPLE_ORTHO) {
-        // 심플 모드도 타일 피라미드를 기본 표시로 사용한다.
-        setMeissa2dLayerVisibility({ showMosaic: true, showImage: hasImg });
+        if (MEISSA_ORTHO_SKIP_TILE_PREVIEW_FOR_UNIFIED_WEBP) {
+          setMeissa2dLayerVisibility({ showMosaic: false, showImage: hasImg });
+        } else {
+          // 심플 모드: 타일 피라미드로 초기 체감속도(단일 WEBP 경로에서는 생략).
+          setMeissa2dLayerVisibility({ showMosaic: true, showImage: hasImg });
+        }
         return;
       }
       if (preferGeorefImage()) {
@@ -14693,7 +14856,8 @@
     }
     let quickMosaic = false;
     const enableTileMosaicNow =
-      !MEISSA_2D_SIMPLE_ORTHO || (MEISSA_2D_SIMPLE_ORTHO && MEISSA_2D_SIMPLE_TILE_FIRST_MODE);
+      (!MEISSA_2D_SIMPLE_ORTHO || (MEISSA_2D_SIMPLE_ORTHO && MEISSA_2D_SIMPLE_TILE_FIRST_MODE)) &&
+      !MEISSA_ORTHO_SKIP_TILE_PREVIEW_FOR_UNIFIED_WEBP;
     if (enableTileMosaicNow) {
       const snapHint = meissa2dSnapshotTileHints[snapKey];
       const focusCenter = focusToTileCenter(projectId, 20);
@@ -14738,7 +14902,11 @@
       }
     } else {
       syncMeissa2dSquareMapFrameLayout();
-      pushMeissa2dLoadLine("심플 모드: 레이아웃 동기화");
+      pushMeissa2dLoadLine(
+        MEISSA_ORTHO_SKIP_TILE_PREVIEW_FOR_UNIFIED_WEBP
+          ? "심플: 단일 WEBP 경로 — 타일 저해상 선표시 생략(정사만)"
+          : "심플 모드: 레이아웃 동기화"
+      );
     }
     // Carta export orthophoto.tif → PNG. 심플 모드에서는 georef 없어도 시도(이미지만이라도 표시).
     let orthophotoOk = false;

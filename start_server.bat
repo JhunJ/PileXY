@@ -7,7 +7,17 @@ echo Starting backend server...
 echo.
 
 cd /d "%~dp0"
-if not defined PORT set PORT=8001
+rem Listen port: default 3001. (Do not use env var PORT - Node/other tools often set PORT=8001 globally.)
+if not defined PILEXY_PORT set "PILEXY_PORT=3001"
+
+rem If this port is already in use (e.g. previous uvicorn), stop that process first.
+echo Stopping any process listening on port %PILEXY_PORT%...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort %PILEXY_PORT% -State Listen -ErrorAction SilentlyContinue ^| ForEach-Object { Write-Host ('  ending PID ' + $_.OwningProcess); Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"
+rem ping avoids "Input redirection is not supported" from timeout when stdin is redirected
+ping -n 2 127.0.0.1 >nul
+
+echo Port: %PILEXY_PORT%  ^(override: set PILEXY_PORT=8001 before running this bat^)
+echo.
 
 rem --- venv next to this batch ---
 set "VENVP=%CD%\backend\.venv\Scripts\python.exe"
@@ -46,7 +56,7 @@ if !errorlevel! equ 0 (
     pause
     exit /b 1
   )
-  py -3 -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PORT%
+  py -3 -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PILEXY_PORT%
   goto :finish
 )
 
@@ -71,7 +81,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-"!VENVP!" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PORT%
+"!VENVP!" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PILEXY_PORT%
 goto :finish
 
 :run_path_python
@@ -84,7 +94,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-"!PYEXE!" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PORT%
+"!PYEXE!" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %PILEXY_PORT%
 goto :finish
 
 :fail_hint
