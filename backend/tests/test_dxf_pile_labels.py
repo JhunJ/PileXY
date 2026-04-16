@@ -25,6 +25,7 @@ class DxfPileLabelCollectionTest(unittest.TestCase):
 
     def test_rejects_non_pile_noise(self) -> None:
         self.assertIsNone(pile_label_for_collection("PHC"))
+        self.assertIsNone(pile_label_for_collection("PART"))
         self.assertIsNone(pile_label_for_collection("T4-1a"))
         self.assertIsNone(pile_label_for_collection("TC4-1a"))
         self.assertIsNone(pile_label_for_collection("TA-1"))
@@ -48,6 +49,11 @@ class DxfPileLabelCollectionTest(unittest.TestCase):
     def test_foundation_pf_fullwidth_leading(self) -> None:
         self.assertEqual(pile_label_for_collection("\uff30\uff11"), "Ｐ１")  # Ｐ１
         self.assertTrue(foundation_pf_only_flag("\uff261"))  # Ｆ1
+
+    def test_leading_pf_only_collects_nonstandard_suffix(self) -> None:
+        """_is_foundation_pf_style_compact 에서 걸러지던 P + 연속 라틴(예: PXY)도 선행 P/F 규칙으로 수집."""
+        self.assertEqual(pile_label_for_collection("PXY99"), "PXY99")
+        self.assertTrue(foundation_pf_only_flag("PXY99"))
 
     def test_pf_digit_series_collected(self) -> None:
         """PF1, PF2 형태 — 두 번째 글자 F가 PHC 오탐으로 빠지지 않아야 함."""

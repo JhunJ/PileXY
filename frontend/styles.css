@@ -4686,11 +4686,15 @@ td {
   flex-direction: column;
   gap: 0.3rem;
   flex: 1;
+  min-width: 0;
 }
 
 .project-item-info strong {
+  display: block;
   font-size: 0.95rem;
   color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .project-meta {
@@ -4702,6 +4706,7 @@ td {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .project-item-name-input {
@@ -6526,11 +6531,9 @@ tr.meissa-result-data-row {
   width: var(--circle-size, 6px);
   height: var(--circle-size, 6px);
   border-radius: 999px;
-  border: 1px solid rgba(8, 47, 73, 0.9);
-  background: rgba(34, 211, 238, 0.18);
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.56) inset,
-    0 0 8px rgba(34, 211, 238, 0.42);
+  border: 0;
+  background: rgba(34, 211, 238, 0.38);
+  box-shadow: none;
 }
 
 .meissa-dom-overlay-label {

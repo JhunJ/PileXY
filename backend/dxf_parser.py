@@ -111,6 +111,21 @@ def _is_foundation_pf_style_compact(compact: str) -> bool:
     return True
 
 
+def _leading_pf_collectible(compact: str) -> bool:
+    """
+    공백 제거 본문이 P/F(전각 포함)로 시작하면 기초 후보로 본다.
+    PHC·PART 등 말뚝/기초 라벨이 아닌 흔한 잡문자열은 기존과 같이 제외.
+    """
+    if not compact:
+        return False
+    if _leading_pf_ascii(compact) is None:
+        return False
+    u = _ascii_fold_pf_compact(compact).upper()
+    if u in ("PHC", "PART"):
+        return False
+    return True
+
+
 def foundation_pf_only_flag(raw: str) -> bool:
     """말뚝 번호가 아닌 기초 P/F 표기 — 뷰어·기초 탭용으로만 수집, 자동 매칭 후보에서는 제외."""
     s = _normalize_label_hyphens((raw or "").strip())
@@ -121,6 +136,8 @@ def foundation_pf_only_flag(raw: str) -> bool:
         return False
     if _normalize_tower_crane_pile_label(compact):
         return False
+    if _leading_pf_collectible(compact):
+        return True
     return _is_foundation_pf_style_compact(compact)
 
 
@@ -142,6 +159,11 @@ def pile_label_for_collection(raw: str) -> Optional[str]:
     if tower_label:
         return tower_label
     if _is_foundation_pf_style_compact(compact):
+        pf_core = _pf_core_label(compact)
+        if pf_core:
+            return pf_core
+        return s if len(s) <= 120 else f"{s[:117]}..."
+    if _leading_pf_collectible(compact):
         pf_core = _pf_core_label(compact)
         if pf_core:
             return pf_core

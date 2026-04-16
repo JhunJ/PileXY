@@ -50,6 +50,7 @@ const toggleTextsInput = document.getElementById("toggle-texts");
 const toggleMatchLinesInput = document.getElementById("toggle-match-lines");
 const toggleFoundationLabelVizInput = document.getElementById("toggle-foundation-label-viz");
 const togglePfPolyLinkVizInput = document.getElementById("toggle-pf-poly-link-viz");
+const toggleFoundationAreaHatchVizInput = document.getElementById("toggle-foundation-area-hatch-viz");
 const toggleBuildingHatchInput = document.getElementById("toggle-building-hatch");
 const toggleParkingHatchInput = document.getElementById("toggle-parking-hatch");
 const toggleTowerCraneHatchInput = document.getElementById("toggle-tower-crane-hatch");
@@ -1891,6 +1892,23 @@ function bindEvents() {
     togglePfPolyLinkVizInput.checked = state.showPfPolyLinkViz !== false;
     togglePfPolyLinkVizInput.addEventListener("change", (event) => {
       state.showPfPolyLinkViz = event.target.checked;
+      requestRedraw();
+    });
+  }
+  if (toggleFoundationAreaHatchVizInput) {
+    toggleFoundationAreaHatchVizInput.checked = state.construction?.foundationAreaHatchVisible !== false;
+    toggleFoundationAreaHatchVizInput.addEventListener("change", (event) => {
+      if (!state.construction) state.construction = {};
+      state.construction.foundationAreaHatchVisible = event.target.checked;
+      const panelHatchBtn = document.getElementById("construction-foundation-hatch-visibility");
+      if (panelHatchBtn) {
+        const hatchOn = state.construction.foundationAreaHatchVisible !== false;
+        panelHatchBtn.textContent = hatchOn ? "가시성 끄기" : "가시성 켜기";
+        panelHatchBtn.title = hatchOn
+          ? "캔버스 면적 해치를 숨깁니다 (지표 선택은 유지됩니다)."
+          : "면적 해치를 다시 표시합니다.";
+        panelHatchBtn.setAttribute("aria-pressed", hatchOn ? "false" : "true");
+      }
       requestRedraw();
     });
   }
@@ -8124,6 +8142,10 @@ let versionCompareExcelSelectionState = {
   activeField: "building",
   selectedSheets: [],
   buildingSourceMode: "sheet",
+  /** 시트명 → 헤더 행(1-based). 시트마다 레이아웃이 다를 때 비교 시 각각 적용 */
+  headerRowBySheet: {},
+  /** 번호/X/Y 열 헤더 셀에 보이는 글자 — 시트마다 헤더 행을 이 글자로 자동 탐지 */
+  headerMarkers: { number: "", x: "", y: "" },
 };
 let versionCompareExcelIssueFilter = "all";
 let versionCompareExcelLastResult = null;
@@ -9936,10 +9958,21 @@ function getVersionCompareExcelFieldInput(fieldKey) {
 
 function ensureVersionCompareExcelSelectionState() {
   if (!versionCompareExcelSelectionState || typeof versionCompareExcelSelectionState !== "object") {
-    versionCompareExcelSelectionState = { activeField: "building", selectedSheets: [], buildingSourceMode: "sheet" };
+    versionCompareExcelSelectionState = {
+      activeField: "building",
+      selectedSheets: [],
+      buildingSourceMode: "sheet",
+      headerRowBySheet: {},
+    };
   }
   if (!Array.isArray(versionCompareExcelSelectionState.selectedSheets)) {
     versionCompareExcelSelectionState.selectedSheets = [];
+  }
+  if (!versionCompareExcelSelectionState.headerRowBySheet || typeof versionCompareExcelSelectionState.headerRowBySheet !== "object") {
+    versionCompareExcelSelectionState.headerRowBySheet = {};
+  }
+  if (!versionCompareExcelSelectionState.headerMarkers || typeof versionCompareExcelSelectionState.headerMarkers !== "object") {
+    versionCompareExcelSelectionState.headerMarkers = { number: "", x: "", y: "" };
   }
   if (!["sheet", "column"].includes(versionCompareExcelSelectionState.buildingSourceMode)) {
     versionCompareExcelSelectionState.buildingSourceMode = versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column";
@@ -10008,6 +10041,15 @@ function getVersionCompareExcelColumnLetter(sheetInfo, columnIndex) {
 }
 
 function getVersionCompareExcelHeaderRowNumber(sheetInfo) {
+  const name = sheetInfo?.name;
+  ensureVersionCompareExcelSelectionState();
+  const stored = name && Object.prototype.hasOwnProperty.call(versionCompareExcelSelectionState.headerRowBySheet, name)
+    ? versionCompareExcelSelectionState.headerRowBySheet[name]
+    : null;
+  if (stored != null) {
+    const n = Number(stored);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
   const fallback = Number(sheetInfo?.suggestedHeaderRow) || 1;
   const rowNumber = Number(versionCompareExcelHeaderRow?.value);
   return Number.isFinite(rowNumber) && rowNumber > 0 ? Math.trunc(rowNumber) : fallback;
@@ -10017,6 +10059,23 @@ function getVersionCompareExcelHeaderRowValues(sheetInfo) {
   const headerRowNumber = getVersionCompareExcelHeaderRowNumber(sheetInfo);
   const headerRow = (sheetInfo?.preview || []).find((row) => row.rowNumber === headerRowNumber);
   return Array.isArray(headerRow?.values) ? headerRow.values : [];
+}
+
+/** 현재 시트·헤더 행·열 지정으로 번호/X/Y 열 헤더 셀 글자를 저장 — 서버에서 시트마다 동일 글자 행을 찾음 */
+function syncVersionCompareExcelHeaderMarkersFromSelection() {
+  const sheetInfo = getVersionCompareSelectedSheetInfo();
+  ensureVersionCompareExcelSelectionState();
+  if (!sheetInfo) return;
+  const headers = getVersionCompareExcelHeaderRowValues(sheetInfo);
+  ["number", "x", "y"].forEach((key) => {
+    const input = getVersionCompareExcelFieldInput(key);
+    const spec = String(input?.value || "").trim();
+    if (!spec) return;
+    const idx = findVersionCompareExcelColumnIndex(sheetInfo, spec);
+    if (idx >= 0 && headers[idx] != null && String(headers[idx]).trim() !== "") {
+      versionCompareExcelSelectionState.headerMarkers[key] = String(headers[idx]).trim();
+    }
+  });
 }
 
 function resetVersionCompareExcelFieldValues() {
@@ -10030,11 +10089,13 @@ function resetVersionCompareExcelFieldValues() {
 
 function resetVersionCompareExcelInspectState() {
   versionCompareExcelInspection = null;
-  versionCompareExcelSelectionState = {
-    activeField: "building",
-    selectedSheets: [],
-    buildingSourceMode: versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column",
-  };
+    versionCompareExcelSelectionState = {
+      activeField: "building",
+      selectedSheets: [],
+      buildingSourceMode: versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column",
+      headerRowBySheet: {},
+      headerMarkers: { number: "", x: "", y: "" },
+    };
   if (versionCompareExcelSheet) {
     versionCompareExcelSheet.innerHTML = "";
     versionCompareExcelSheet.value = "";
@@ -10200,6 +10261,18 @@ function renderVersionCompareExcelSelectionSummary() {
       </span>
     </div>
   `;
+  ensureVersionCompareExcelSelectionState();
+  const hm = versionCompareExcelSelectionState.headerMarkers || {};
+  const hmOk = Boolean(hm.number && hm.x && hm.y);
+  const headerMarkerHtml = hmOk
+    ? `
+    <div class="version-compare-excel-selection-item">
+      <strong>헤더 찾기</strong>
+      <span class="version-compare-excel-selection-value" title="각 시트에서 아래 글자가 동시에 나타나는 행을 헤더로 사용합니다.">
+        헤더명 기준 자동 · 번호 ${escapeHtml(hm.number)} · X ${escapeHtml(hm.x)} · Y ${escapeHtml(hm.y)}
+      </span>
+    </div>`
+    : "";
   const fieldHtml = VERSION_COMPARE_EXCEL_FIELDS.map((field) => {
     const detail = getVersionCompareExcelSelectionDetails(sheetInfo, field.key);
     const badge = detail.letter
@@ -10212,7 +10285,7 @@ function renderVersionCompareExcelSelectionSummary() {
       </div>
     `;
   }).join("");
-  versionCompareExcelSelectionSummary.innerHTML = headerRowHtml + metaHtml + fieldHtml;
+  versionCompareExcelSelectionSummary.innerHTML = headerRowHtml + metaHtml + headerMarkerHtml + fieldHtml;
 }
 
 function renderVersionCompareExcelSheetTabs() {
@@ -10286,6 +10359,10 @@ function setVersionCompareExcelHeaderRow(rowNumber, options = {}) {
   const { applySuggestions = false } = options;
   const sheetInfo = getVersionCompareSelectedSheetInfo();
   const nextRow = Math.max(1, Number(rowNumber) || Number(sheetInfo?.suggestedHeaderRow) || 1);
+  if (sheetInfo?.name) {
+    ensureVersionCompareExcelSelectionState();
+    versionCompareExcelSelectionState.headerRowBySheet[sheetInfo.name] = nextRow;
+  }
   if (versionCompareExcelHeaderRow) {
     versionCompareExcelHeaderRow.value = String(nextRow);
   }
@@ -10297,13 +10374,20 @@ function setVersionCompareExcelHeaderRow(rowNumber, options = {}) {
   renderVersionCompareExcelPreview();
 }
 
-function handleVersionCompareExcelSheetChange(sheetName) {
+function handleVersionCompareExcelSheetChange(sheetName, options = {}) {
+  const { applySuggestions = false } = options;
   if (!versionCompareExcelSheet) return;
   const nextSheetName = sheetName || versionCompareExcelInspection?.sheetNames?.[0] || "";
   versionCompareExcelSheet.value = nextSheetName;
   renderVersionCompareExcelSheetTabs();
   const sheetInfo = getVersionCompareSelectedSheetInfo();
-  setVersionCompareExcelHeaderRow(sheetInfo?.suggestedHeaderRow || 1, { applySuggestions: true });
+  ensureVersionCompareExcelSelectionState();
+  const saved = sheetInfo?.name != null ? versionCompareExcelSelectionState.headerRowBySheet[sheetInfo.name] : null;
+  const rowToUse =
+    saved != null && Number(saved) > 0
+      ? Number(saved)
+      : sheetInfo?.suggestedHeaderRow || 1;
+  setVersionCompareExcelHeaderRow(rowToUse, { applySuggestions });
   resetVersionCompareExcelCompareResult();
 }
 
@@ -10387,7 +10471,7 @@ function renderVersionCompareExcelPreview() {
         </div>
       </div>
     </div>
-    <p class="version-compare-excel-preview-tip">1. 왼쪽 행 번호를 눌러 헤더 행을 정합니다. 2. 파란 강조 대상 항목을 고른 뒤 헤더 셀을 클릭하면 컬럼이 지정됩니다.</p>
+    <p class="version-compare-excel-preview-tip">1. 왼쪽 행 번호를 눌러 헤더 행을 정합니다. 2. 파란 강조 대상 항목을 고른 뒤 헤더 셀을 클릭하면 컬럼이 지정됩니다. 번호·X·Y 헤더 글자가 모두 잡히면 시트마다 그 글자가 있는 행을 자동으로 찾습니다.</p>
     <div class="version-compare-excel-table-wrap">
       <table class="version-compare-excel-table">
         <thead>
@@ -10411,6 +10495,7 @@ function renderVersionCompareExcelPreview() {
       );
     });
   });
+  syncVersionCompareExcelHeaderMarkersFromSelection();
 }
 
 async function inspectVersionCompareExcelFile() {
@@ -10435,10 +10520,18 @@ async function inspectVersionCompareExcelFile() {
       throw new Error(await response.text());
     }
     versionCompareExcelInspection = await response.json();
+    const headerRowBySheetInit = {};
+    (versionCompareExcelInspection.sheets || []).forEach((sh) => {
+      if (sh?.name) {
+        headerRowBySheetInit[sh.name] = Math.max(1, Number(sh.suggestedHeaderRow) || 1);
+      }
+    });
     versionCompareExcelSelectionState = {
       activeField: getVersionCompareExcelBuildingSourceMode() === "sheet" ? "number" : "building",
       selectedSheets: [...(versionCompareExcelInspection.sheetNames || [])],
       buildingSourceMode: getVersionCompareExcelBuildingSourceMode(),
+      headerRowBySheet: headerRowBySheetInit,
+      headerMarkers: { number: "", x: "", y: "" },
     };
     if (versionCompareExcelSheet) {
       versionCompareExcelSheet.innerHTML = "";
@@ -10455,7 +10548,7 @@ async function inspectVersionCompareExcelFile() {
     }
     renderVersionCompareExcelSheetTabs();
     setVersionCompareExcelBuildingSourceMode(versionCompareExcelSelectionState.buildingSourceMode, { updateSuggestions: false });
-    handleVersionCompareExcelSheetChange(firstSheetName);
+    handleVersionCompareExcelSheetChange(firstSheetName, { applySuggestions: true });
     setUploadStatus("엑셀 샘플을 불러왔습니다.");
     setVersionCompareExcelStatus("엑셀 샘플을 불러왔습니다.");
   } catch (error) {
@@ -10692,6 +10785,24 @@ async function runVersionCompareExcelCompare() {
     formData.append("sheet_name", sheetInfo.name);
     formData.append("sheet_names_json", JSON.stringify(selectedSheetNames));
     formData.append("header_row", String(getVersionCompareExcelHeaderRowNumber(sheetInfo)));
+    const inspectSheets = versionCompareExcelInspection?.sheets || [];
+    const headerRowsPayload = {};
+    selectedSheetNames.forEach((sheetNm) => {
+      const sInf = inspectSheets.find((s) => s.name === sheetNm);
+      headerRowsPayload[sheetNm] = getVersionCompareExcelHeaderRowNumber(
+        sInf || { name: sheetNm, suggestedHeaderRow: 1 },
+      );
+    });
+    formData.append("header_rows_json", JSON.stringify(headerRowsPayload));
+    ensureVersionCompareExcelSelectionState();
+    syncVersionCompareExcelHeaderMarkersFromSelection();
+    const hm = versionCompareExcelSelectionState.headerMarkers || {};
+    if (hm.number && hm.x && hm.y) {
+      formData.append(
+        "header_markers_json",
+        JSON.stringify({ number: hm.number, x: hm.x, y: hm.y }),
+      );
+    }
     formData.append("number_column", numberColumn);
     formData.append("x_column", xColumn);
     formData.append("y_column", yColumn);
