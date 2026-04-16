@@ -30,9 +30,12 @@ from .meissa_api import (
     Meissa2FARequired,
     meissa_get_carta_orthophoto_preview_png,
     meissa_orthophoto_disk_cache_best_valid_path_up_to,
+    meissa_orthophoto_disk_cache_encoded_path_if_valid,
     meissa_orthophoto_disk_cache_full_export_path_if_valid,
     meissa_orthophoto_disk_cache_path_if_valid,
     meissa_orthophoto_effective_preview_edge,
+    meissa_orthophoto_preview_transcode_png_bytes_to_mime,
+    meissa_orthophoto_write_disk_cache_encoded,
     meissa_orthophoto_write_disk_cache,
     meissa_orthophoto_write_disk_cache_full_export,
     meissa_orthophoto_full_export_crop_to_png_bytes,
@@ -4335,12 +4338,63 @@ async def get_latest_excel_compare_cache(
     }
 
 
+def _parse_excel_header_rows_map(
+    raw: Optional[str],
+    sheet_names: List[str],
+    fallback: int,
+) -> Dict[str, int]:
+    """시트별 헤더 행. JSON 없거나 오류 시 모든 시트에 fallback(공통 헤더 행)."""
+    fb = max(1, int(fallback) if fallback is not None else 1)
+    if not raw or not str(raw).strip():
+        return {name: fb for name in sheet_names}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {name: fb for name in sheet_names}
+    if not isinstance(data, dict):
+        return {name: fb for name in sheet_names}
+    out: Dict[str, int] = {}
+    for name in sheet_names:
+        val = data.get(name)
+        if val is None:
+            out[name] = fb
+            continue
+        try:
+            n = int(val)
+            out[name] = n if n >= 1 else fb
+        except (TypeError, ValueError):
+            out[name] = fb
+    return out
+
+
+def _parse_header_markers_json(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """번호/X/Y 열 헤더 셀에 적힌 글자(시트마다 동일 패턴). 세 값이 모두 있을 때만 자동 헤더 행 탐지."""
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    out = {
+        "number": str(data.get("number", "")).strip(),
+        "x": str(data.get("x", "")).strip(),
+        "y": str(data.get("y", "")).strip(),
+    }
+    if out["number"] and out["x"] and out["y"]:
+        return out
+    return None
+
+
 @app.post("/api/excel/compare")
 async def compare_excel_coordinates(
     file: UploadFile = File(...),
     sheet_name: Optional[str] = Form(None),
     sheet_names_json: Optional[str] = Form(None),
     header_row: int = Form(...),
+    header_rows_json: Optional[str] = Form(None),
+    header_markers_json: Optional[str] = Form(None),
     number_column: str = Form(...),
     x_column: str = Form(...),
     y_column: str = Form(...),
@@ -4377,12 +4431,16 @@ async def compare_excel_coordinates(
     )
     if not sheet_names:
         raise HTTPException(status_code=400, detail="At least one sheet must be selected.")
+    header_rows_map = _parse_excel_header_rows_map(header_rows_json, sheet_names, header_row)
+    header_markers = _parse_header_markers_json(header_markers_json)
     try:
         result = compare_excel_workbook(
             content,
             sheet_name=sheet_name,
             sheet_names=sheet_names,
             header_row=header_row,
+            header_rows=header_rows_map,
+            header_markers=header_markers,
             building_column=building_column,
             number_column=number_column,
             x_column=x_column,
@@ -4742,12 +4800,99 @@ def _file_response_png_if_nonempty(path: Optional[str], headers: Dict[str, str])
     return None
 
 
+def _read_orthophoto_png_file_bytes(path: str) -> Optional[bytes]:
+    """디스크 캐시 PNG 를 바이트로 읽는다(재인코딩 응답용)."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > 64:
+            with open(path, "rb") as rf:
+                b = rf.read()
+            if b and len(b) > 64:
+                return b
+    except OSError:
+        pass
+    return None
+
+
+async def _orthophoto_preview_response_from_png_body(
+    body_bytes: bytes,
+    headers: Dict[str, str],
+    out_fmt: str,
+    *,
+    project_id: Optional[str] = None,
+    snapshot_id: Optional[str] = None,
+    edge_lim: Optional[int] = None,
+) -> Response:
+    """out_fmt 가 jpeg/webp 이면 재인코딩(캐시 우선). png 는 그대로."""
+    f = (out_fmt or "png").lower().strip()
+    h2 = dict(headers)
+    h2["X-Ortho-Requested-Fmt"] = f
+    if f == "png":
+        h2["X-Ortho-Encoded-As"] = "png"
+        h2["X-Ortho-Convert-Status"] = "none"
+        return Response(content=body_bytes, media_type="image/png", headers=h2)
+    if f not in ("jpeg", "webp"):
+        h2["X-Ortho-Encoded-As"] = "png"
+        h2["X-Ortho-Convert-Status"] = "skip-invalid-fmt"
+        return Response(content=body_bytes, media_type="image/png", headers=h2)
+    pid = str(project_id or "").strip()
+    sid = str(snapshot_id or "").strip()
+    el = int(edge_lim) if edge_lim is not None else None
+    if pid and sid and el is not None:
+        cached_path = await run_in_threadpool(
+            meissa_orthophoto_disk_cache_encoded_path_if_valid,
+            pid,
+            sid,
+            int(el),
+            f,
+        )
+        if cached_path:
+            cached_body = await run_in_threadpool(_read_orthophoto_png_file_bytes, cached_path)
+            if cached_body:
+                h2["X-Ortho-Encoded-As"] = f
+                h2["X-Ortho-Convert-Status"] = "cached"
+                h2["X-Ortho-Encoded-Cache"] = "hit"
+                mime_cached = "image/webp" if f == "webp" else "image/jpeg"
+                return Response(content=cached_body, media_type=mime_cached, headers=h2)
+    out, mime = await run_in_threadpool(
+        meissa_orthophoto_preview_transcode_png_bytes_to_mime,
+        body_bytes,
+        f,
+    )
+    mt = str(mime or "").strip().lower()
+    if mt == "image/webp":
+        encoded = "webp"
+    elif mt == "image/jpeg":
+        encoded = "jpeg"
+    else:
+        encoded = "png"
+    h2["X-Ortho-Encoded-As"] = encoded
+    h2["X-Ortho-Convert-Status"] = "ok" if encoded == f else "fallback"
+    h2["X-Ortho-Encoded-Cache"] = "miss"
+    if pid and sid and el is not None and encoded in ("jpeg", "webp") and out:
+        await run_in_threadpool(
+            meissa_orthophoto_write_disk_cache_encoded,
+            pid,
+            sid,
+            bytes(out),
+            int(el),
+            encoded,
+        )
+    return Response(content=out, media_type=mime, headers=h2)
+
+
 @app.get("/api/meissa/snapshots/{snapshot_id}/orthophoto-preview")
 async def api_meissa_orthophoto_preview(
     background_tasks: BackgroundTasks,
     snapshot_id: str,
+    fmt: str = Query(
+        "png",
+        pattern="^(png|jpeg|webp)$",
+        description="응답 포맷. jpeg/webp 는 서버에서 PNG를 재인코딩해 전송 바이트를 줄입니다(대체뷰 등). 기본 png.",
+    ),
     project_id: str = Query(..., min_length=1),
-    max_edge: Optional[int] = Query(None, ge=1024, le=16384),
+    max_edge: Optional[int] = Query(None, ge=1024, le=25000),
     crop_x: Optional[int] = Query(None, ge=0),
     crop_y: Optional[int] = Query(None, ge=0),
     crop_w: Optional[int] = Query(None, ge=1, le=8192),
@@ -4831,7 +4976,14 @@ async def api_meissa_orthophoto_preview(
                     headers[hk] = str(int(hv))
             except (TypeError, ValueError):
                 pass
-        return Response(content=body_bytes, media_type="image/png", headers=headers)
+        return await _orthophoto_preview_response_from_png_body(
+            body_bytes,
+            headers,
+            fmt,
+            project_id=project_id,
+            snapshot_id=snapshot_id,
+            edge_lim=edge_eff,
+        )
     # full-export 디스크 캐시는 "최대 해상도" 요청에만 맞춘다. 그렇지 않으면 max_edge=6144 도
     # 동일한 원본 PNG가 나가 프론트의 저해상→고해상 2단계가 같은 픽셀이 되어 화면이 안 바뀐다.
     _ortho_full_edge = 16384
@@ -4840,17 +4992,27 @@ async def api_meissa_orthophoto_preview(
             meissa_orthophoto_disk_cache_full_export_path_if_valid, project_id, snapshot_id
         )
         if full_cached and int(edge_eff) >= _ortho_full_edge:
-            fr = _file_response_png_if_nonempty(
-                full_cached,
-                {
-                    "X-Ortho-Source": "disk-cache-full",
-                    "X-Ortho-Full-Export": "1",
-                    "X-Ortho-Max-Edge": str(int(edge_eff)),
-                    "Cache-Control": "public, max-age=604800",
-                },
-            )
-            if fr is not None:
-                return fr
+            hdr_full = {
+                "X-Ortho-Source": "disk-cache-full",
+                "X-Ortho-Full-Export": "1",
+                "X-Ortho-Max-Edge": str(int(edge_eff)),
+                "Cache-Control": "public, max-age=604800",
+            }
+            if fmt == "png":
+                fr = _file_response_png_if_nonempty(full_cached, hdr_full)
+                if fr is not None:
+                    return fr
+            else:
+                fb = await run_in_threadpool(_read_orthophoto_png_file_bytes, full_cached)
+                if fb:
+                    return await _orthophoto_preview_response_from_png_body(
+                        fb,
+                        hdr_full,
+                        fmt,
+                        project_id=project_id,
+                        snapshot_id=snapshot_id,
+                        edge_lim=edge_eff,
+                    )
     except Exception:
         pass
     try:
@@ -4858,16 +5020,26 @@ async def api_meissa_orthophoto_preview(
             meissa_orthophoto_disk_cache_path_if_valid, project_id, snapshot_id, edge_eff
         )
         if cached_path:
-            fr = _file_response_png_if_nonempty(
-                cached_path,
-                {
-                    "X-Ortho-Source": "disk-cache",
-                    "X-Ortho-Max-Edge": str(int(edge_eff)),
-                    "Cache-Control": "public, max-age=604800",
-                },
-            )
-            if fr is not None:
-                return fr
+            hdr_edge = {
+                "X-Ortho-Source": "disk-cache",
+                "X-Ortho-Max-Edge": str(int(edge_eff)),
+                "Cache-Control": "public, max-age=604800",
+            }
+            if fmt == "png":
+                fr = _file_response_png_if_nonempty(cached_path, hdr_edge)
+                if fr is not None:
+                    return fr
+            else:
+                eb = await run_in_threadpool(_read_orthophoto_png_file_bytes, cached_path)
+                if eb:
+                    return await _orthophoto_preview_response_from_png_body(
+                        eb,
+                        hdr_edge,
+                        fmt,
+                        project_id=project_id,
+                        snapshot_id=snapshot_id,
+                        edge_lim=edge_eff,
+                    )
     except Exception:
         pass
     try:
@@ -4896,9 +5068,21 @@ async def api_meissa_orthophoto_preview(
             }
             if int(el_fb) < int(edge_eff):
                 hdrs["X-Ortho-Requested-Max-Edge"] = str(int(edge_eff))
-            fr_fb = _file_response_png_if_nonempty(pth, hdrs)
-            if fr_fb is not None:
-                return fr_fb
+            if fmt == "png":
+                fr_fb = _file_response_png_if_nonempty(pth, hdrs)
+                if fr_fb is not None:
+                    return fr_fb
+            else:
+                fb_b = await run_in_threadpool(_read_orthophoto_png_file_bytes, pth)
+                if fb_b:
+                    return await _orthophoto_preview_response_from_png_body(
+                        fb_b,
+                        hdrs,
+                        fmt,
+                        project_id=project_id,
+                        snapshot_id=snapshot_id,
+                        edge_lim=edge_eff,
+                    )
         raise HTTPException(
             status_code=404,
             detail={
@@ -4924,9 +5108,21 @@ async def api_meissa_orthophoto_preview(
             }
             if int(el_fb) < int(edge_eff):
                 hdrs2["X-Ortho-Requested-Max-Edge"] = str(int(edge_eff))
-            fr_fb2 = _file_response_png_if_nonempty(pth, hdrs2)
-            if fr_fb2 is not None:
-                return fr_fb2
+            if fmt == "png":
+                fr_fb2 = _file_response_png_if_nonempty(pth, hdrs2)
+                if fr_fb2 is not None:
+                    return fr_fb2
+            else:
+                fb2_b = await run_in_threadpool(_read_orthophoto_png_file_bytes, pth)
+                if fb2_b:
+                    return await _orthophoto_preview_response_from_png_body(
+                        fb2_b,
+                        hdrs2,
+                        fmt,
+                        project_id=project_id,
+                        snapshot_id=snapshot_id,
+                        edge_lim=edge_eff,
+                    )
         raise HTTPException(
             status_code=404,
             detail={"message": "PNG 바이트가 비어 있습니다.", "snapshotId": snapshot_id, "projectId": project_id},
@@ -4947,7 +5143,14 @@ async def api_meissa_orthophoto_preview(
     else:
         headers["X-Ortho-Max-Edge"] = str(int(edge_eff))
         background_tasks.add_task(meissa_orthophoto_write_disk_cache, project_id, snapshot_id, body_bytes, edge_eff)
-    return Response(content=body_bytes, media_type="image/png", headers=headers)
+    return await _orthophoto_preview_response_from_png_body(
+        body_bytes,
+        headers,
+        fmt,
+        project_id=project_id,
+        snapshot_id=snapshot_id,
+        edge_lim=edge_eff,
+    )
 
 
 @app.get("/api/circles/export")
