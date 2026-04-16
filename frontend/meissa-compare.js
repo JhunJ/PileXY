@@ -11330,6 +11330,10 @@
     domImg.addEventListener("error", () => {
       const failed = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
       markMeissaDomOverlayUrlFailed(failed);
+      const hiNow = meissaDomOverlayCurrentPreferredHiUrl();
+      if (failed && hiNow && failed === hiNow) {
+        meissaDomOverlayMarkHiReadyForCurrent(false);
+      }
       const status = els.meissaDomOverlayStatus;
       if (status) status.textContent = "대체 뷰: 고화질 URL 로드 실패 → 기본 이미지로 전환 중...";
       scheduleRenderMeissaDomOverlay();
@@ -11337,6 +11341,10 @@
     domImg.addEventListener("load", () => {
       const loaded = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
       if (loaded) meissaDomOverlayBadUrlUntil.delete(loaded);
+      const hiNow = meissaDomOverlayCurrentPreferredHiUrl();
+      if (loaded && hiNow && loaded === hiNow) {
+        meissaDomOverlayMarkHiReadyForCurrent(true);
+      }
       scheduleRenderMeissaDomOverlay();
     });
   }
@@ -11386,12 +11394,9 @@
     if (!key || !meissaAccess) return;
     const now = Date.now();
     const cachedHi = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
-    const cachedFast = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
     if (
       cachedHi &&
       !meissaDomOverlayUrlInCooldown(cachedHi) &&
-      cachedFast &&
-      !meissaDomOverlayUrlInCooldown(cachedFast) &&
       now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS
     ) {
       meissaDomOverlayEnsureHiPreload();
@@ -11410,7 +11415,7 @@
       if (!ordered.length) return;
       const filtered = ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url));
       const hiBest = String(pickBestMeissaOrthoButtonUrlForSharpness(filtered) || "").trim();
-      const fastBest = String(meissaDomOverlayBuildFastFirstUrl(filtered) || "").trim();
+      const fastBest = hiBest;
       if (hiBest) {
         const prev = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
         meissaDomOverlayHiUrlBySnapshot.set(key, hiBest);
@@ -11436,14 +11441,8 @@
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
     bindMeissaDomOverlayImageFallback();
-    const key = meissaDomOverlayCurrentSnapshotKey();
     const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
-    const fastUrl = meissaDomOverlayFastUrl();
-    const hiReady = key ? Boolean(meissaDomOverlayHiReadyBySnapshot.get(key)) : false;
-    let src = "";
-    if (hiUrl && hiReady) src = hiUrl;
-    else if (fastUrl) src = fastUrl;
-    else if (hiUrl) src = hiUrl;
+    let src = hiUrl;
     if (!src) {
       const mainSrc = String(mainImg.getAttribute("src") || "").trim();
       src = mainSrc;
@@ -11504,10 +11503,8 @@
       return;
     }
     const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
-    const fastNow = String(meissaDomOverlayCurrentFastUrl() || "").trim();
-    const hiReady = meissaDomOverlayIsHiReadyForCurrent();
     const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
-    if (hiResolved && hiReady && domSrcNow !== hiResolved) {
+    if (hiResolved && domSrcNow !== hiResolved) {
       try {
         domImg.src = hiResolved;
       } catch (_) {
@@ -11592,12 +11589,7 @@
     if (status) {
       const edge = meissaDomOverlayCurrentSourceEdgeHint();
       const hiHint = edge > 0 ? `URL 이미지(장변≈${edge}px)` : "URL 이미지";
-      const qualityTag =
-        hiResolved && hiReady
-          ? "고화질 적용"
-          : fastNow
-            ? "빠른 표시(고화질 백그라운드 준비)"
-            : "URL 준비 중";
+      const qualityTag = hiResolved ? "고화질 URL 직접 표시" : "고화질 URL 준비 중";
       status.textContent =
         `대체 뷰: ${hiHint} · ${qualityTag} · 좌표 ${shown}개 표시` +
         `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
@@ -13818,6 +13810,34 @@
     return rows.join("\n");
   }
 
+  async function warmMeissaDomOverlayTilePath(snapshotId) {
+    const sid = String(snapshotId || "").trim();
+    if (!sid) return false;
+    const projectId =
+      (els.meissaProjectSelect?.value || "").trim() ||
+      (els.projectId?.value || "").trim();
+    if (!projectId || !meissaAccess) return false;
+    try {
+      const centers = candidateTileCenters(projectId, { strictAbsolute: true });
+      const [cx, cy] = centers[0] || [];
+      if (!Number.isFinite(Number(cx)) || !Number.isFinite(Number(cy))) return false;
+      const z = 20;
+      const candidates = [
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx)), Math.round(Number(cy))) },
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx) + 1), Math.round(Number(cy))) },
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx)), Math.round(Number(cy) + 1)) },
+      ].filter((c) => String(c.url || "").trim());
+      const winner = await firstReachableTile(candidates, {
+        timeoutMs: 900,
+        batchSize: 3,
+        maxChecks: 3,
+      });
+      return Boolean(winner?.url);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function loadMeissa2dOverlayImage(snapshotId) {
     const img = els.meissaCloud2dImageLocal;
     if (!img) return false;
@@ -13853,6 +13873,7 @@
       );
     };
     const sid = String(snapshotId || "").trim();
+    void warmMeissaDomOverlayTilePath(sid);
     pushMeissa2dLoadLine(sid ? `스냅샷 ${sid}` : "스냅샷 미선택");
     if (String(meissa2dPointTileCacheSid) !== sid) {
       meissa2dPointTileCache.clear();
@@ -13878,6 +13899,10 @@
     const projectId =
       (els.meissaProjectSelect?.value || "").trim() ||
       (els.projectId?.value || "").trim();
+    // 대체뷰는 저해상 선표시 없이 고화질 URL을 바로 물리기 위해 해상도 URL을 선해결한다.
+    if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess) {
+      void ensureMeissaDomOverlayHiUrl();
+    }
     const snapKey = `${projectId}:${sid}`;
     const hasUsableGeoref = () => {
       const gg = meissa2dGeorefBySnapshot[snapKey];
