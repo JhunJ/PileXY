@@ -269,7 +269,7 @@
     } catch (_) {
       /* ignore */
     }
-    return "png";
+    return "webp";
   })();
   /** 대체뷰는 고화질 단일 요청을 강제한다(초기 저화질 선표시 생략). */
   const MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE = 16384;
@@ -417,7 +417,7 @@
    * true: 정사 로딩을 단일 경로로 고정.
    * Carta 버튼 URL PNG 소스를 서버에서 받아 webp로 변환/캐시한 API만 사용한다.
    */
-  const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = false;
+  const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = true;
   const MEISSA_ORTHOPHOTO_UNIFIED_FMT = "webp";
   const MEISSA_ORTHOPHOTO_UNIFIED_EDGE = 16384;
   /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
