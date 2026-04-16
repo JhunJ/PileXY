@@ -2904,7 +2904,8 @@ def meissa_orthophoto_preview_transcode_png_bytes_to_mime(body: bytes, fmt: str)
         if f == "webp":
             if im.mode not in ("RGB", "RGBA"):
                 im = im.convert("RGBA")
-            im.save(buf, format="WEBP", quality=82, method=4)
+            # method=0~1: 압축 품질은 비슷하게 두고 인코딩 시간을 크게 줄임(대형 정사 PNG→WEBP 시 체감 속도)
+            im.save(buf, format="WEBP", quality=82, method=1)
             return buf.getvalue(), "image/webp"
     except Exception:
         return body, "image/png"

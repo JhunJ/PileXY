@@ -419,7 +419,22 @@
    */
   const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = true;
   const MEISSA_ORTHOPHOTO_UNIFIED_FMT = "webp";
-  const MEISSA_ORTHOPHOTO_UNIFIED_EDGE = 16384;
+  /**
+   * 단일 WEBP 경로의 max_edge. 16384는 브라우저 비트맵 한 변 제한(Chrome ~16384)과 맞물려
+   * load 후 naturalWidth=0(디코드 실패)이 잦다. 서버 PNG 축소·WEBP 변환도 가벼워진다.
+   * 필요 시 페이지에서 window.__MEISSA_ORTHO_UNIFIED_EDGE__ = 6144 등으로 조절.
+   */
+  const MEISSA_ORTHOPHOTO_UNIFIED_EDGE = (() => {
+    try {
+      const w = typeof window !== "undefined" ? Number(window.__MEISSA_ORTHO_UNIFIED_EDGE__) : NaN;
+      if (Number.isFinite(w) && w >= 2048) return Math.min(16384, Math.round(w));
+    } catch (_) {
+      /* ignore */
+    }
+    return 8192;
+  })();
+  /** 디코드 실패·0×0 시 순차 재시도(고화질→가용 해상). */
+  const MEISSA_ORTHOPHOTO_UNIFIED_EDGE_FALLBACKS = [MEISSA_ORTHOPHOTO_UNIFIED_EDGE, 6144, 4096, 3072];
   /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
   const MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY = true;
   /** true면 <img src> 직접 경로 사용, false면 API fetch→blob 경로만 사용(안정 우선). */
@@ -13795,12 +13810,33 @@
     }
   }
 
-  async function loadMeissa2dSingleHighFromUnifiedApi(imgEl, apiUrl, loadSeq, sid, options) {
+  async function loadMeissa2dSingleHighFromUnifiedApi(
+    imgEl,
+    snapshotId,
+    projectId,
+    accessToken,
+    fmt,
+    edgeCandidates,
+    loadSeq,
+    sid,
+    options
+  ) {
     if (!imgEl) return { ok: false };
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
-    const src = String(apiUrl || "").trim();
-    if (!src) return { ok: false };
     const timeoutMs = Math.max(30000, Number(options?.timeoutMs) || 180000);
+    const edges = Array.isArray(edgeCandidates)
+      ? edgeCandidates
+          .map((e) => Math.round(Number(e)))
+          .filter((e) => Number.isFinite(e) && e >= 1024 && e <= 16384)
+      : [];
+    const uniq = [];
+    for (const e of edges) {
+      if (!uniq.includes(e)) uniq.push(e);
+    }
+    if (!uniq.length) {
+      pushMeissa2dLoadLine("정사: 단일 WEBP — 유효한 max_edge 후보가 없습니다.");
+      return { ok: false };
+    }
     meissa2dOrthoApplyWrapLoadingPhase("loading");
     meissa2dOrthoInteractReady = false;
     const startedAt = Date.now();
@@ -13810,64 +13846,113 @@
       pushMeissa2dLoadLine(`정사: 단일 WEBP 다운로드 진행중… ${sec}s 경과`);
     }, 5000);
     try {
-      pushMeissa2dLoadLine("정사: 단일 WEBP 응답 대기 중(브라우저 직접 다운로드)");
-      const reqSetAt = Date.now();
-      const decoded = await new Promise((resolve) => {
-        let done = false;
-        const finish = (ok) => {
-          if (done) return;
-          done = true;
+      for (let ei = 0; ei < uniq.length; ei++) {
+        if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+        const edge = uniq[ei];
+        const src = buildOrthophotoPreviewImgUrl(
+          snapshotId,
+          projectId,
+          accessToken,
+          edge,
+          fmt
+        ).trim();
+        if (!src) continue;
+        pushMeissa2dLoadLine(
+          ei === 0
+            ? `정사: 단일 WEBP 응답 대기 (max_edge=${edge} · 서버 PNG→${String(fmt || "webp").toUpperCase()})`
+            : `정사: 단일 WEBP 재시도 max_edge=${edge} (이전 단계 디코드 실패 또는 0×0)`
+        );
+        const reqSetAt = Date.now();
+        const decoded = await new Promise((resolve) => {
+          let done = false;
+          let raf = 0;
+          const finish = (ok) => {
+            if (done) return;
+            done = true;
+            try {
+              window.clearTimeout(tm);
+            } catch (_) {
+              /* ignore */
+            }
+            try {
+              if (raf) window.cancelAnimationFrame(raf);
+            } catch (_) {
+              /* ignore */
+            }
+            try {
+              imgEl.removeEventListener("load", onLoad);
+              imgEl.removeEventListener("error", onErr);
+            } catch (_) {
+              /* ignore */
+            }
+            resolve(Boolean(ok));
+          };
+          let decodeTries = 0;
+          const tryDecode = () => {
+            try {
+              const w = Math.round(Number(imgEl.naturalWidth || 0));
+              const h = Math.round(Number(imgEl.naturalHeight || 0));
+              if (w > 0 && h > 0) {
+                finish(true);
+                return;
+              }
+            } catch (_) {
+              /* ignore */
+            }
+            decodeTries += 1;
+            if (decodeTries >= 24) {
+              finish(false);
+              return;
+            }
+            raf = window.requestAnimationFrame(tryDecode);
+          };
+          const onLoad = () => {
+            tryDecode();
+          };
+          const onErr = () => finish(false);
+          const tm = window.setTimeout(() => {
+            try {
+              pushMeissa2dLoadLine(
+                `정사: 단일 WEBP 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — max_edge=${edge} 중단`
+              );
+            } catch (_) {
+              /* ignore */
+            }
+            finish(false);
+          }, timeoutMs);
+          imgEl.addEventListener("load", onLoad);
+          imgEl.addEventListener("error", onErr);
           try {
-            window.clearTimeout(tm);
+            setMeissa2dRawUrlForSnapshot(String(sid || "").trim(), src);
+            imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+            imgEl.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+            imgEl.src = src;
+            if (imgEl.complete && Number(imgEl.naturalWidth || 0) > 0) {
+              finish(true);
+            }
           } catch (_) {
-            /* ignore */
+            finish(false);
           }
-          try {
-            imgEl.removeEventListener("load", onLoad);
-            imgEl.removeEventListener("error", onErr);
-          } catch (_) {
-            /* ignore */
-          }
-          resolve(Boolean(ok));
-        };
-        const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
-        const onErr = () => finish(false);
-        const tm = window.setTimeout(() => {
-          try {
-            pushMeissa2dLoadLine(
-              `정사: 단일 WEBP 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — 현재 요청 중단`
-            );
-          } catch (_) {
-            /* ignore */
-          }
-          finish(false);
-        }, timeoutMs);
-        imgEl.addEventListener("load", onLoad);
-        imgEl.addEventListener("error", onErr);
-        try {
-          setMeissa2dRawUrlForSnapshot(String(sid || "").trim(), src);
-          imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
-          imgEl.setAttribute("data-meissa-2d-source", "orthophoto-preview");
-          imgEl.src = src;
-        } catch (_) {
-          finish(false);
+        });
+        if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+        if (decoded) {
+          pushMeissa2dLoadLine(
+            `정사: 단일 WEBP 응답+디코드 완료 ${Math.max(1, Math.round((Date.now() - reqSetAt) / 1000))}s · max_edge=${edge}`
+          );
+          meissa2dOrthoInteractReady = true;
+          meissa2dOrthoApplyWrapLoadingPhase("idle");
+          pushMeissa2dLoadLine(
+            `정사: 단일 WEBP 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
+          );
+          return { ok: true };
         }
-      });
-      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
-      if (!decoded) {
-        pushMeissa2dLoadLine("정사: 단일 WEBP 로드는 시도했지만 화면 디코드에 실패했습니다.");
-        meissa2dOrthoApplyWrapLoadingPhase("idle");
-        return { ok: false };
+        pushMeissa2dLoadLine(
+          `정사: 단일 WEBP max_edge=${edge} 단계 실패(네트워크·서버 PNG 폴백·또는 브라우저 디코드 한계)`
+        );
       }
-      pushMeissa2dLoadLine(
-        `정사: 단일 WEBP 응답+디코드 완료 ${Math.max(1, Math.round((Date.now() - reqSetAt) / 1000))}s`
-      );
-      meissa2dOrthoInteractReady = true;
+      pushMeissa2dLoadLine("정사: 단일 WEBP — 모든 max_edge 단계에서 화면 디코드에 실패했습니다.");
       meissa2dOrthoApplyWrapLoadingPhase("idle");
-      pushMeissa2dLoadLine(
-        `정사: 단일 WEBP 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
-      );
-      return { ok: true };
+      return { ok: false };
     } finally {
       try {
         window.clearInterval(ticker);
@@ -14455,22 +14540,21 @@
         );
       } else if (MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY) {
         if (MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
-          const unifiedWebpUrl = buildOrthophotoPreviewImgUrl(
+          orthoImgLoadPromise = loadMeissa2dSingleHighFromUnifiedApi(
+            img,
             sid,
             projectId,
             meissaAccess,
-            MEISSA_ORTHOPHOTO_UNIFIED_EDGE,
-            MEISSA_ORTHOPHOTO_UNIFIED_FMT
-          );
-          orthoImgLoadPromise = loadMeissa2dSingleHighFromUnifiedApi(
-            img,
-            unifiedWebpUrl,
+            MEISSA_ORTHOPHOTO_UNIFIED_FMT,
+            MEISSA_ORTHOPHOTO_UNIFIED_EDGE_FALLBACKS,
             loadSeq,
             sid,
             { timeoutMs: MEISSA_ORTHOPHOTO_HIGH_FETCH_MS }
           );
           pushMeissa2dLoadLine(
-            `정사: 단일 요청(버튼 PNG→서버 ${String(MEISSA_ORTHOPHOTO_UNIFIED_FMT || "webp").toUpperCase()} 캐시 · max_edge=${MEISSA_ORTHOPHOTO_UNIFIED_EDGE})`
+            `정사: 단일 요청(버튼 PNG→서버 ${String(MEISSA_ORTHOPHOTO_UNIFIED_FMT || "webp").toUpperCase()} 캐시 · max_edge 시도=${MEISSA_ORTHOPHOTO_UNIFIED_EDGE_FALLBACKS.join(
+              "→"
+            )})`
           );
         } else {
           perfMark("버튼 URL 조회 시작");
