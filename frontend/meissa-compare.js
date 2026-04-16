@@ -269,7 +269,7 @@
     } catch (_) {
       /* ignore */
     }
-    return "jpeg";
+    return "webp";
   })();
   function meissaDomOverlayUsesLossyApiPreview() {
     const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
