@@ -11496,6 +11496,9 @@
         src = buildOrthophotoPreviewImgUrl(sid, projectId, meissaAccess, edge, domFmt);
       }
     }
+    if (src && meissaDomOverlayUrlInCooldown(src)) {
+      src = "";
+    }
     if (!src) {
       if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
         src = mainSrcEarly;
@@ -11562,6 +11565,15 @@
     if (!hasMain || !synced) {
       pointsLayer.replaceChildren();
       if (status) status.textContent = "대체 뷰: 표시 가능한 URL 이미지가 아직 없습니다.";
+      return;
+    }
+    const domDecoded =
+      Number(domImg.naturalWidth || 0) > 1 &&
+      Number(domImg.naturalHeight || 0) > 1 &&
+      hasRenderableOverlayImage(domImg);
+    if (!domDecoded) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 배경 이미지 로드/폴백 대기 중...";
       return;
     }
     if (!MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE && !meissaDomOverlayUsesLossyApiPreview()) {
