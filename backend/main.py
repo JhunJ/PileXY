@@ -4855,6 +4855,16 @@ async def _orthophoto_preview_response_from_png_body(
                 h2["X-Ortho-Encoded-Cache"] = "hit"
                 mime_cached = "image/webp" if f == "webp" else "image/jpeg"
                 return Response(content=cached_body, media_type=mime_cached, headers=h2)
+    # JPEG/WebP 변환 전에 동일 캐시 디렉터리에 PNG를 먼저 저장(ortho_*_e*_r*.png).
+    # 이후 Pillow 변환은 이 바이트(=디스크와 동일)를 사용한다.
+    if pid and sid and el is not None and body_bytes and len(body_bytes) >= 64:
+        await run_in_threadpool(
+            meissa_orthophoto_write_disk_cache,
+            pid,
+            sid,
+            bytes(body_bytes),
+            int(el),
+        )
     out, mime = await run_in_threadpool(
         meissa_orthophoto_preview_transcode_png_bytes_to_mime,
         body_bytes,

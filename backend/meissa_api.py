@@ -3792,7 +3792,20 @@ def meissa_orthophoto_write_disk_cache(
         with open(tmp, "wb") as wf:
             wf.write(body)
         os.replace(tmp, path)
-    except OSError:
+        try:
+            logger.info(
+                "orthophoto PNG cache wrote %s (%s bytes, edge=%s)",
+                path,
+                len(body),
+                el,
+            )
+        except Exception:
+            pass
+    except OSError as exc:
+        try:
+            logger.warning("orthophoto PNG cache write failed %s: %s", path, exc)
+        except Exception:
+            pass
         try:
             if os.path.isfile(tmp):
                 os.unlink(tmp)
@@ -3827,7 +3840,21 @@ def meissa_orthophoto_write_disk_cache_encoded(
         with open(tmp, "wb") as wf:
             wf.write(body)
         os.replace(tmp, path)
-    except OSError:
+        try:
+            logger.info(
+                "orthophoto encoded cache wrote %s fmt=%s (%s bytes, edge=%s)",
+                path,
+                f,
+                len(body),
+                el,
+            )
+        except Exception:
+            pass
+    except OSError as exc:
+        try:
+            logger.warning("orthophoto encoded cache write failed %s: %s", path, exc)
+        except Exception:
+            pass
         try:
             if os.path.isfile(tmp):
                 os.unlink(tmp)
