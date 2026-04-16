@@ -271,12 +271,20 @@
     }
     return "webp";
   })();
+  /** 대체뷰는 고화질 단일 요청을 강제한다(초기 저화질 선표시 생략). */
+  const MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE = 16384;
   function meissaDomOverlayUsesLossyApiPreview() {
     const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
     return f === "jpeg" || f === "webp";
   }
   /** @type {Map<string, number>} url -> retryAfterTs */
   let meissaDomOverlayBadUrlUntil = new Map();
+  /** 대체뷰 orthophoto-preview 응답 헤더 로그(project:snapshot 기준). */
+  let meissaDomOverlayHeaderLogBySnapshot = new Map();
+  /** 중복 포맷 로그 방지용 시그니처(project:snapshot 기준). */
+  let meissaDomOverlayHeaderSigBySnapshot = new Map();
+  /** 동일 URL 헤더 재조회 최소 간격(ms). */
+  const MEISSA_DOM_OVERLAY_HEADER_PROBE_MIN_INTERVAL_MS = 12000;
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
   const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
   const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
@@ -11361,6 +11369,99 @@
     );
   }
 
+  function meissaDomOverlayCurrentRequestedFmt() {
+    if (!meissaDomOverlayUsesLossyApiPreview()) return "png";
+    const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "webp").toLowerCase();
+    return f === "jpeg" || f === "webp" ? f : "webp";
+  }
+
+  function meissaDomOverlaySetFormatAttrsOnImage(info) {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg || !info || typeof info !== "object") return;
+    const encodedAs = String(info.encodedAs || "").trim().toLowerCase();
+    const source = String(info.source || "").trim();
+    const requestedFmt = String(info.requestedFmt || "").trim().toLowerCase();
+    const convertStatus = String(info.convertStatus || "").trim().toLowerCase();
+    if (requestedFmt) domImg.setAttribute("data-ortho-requested-fmt", requestedFmt);
+    if (encodedAs) domImg.setAttribute("data-ortho-encoded-as", encodedAs);
+    if (source) domImg.setAttribute("data-ortho-source", source);
+    if (convertStatus) domImg.setAttribute("data-ortho-convert-status", convertStatus);
+  }
+
+  async function meissaDomOverlayProbeFormatHeaders(src) {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    const u = String(src || "").trim();
+    if (!key || !u) return;
+    const prev = meissaDomOverlayHeaderLogBySnapshot.get(key);
+    const now = Date.now();
+    if (
+      prev &&
+      String(prev.url || "").trim() === u &&
+      now - Number(prev.ts || 0) < MEISSA_DOM_OVERLAY_HEADER_PROBE_MIN_INTERVAL_MS
+    ) {
+      meissaDomOverlaySetFormatAttrsOnImage(prev);
+      return;
+    }
+    let requestedFmt = meissaDomOverlayCurrentRequestedFmt();
+    try {
+      const parsed = new URL(u, window.location.href);
+      const qFmt = String(parsed.searchParams.get("fmt") || "").trim().toLowerCase();
+      if (qFmt === "png" || qFmt === "jpeg" || qFmt === "webp") requestedFmt = qFmt;
+    } catch (_) {
+      /* ignore */
+    }
+    let encodedAs = "";
+    let source = "";
+    let httpStatus = 0;
+    let probe = "none";
+    let convertStatus = "unknown";
+    try {
+      const res = await fetch(u, { method: "HEAD", cache: "no-store" });
+      httpStatus = Number(res.status) || 0;
+      probe = "head";
+      if (res.ok) {
+        encodedAs = String(res.headers.get("X-Ortho-Encoded-As") || "").trim().toLowerCase();
+        source = String(res.headers.get("X-Ortho-Source") || "").trim();
+        const reqHdr = String(res.headers.get("X-Ortho-Requested-Fmt") || "").trim().toLowerCase();
+        if (reqHdr === "png" || reqHdr === "jpeg" || reqHdr === "webp") requestedFmt = reqHdr;
+        if (!encodedAs) {
+          const ct = String(res.headers.get("Content-Type") || "").toLowerCase();
+          if (ct.includes("image/webp")) encodedAs = "webp";
+          else if (ct.includes("image/jpeg")) encodedAs = "jpeg";
+          else if (ct.includes("image/png")) encodedAs = "png";
+        }
+      }
+    } catch (_) {
+      probe = "head-error";
+    }
+    if (requestedFmt === "jpeg" || requestedFmt === "webp") {
+      if (encodedAs === requestedFmt) convertStatus = "ok";
+      else if (encodedAs) convertStatus = "mismatch";
+    } else if (requestedFmt === "png") {
+      if (!encodedAs || encodedAs === "png") convertStatus = "ok";
+      else convertStatus = "mismatch";
+    }
+    const info = {
+      url: u,
+      requestedFmt: requestedFmt || "unknown",
+      encodedAs: encodedAs || "unknown",
+      source: source || "unknown",
+      convertStatus,
+      httpStatus,
+      probe,
+      ts: now,
+    };
+    meissaDomOverlayHeaderLogBySnapshot.set(key, info);
+    meissaDomOverlaySetFormatAttrsOnImage(info);
+    const sig = `${info.requestedFmt}|${info.encodedAs}|${info.convertStatus}|${info.source}|${info.httpStatus}|${u}`;
+    if (String(meissaDomOverlayHeaderSigBySnapshot.get(key) || "") !== sig) {
+      meissaDomOverlayHeaderSigBySnapshot.set(key, sig);
+      pushMeissa2dLoadLine(
+        `대체 뷰 포맷검증: req=${info.requestedFmt} · encoded=${info.encodedAs} · convert=${info.convertStatus} · source=${info.source} · HTTP ${info.httpStatus || "?"} (${info.probe})`
+      );
+    }
+  }
+
   function bindMeissaDomOverlayImageFallback() {
     const domImg = els.meissaDomOverlayImage;
     if (!domImg || domImg.dataset.meissaDomOverlayImgBound === "1") return;
@@ -11383,6 +11484,7 @@
       if (loaded && hiNow && loaded === hiNow) {
         meissaDomOverlayMarkHiReadyForCurrent(true);
       }
+      void meissaDomOverlayProbeFormatHeaders(loaded);
       scheduleRenderMeissaDomOverlay();
     });
   }
@@ -11488,11 +11590,7 @@
       const sid =
         (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
       if (projectId && sid && meissaAccess) {
-        let edge = meissa2dOrthoNominalLongEdgeFromImgSrc(mainSrcEarly);
-        if (!Number.isFinite(edge) || edge < 1024) {
-          edge = MEISSA_ORTHOPHOTO_FULL_MAX_EDGE;
-        }
-        edge = Math.min(16384, Math.max(1024, Math.round(edge)));
+        const edge = Math.min(16384, Math.max(1024, Math.round(MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE)));
         src = buildOrthophotoPreviewImgUrl(sid, projectId, meissaAccess, edge, domFmt);
       }
     }
@@ -11520,11 +11618,16 @@
     }
     if (String(domImg.getAttribute("src") || "").trim() !== src) {
       try {
+        domImg.removeAttribute("data-ortho-encoded-as");
+        domImg.removeAttribute("data-ortho-source");
+        domImg.removeAttribute("data-ortho-requested-fmt");
+        domImg.removeAttribute("data-ortho-convert-status");
         domImg.src = src;
       } catch (_) {
         return false;
       }
     }
+    void meissaDomOverlayProbeFormatHeaders(src);
     return true;
   }
 
@@ -11600,7 +11703,7 @@
       return;
     }
     const circles = Array.isArray(state.circles) ? state.circles : [];
-    const showLabels = circles.length <= 180 && meissaDomOverlayScale <= 1.4;
+    const showLabels = circles.length <= 180 && meissaDomOverlayScale <= 3.2;
     const frag = document.createDocumentFragment();
     let shown = 0;
     const mapMainPxToDom = (mx, my) => {
@@ -11610,40 +11713,17 @@
       if (nx < -0.2 || nx > 1.2 || ny < -0.2 || ny > 1.2) return null;
       return { px: domRect.x + nx * domRect.w, py: domRect.y + ny * domRect.h };
     };
-    const stageMaxR = Math.max(8, Math.min(stage.clientWidth, stage.clientHeight) * 0.28);
     for (const c of circles) {
       if (!meissa2dCirclePassesRemainingFilter(c)) continue;
       const m = meissa2dComputeFileToContentPx(c?.center_x, c?.center_y);
       if (!m || !Number.isFinite(m.px) || !Number.isFinite(m.py)) continue;
       const center = mapMainPxToDom(m.px, m.py);
       if (!center) continue;
-      const fx = Number(c?.center_x);
-      const fy = Number(c?.center_y);
-      const radFile = meissa2dPileRadiusFileUnits(c);
-      let rDom = NaN;
-      if (Number.isFinite(fx) && Number.isFinite(fy) && Number.isFinite(radFile) && radFile > 1e-9) {
-        const mx = meissa2dComputeFileToContentPx(fx + radFile, fy);
-        const my = meissa2dComputeFileToContentPx(fx, fy + radFile);
-        const dx = mx ? mapMainPxToDom(mx.px, mx.py) : null;
-        const dy = my ? mapMainPxToDom(my.px, my.py) : null;
-        if (dx && dy) {
-          const rx = Math.hypot(dx.px - center.px, dx.py - center.py);
-          const ry = Math.hypot(dy.px - center.px, dy.py - center.py);
-          rDom = Math.min(stageMaxR, Math.max(1.2, (rx + ry) * 0.5));
-        }
-      }
       const marker = document.createElement("div");
-      if (Number.isFinite(rDom) && rDom > 1.4) {
-        marker.className = "meissa-dom-overlay-circle";
-        const inv = 1 / Math.max(1e-9, meissaDomOverlayScale);
-        const dia = Math.max(2.4, Math.min(stageMaxR * 2, rDom * 2 * inv));
-        marker.style.setProperty("--circle-size", `${dia}px`);
-      } else {
-        marker.className = "meissa-dom-overlay-dot";
-        const inv = 1 / Math.max(1e-9, meissaDomOverlayScale);
-        const sizePx = Math.max(2.2, Math.min(16, 6 * inv));
-        marker.style.setProperty("--dot-size", `${sizePx}px`);
-      }
+      marker.className = "meissa-dom-overlay-dot";
+      const inv = 1 / Math.max(0.35, meissaDomOverlayScale);
+      const sizePx = Math.max(1.8, Math.min(10, 5.2 * inv));
+      marker.style.setProperty("--dot-size", `${sizePx}px`);
       marker.style.left = `${center.px}px`;
       marker.style.top = `${center.py}px`;
       marker.title = `ID ${String(c?.id ?? "")} · (${Number(c?.center_x || 0).toFixed(3)}, ${Number(c?.center_y || 0).toFixed(3)})`;
@@ -11663,21 +11743,36 @@
     }
     pointsLayer.replaceChildren(frag);
     if (status) {
+      const domSrc = String(domImg.currentSrc || domImg.src || "").trim();
+      void meissaDomOverlayProbeFormatHeaders(domSrc);
       const edge = meissaDomOverlayCurrentSourceEdgeHint();
       const hiHint = edge > 0 ? `URL 이미지(장변≈${edge}px)` : "URL 이미지";
       let qualityTag = "";
       if (meissaDomOverlayUsesLossyApiPreview()) {
         const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "jpeg").toUpperCase();
-        qualityTag = `API ${f} 응답(전송량↓)`;
+        qualityTag = `API ${f} 응답(단일 고화질 요청)`;
       } else if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
         qualityTag = "메인 뷰와 동일 소스(별도 고화질 선해결 없음)";
       } else {
         const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
         qualityTag = hiResolved ? "고화질 URL 직접 표시" : "고화질 URL 준비 중";
       }
+      const key = meissaDomOverlayCurrentSnapshotKey();
+      const hdr = key ? meissaDomOverlayHeaderLogBySnapshot.get(key) : null;
+      const requestedFmt = String(
+        domImg.getAttribute("data-ortho-requested-fmt") || hdr?.requestedFmt || "unknown"
+      ).trim();
+      const encodedAs = String(
+        domImg.getAttribute("data-ortho-encoded-as") || hdr?.encodedAs || "unknown"
+      ).trim();
+      const source = String(domImg.getAttribute("data-ortho-source") || hdr?.source || "unknown").trim();
+      const convertStatus = String(
+        domImg.getAttribute("data-ortho-convert-status") || hdr?.convertStatus || "unknown"
+      ).trim();
       status.textContent =
         `대체 뷰: ${hiHint} · ${qualityTag} · 좌표 ${shown}개 표시` +
-        `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
+        `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}\n` +
+        `포맷로그: req=${requestedFmt || "unknown"} · encoded=${encodedAs || "unknown"} · convert=${convertStatus || "unknown"} · source=${source || "unknown"} · src=${domSrc ? "set" : "empty"}`;
     }
   }
 
