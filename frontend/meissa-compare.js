@@ -241,6 +241,40 @@
   const MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS = 120000;
   /** 대체뷰 고화질 프리로드 타임아웃(ms). */
   const MEISSA_DOM_OVERLAY_HI_PRELOAD_TIMEOUT_MS = 45000;
+  /**
+   * true(기본): 대체뷰 <img>는 메인 정사(#meissa-cloud-2d-image-local)와 동일한 src만 사용.
+   * 별도 버튼 URL 선해결·히든 Image 프리로드·강제 고화질 src 교체를 하지 않아 체감 지연을 줄인다.
+   * false: 예전처럼 resolveMeissaOrthoButtonUrls 로 고선명 URL을 대체뷰에 직접 물림(느릴 수 있음).
+   * 런타임 끄기: window.__MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE__ = false
+   */
+  const MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE__ === false) {
+        return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  })();
+  /**
+   * 대체뷰 orthophoto-preview 응답 포맷: png | jpeg | webp.
+   * jpeg/webp 는 API `?fmt=` 로 요청(서버에서 PNG→손실 압축, 전송량 감소). png 는 기존 미러/버튼 URL 로직.
+   * 끄고 PNG만: window.__MEISSA_DOM_OVERLAY_PREVIEW_FMT__ = "png"
+   */
+  const MEISSA_DOM_OVERLAY_PREVIEW_FMT = (() => {
+    try {
+      const w = typeof window !== "undefined" ? window.__MEISSA_DOM_OVERLAY_PREVIEW_FMT__ : undefined;
+      if (w === "png" || w === "jpeg" || w === "webp") return w;
+    } catch (_) {
+      /* ignore */
+    }
+    return "jpeg";
+  })();
+  function meissaDomOverlayUsesLossyApiPreview() {
+    const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
+    return f === "jpeg" || f === "webp";
+  }
   /** @type {Map<string, number>} url -> retryAfterTs */
   let meissaDomOverlayBadUrlUntil = new Map();
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
@@ -7014,7 +7048,7 @@
   }
 
   /** 정사 미리보기: <img src> 용(Authorization 대신 access_token 쿼리). maxEdge 생략 시 16384. */
-  function buildOrthophotoPreviewImgUrl(snapshotId, projectId, accessToken, maxEdge) {
+  function buildOrthophotoPreviewImgUrl(snapshotId, projectId, accessToken, maxEdge, previewFmt) {
     const e = Number(maxEdge);
     const edge =
       Number.isFinite(e) && e >= 1024 ? Math.min(16384, Math.round(e)) : 16384;
@@ -7023,6 +7057,10 @@
       access_token: normalizeMeissaAccessToken(accessToken),
       max_edge: String(edge),
     });
+    const pf = String(previewFmt || "png").toLowerCase();
+    if (pf === "jpeg" || pf === "webp") {
+      params.set("fmt", pf);
+    }
     return `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(String(snapshotId).trim())}/orthophoto-preview?${params}`;
   }
 
@@ -11441,11 +11479,33 @@
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
     bindMeissaDomOverlayImageFallback();
-    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
-    let src = hiUrl;
+    const domFmt = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
+    const mainSrcEarly = String(mainImg.getAttribute("src") || "").trim();
+    let src = "";
+    if (domFmt === "jpeg" || domFmt === "webp") {
+      const projectId =
+        (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
+      const sid =
+        (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
+      if (projectId && sid && meissaAccess) {
+        let edge = meissa2dOrthoNominalLongEdgeFromImgSrc(mainSrcEarly);
+        if (!Number.isFinite(edge) || edge < 1024) {
+          edge = MEISSA_ORTHOPHOTO_FULL_MAX_EDGE;
+        }
+        edge = Math.min(16384, Math.max(1024, Math.round(edge)));
+        src = buildOrthophotoPreviewImgUrl(sid, projectId, meissaAccess, edge, domFmt);
+      }
+    }
     if (!src) {
-      const mainSrc = String(mainImg.getAttribute("src") || "").trim();
-      src = mainSrc;
+      if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
+        src = mainSrcEarly;
+      } else {
+        const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+        src = hiUrl;
+        if (!src) {
+          src = mainSrcEarly;
+        }
+      }
     }
     if (!src) {
       try {
@@ -11494,7 +11554,9 @@
     const status = els.meissaDomOverlayStatus;
     const mainImg = els.meissaCloud2dImageLocal;
     if (!stage || !domImg || !pointsLayer || !mainImg) return;
-    void ensureMeissaDomOverlayHiUrl();
+    if (!MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE && !meissaDomOverlayUsesLossyApiPreview()) {
+      void ensureMeissaDomOverlayHiUrl();
+    }
     const hasMain = hasRenderableOverlayImage(mainImg);
     const synced = syncMeissaDomOverlayImageFromMain();
     if (!hasMain || !synced) {
@@ -11502,13 +11564,15 @@
       if (status) status.textContent = "대체 뷰: 표시 가능한 URL 이미지가 아직 없습니다.";
       return;
     }
-    const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
-    const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
-    if (hiResolved && domSrcNow !== hiResolved) {
-      try {
-        domImg.src = hiResolved;
-      } catch (_) {
-        /* ignore */
+    if (!MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE && !meissaDomOverlayUsesLossyApiPreview()) {
+      const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
+      const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      if (hiResolved && domSrcNow !== hiResolved) {
+        try {
+          domImg.src = hiResolved;
+        } catch (_) {
+          /* ignore */
+        }
       }
     }
     const domRect = getDisplayedImageRectInWrap(domImg, stage);
@@ -11589,7 +11653,16 @@
     if (status) {
       const edge = meissaDomOverlayCurrentSourceEdgeHint();
       const hiHint = edge > 0 ? `URL 이미지(장변≈${edge}px)` : "URL 이미지";
-      const qualityTag = hiResolved ? "고화질 URL 직접 표시" : "고화질 URL 준비 중";
+      let qualityTag = "";
+      if (meissaDomOverlayUsesLossyApiPreview()) {
+        const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "jpeg").toUpperCase();
+        qualityTag = `API ${f} 응답(전송량↓)`;
+      } else if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
+        qualityTag = "메인 뷰와 동일 소스(별도 고화질 선해결 없음)";
+      } else {
+        const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
+        qualityTag = hiResolved ? "고화질 URL 직접 표시" : "고화질 URL 준비 중";
+      }
       status.textContent =
         `대체 뷰: ${hiHint} · ${qualityTag} · 좌표 ${shown}개 표시` +
         `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
@@ -13899,8 +13972,15 @@
     const projectId =
       (els.meissaProjectSelect?.value || "").trim() ||
       (els.projectId?.value || "").trim();
-    // 대체뷰는 저해상 선표시 없이 고화질 URL을 바로 물리기 위해 해상도 URL을 선해결한다.
-    if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess) {
+    // 대체뷰: 예전 모드에서만 별도 고화질 버튼 URL을 선해결(JPEG/WebP 대체뷰는 API fmt 로 처리).
+    if (
+      MEISSA_2D_SIMPLE_ORTHO &&
+      projectId &&
+      sid &&
+      meissaAccess &&
+      !MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE &&
+      !meissaDomOverlayUsesLossyApiPreview()
+    ) {
       void ensureMeissaDomOverlayHiUrl();
     }
     const snapKey = `${projectId}:${sid}`;
