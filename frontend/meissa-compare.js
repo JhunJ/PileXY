@@ -269,11 +269,12 @@
     } catch (_) {
       /* ignore */
     }
-    return "webp";
+    return "png";
   })();
   /** 대체뷰는 고화질 단일 요청을 강제한다(초기 저화질 선표시 생략). */
   const MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE = 16384;
   function meissaDomOverlayUsesLossyApiPreview() {
+    if (isMeissa2dButtonUrlOnlySingleMode()) return false;
     const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
     return f === "jpeg" || f === "webp";
   }
@@ -416,7 +417,7 @@
    * true: 정사 로딩을 단일 경로로 고정.
    * Carta 버튼 URL PNG 소스를 서버에서 받아 webp로 변환/캐시한 API만 사용한다.
    */
-  const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = true;
+  const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = false;
   const MEISSA_ORTHOPHOTO_UNIFIED_FMT = "webp";
   const MEISSA_ORTHOPHOTO_UNIFIED_EDGE = 16384;
   /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
@@ -10102,7 +10103,7 @@
     const { w: pw, h: ph } = getOverlayWrapSize();
     const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
     const img = els.meissaCloud2dImageLocal;
-    if (MEISSA_2D_SIMPLE_ORTHO) {
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
       const mapSideSimple = Math.min(pw, ph);
       const mOffXSimple = (pw - mapSideSimple) / 2;
       const mOffYSimple = (ph - mapSideSimple) / 2;
@@ -11403,6 +11404,21 @@
     const key = meissaDomOverlayCurrentSnapshotKey();
     const u = String(src || "").trim();
     if (!key || !u) return;
+    if (!u.includes("/orthophoto-preview")) {
+      const info = {
+        url: u,
+        requestedFmt: "png",
+        encodedAs: "png",
+        source: "button-url",
+        convertStatus: "none",
+        httpStatus: 0,
+        probe: "skip-non-preview",
+        ts: Date.now(),
+      };
+      meissaDomOverlayHeaderLogBySnapshot.set(key, info);
+      meissaDomOverlaySetFormatAttrsOnImage(info);
+      return;
+    }
     const prev = meissaDomOverlayHeaderLogBySnapshot.get(key);
     const now = Date.now();
     if (
@@ -14555,10 +14571,8 @@
           orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
           perfMark("georef·지오설정·버튼URL 병렬 완료");
           if (!orthoParallelResult?.ok) {
-            buttonOnlyAllowFallbackViews = true;
-            pushMeissa2dLoadLine(
-              "정사: 버튼 URL 단일 경로 실패 — 대체 뷰(raw/json/carta) 탐색으로 전환합니다."
-            );
+            buttonOnlyAllowFallbackViews = false;
+            pushMeissa2dLoadLine("정사: 버튼 URL 단일 경로 실패 — 추가 폴백 없이 중단합니다.");
           }
         } else {
           const oP = orthoImgLoadPromise || Promise.resolve({ ok: false, skip: true });
@@ -14794,12 +14808,19 @@
       );
     }
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
-    if (!orthophotoOk && MEISSA_2D_SIMPLE_ORTHO && projectId && sid && MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
-      pushMeissa2dLoadLine("중단: 단일 WEBP 경로 실패(버튼URL/RAW/JSON/Carta 폴백 미사용)");
-      perfDone("실패(단일 WEBP 경로)");
+    if (!orthophotoOk && isMeissa2dButtonUrlOnlySingleMode()) {
+      pushMeissa2dLoadLine("중단: 단일 버튼 URL 경로 실패(orthophoto-preview/RAW/JSON/Carta 폴백 미사용)");
+      perfDone("실패(단일 버튼 URL 경로)");
       return false;
     }
-    if (!orthophotoOk && MEISSA_2D_SIMPLE_ORTHO && projectId && sid) {
+    if (
+      !orthophotoOk &&
+      MEISSA_2D_SIMPLE_ORTHO &&
+      projectId &&
+      sid &&
+      !isMeissa2dButtonUrlOnlySingleMode() &&
+      !MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY
+    ) {
       pushMeissa2dLoadLine("정사: orthophoto-preview 실패 → 버튼 URL 고화질 폴백 시도");
       try {
         const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
@@ -14853,15 +14874,10 @@
       perfDone("완료(정사)");
       return true;
     }
-    if (
-      MEISSA_2D_SIMPLE_ORTHO &&
-      MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY &&
-      MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY &&
-      !buttonOnlyAllowFallbackViews
-    ) {
-      pushMeissa2dLoadLine("중단: 버튼 URL 단일 모드에서 정사 표시 실패(다른 폴백 미사용)");
+    if (isMeissa2dButtonUrlOnlySingleMode() || MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
+      pushMeissa2dLoadLine("중단: 버튼 URL 고화질 단일 경로 실패(다른 경로 미사용)");
       setMeissa2dLayerVisibility({ showMosaic: false, showImage: false });
-      perfDone("실패(버튼 URL 단일 모드)");
+      perfDone("실패(버튼 URL 단일 경로)");
       return false;
     }
     if (MEISSA_2D_SIMPLE_ORTHO) {
