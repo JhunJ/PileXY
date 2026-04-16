@@ -226,13 +226,21 @@
   let meissaDomOverlayTx = 0;
   let meissaDomOverlayTy = 0;
   let meissaDomOverlayPinchLastDist = 0;
-  /** @type {Map<string, string>} project:snapshot -> preferred high-res URL */
+  /** @type {Map<string, string>} project:snapshot -> high-res target URL */
   let meissaDomOverlayHiUrlBySnapshot = new Map();
+  /** @type {Map<string, string>} project:snapshot -> fast first URL */
+  let meissaDomOverlayFastUrlBySnapshot = new Map();
+  /** @type {Map<string, boolean>} project:snapshot -> high-res decoded/ready */
+  let meissaDomOverlayHiReadyBySnapshot = new Map();
+  /** @type {Map<string, number>} project:snapshot -> preload in flight token */
+  let meissaDomOverlayHiPreloadInFlight = new Map();
   let meissaDomOverlayHiResolveInFlight = false;
   let meissaDomOverlayHiLastResolveTs = 0;
   const MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS = 7000;
   /** 실패한 URL은 잠시 재시도를 미뤄 메인 이미지로 안정 폴백한다. */
   const MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS = 120000;
+  /** 대체뷰 고화질 프리로드 타임아웃(ms). */
+  const MEISSA_DOM_OVERLAY_HI_PRELOAD_TIMEOUT_MS = 45000;
   /** @type {Map<string, number>} url -> retryAfterTs */
   let meissaDomOverlayBadUrlUntil = new Map();
   /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
@@ -11220,11 +11228,79 @@
     return raw;
   }
 
+  function meissaDomOverlayCurrentFastUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const raw = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
+    if (!raw) return "";
+    if (meissaDomOverlayUrlInCooldown(raw)) return "";
+    return raw;
+  }
+
   function meissaDomOverlayDesiredHiUrl() {
     const key = meissaDomOverlayCurrentSnapshotKey();
     if (!key) return "";
     const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
     return cached;
+  }
+
+  function meissaDomOverlayIsHiReadyForCurrent() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return false;
+    return Boolean(meissaDomOverlayHiReadyBySnapshot.get(key));
+  }
+
+  function meissaDomOverlayMarkHiReadyForCurrent(flag) {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return;
+    meissaDomOverlayHiReadyBySnapshot.set(key, Boolean(flag));
+  }
+
+  function meissaDomOverlayMarkHiReadyByKey(key, flag) {
+    const k = String(key || "").trim();
+    if (!k) return;
+    meissaDomOverlayHiReadyBySnapshot.set(k, Boolean(flag));
+  }
+
+  function meissaDomOverlayBuildFastFirstUrl(ordered) {
+    const list = Array.isArray(ordered) ? ordered : [];
+    if (!list.length) return "";
+    const scored = list
+      .map((u) => {
+        const s = String(u || "").trim();
+        const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(s)) || 0);
+        const score = Number(_scoreMeissaOrthoButtonUrl(s)) || 0;
+        return { s, edge, score };
+      })
+      .filter((x) => !!x.s && !meissaDomOverlayUrlInCooldown(x.s))
+      .sort((a, b) => {
+        const aClass = a.edge >= 12000 ? 0 : a.edge >= 7000 ? 1 : 2;
+        const bClass = b.edge >= 12000 ? 0 : b.edge >= 7000 ? 1 : 2;
+        if (aClass !== bClass) return aClass - bClass;
+        if (aClass === 0 && bClass === 0) {
+          // 고해상 클래스에서는 너무 큰 파일(25k)보다 12k를 우선해 first paint를 빠르게 만든다.
+          const aBias = a.edge >= 24000 ? 1 : 0;
+          const bBias = b.edge >= 24000 ? 1 : 0;
+          if (aBias !== bBias) return aBias - bBias;
+        }
+        if (aClass === 1 && bClass === 1) {
+          // 중간 클래스는 7k를 우선.
+          const ad = Math.abs(a.edge - 7000);
+          const bd = Math.abs(b.edge - 7000);
+          if (ad !== bd) return ad - bd;
+        }
+        if (a.edge !== b.edge) return a.edge - b.edge;
+        return b.score - a.score;
+      });
+    return String(scored[0]?.s || "").trim();
+  }
+
+  function meissaDomOverlayFastUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const fast = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
+    if (!fast || meissaDomOverlayUrlInCooldown(fast)) return "";
+    return fast;
   }
 
   function meissaDomOverlayUrlInCooldown(url) {
@@ -11265,16 +11341,60 @@
     });
   }
 
+  function meissaDomOverlayEnsureHiPreload() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return;
+    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+    if (!hiUrl || meissaDomOverlayIsHiReadyForCurrent()) return;
+    const inFlight = Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0);
+    if (inFlight) return;
+    const token = Date.now();
+    meissaDomOverlayHiPreloadInFlight.set(key, token);
+    const im = new Image();
+    im.onload = () => {
+      if (Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0) !== token) return;
+      meissaDomOverlayHiPreloadInFlight.delete(key);
+      meissaDomOverlayHiReadyBySnapshot.set(key, true);
+      scheduleRenderMeissaDomOverlay();
+    };
+    im.onerror = () => {
+      if (Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0) !== token) return;
+      meissaDomOverlayHiPreloadInFlight.delete(key);
+      markMeissaDomOverlayUrlFailed(hiUrl);
+      scheduleRenderMeissaDomOverlay();
+    };
+    try {
+      im.decoding = "async";
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      im.loading = "eager";
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      im.fetchPriority = "high";
+    } catch (_) {
+      /* ignore */
+    }
+    im.src = hiUrl;
+  }
+
   async function ensureMeissaDomOverlayHiUrl() {
     const key = meissaDomOverlayCurrentSnapshotKey();
     if (!key || !meissaAccess) return;
     const now = Date.now();
-    const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    const cachedHi = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    const cachedFast = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
     if (
-      cached &&
-      !meissaDomOverlayUrlInCooldown(cached) &&
+      cachedHi &&
+      !meissaDomOverlayUrlInCooldown(cachedHi) &&
+      cachedFast &&
+      !meissaDomOverlayUrlInCooldown(cachedFast) &&
       now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS
     ) {
+      meissaDomOverlayEnsureHiPreload();
       return;
     }
     if (meissaDomOverlayHiResolveInFlight) return;
@@ -11287,31 +11407,23 @@
       const ordered = Array.isArray(urls)
         ? urls.map((u) => String(u || "").trim()).filter(Boolean)
         : [];
-      let best = "";
-      if (ordered.length) {
-        // 대체뷰는 품질 우선: 짧은 probe(1s대)로 25k PNG를 탈락시키지 않는다.
-        // 큰 파일은 실제 img 로드 경로에서 디코드되게 두고, 실패 이벤트에서 폴백 처리한다.
-        const filtered = ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url));
-        best = String(pickBestMeissaOrthoButtonUrlForSharpness(filtered) || "").trim();
-      }
-      if (!best) {
-        const fallback = String(
-          pickBestMeissaOrthoButtonUrlForSharpness(
-            ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url))
-          ) || ""
-        ).trim();
-        if (fallback) {
-          const ok = await probeImageUrl(
-            fallback,
-            Math.max(900, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS) || 1500)
-          );
-          if (ok) best = fallback;
-          else markMeissaDomOverlayUrlFailed(fallback);
+      if (!ordered.length) return;
+      const filtered = ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url));
+      const hiBest = String(pickBestMeissaOrthoButtonUrlForSharpness(filtered) || "").trim();
+      const fastBest = String(meissaDomOverlayBuildFastFirstUrl(filtered) || "").trim();
+      if (hiBest) {
+        const prev = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+        meissaDomOverlayHiUrlBySnapshot.set(key, hiBest);
+        if (!prev || prev !== hiBest) {
+          meissaDomOverlayHiReadyBySnapshot.set(key, false);
         }
       }
-      if (best) {
-        meissaDomOverlayHiUrlBySnapshot.set(key, best);
+      if (fastBest) {
+        meissaDomOverlayFastUrlBySnapshot.set(key, fastBest);
+      } else if (hiBest) {
+        meissaDomOverlayFastUrlBySnapshot.set(key, hiBest);
       }
+      meissaDomOverlayEnsureHiPreload();
     } catch (_) {
       /* ignore */
     } finally {
@@ -11324,10 +11436,18 @@
     const mainImg = els.meissaCloud2dImageLocal;
     if (!domImg || !mainImg) return false;
     bindMeissaDomOverlayImageFallback();
-    const hiCandidate = meissaDomOverlayDesiredHiUrl();
-    const hiUrl = meissaDomOverlayUrlInCooldown(hiCandidate) ? "" : hiCandidate;
-    const mainSrc = String(mainImg.getAttribute("src") || "").trim();
-    const src = hiUrl || mainSrc;
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+    const fastUrl = meissaDomOverlayFastUrl();
+    const hiReady = key ? Boolean(meissaDomOverlayHiReadyBySnapshot.get(key)) : false;
+    let src = "";
+    if (hiUrl && hiReady) src = hiUrl;
+    else if (fastUrl) src = fastUrl;
+    else if (hiUrl) src = hiUrl;
+    if (!src) {
+      const mainSrc = String(mainImg.getAttribute("src") || "").trim();
+      src = mainSrc;
+    }
     if (!src) {
       try {
         domImg.removeAttribute("src");
@@ -11344,6 +11464,24 @@
       }
     }
     return true;
+  }
+
+  function meissaDomOverlayBackgroundEdge() {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg) return 0;
+    const srcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+    const nowEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
+    if (nowEdge > 0) return nowEdge;
+    const nw = Math.round(Number(domImg.naturalWidth || 0));
+    const nh = Math.round(Number(domImg.naturalHeight || 0));
+    return Math.max(nw, nh, 0);
+  }
+
+  function meissaDomOverlayCurrentSourceEdgeHint() {
+    const domImg = els.meissaDomOverlayImage;
+    const srcNow = String(domImg?.currentSrc || domImg?.src || "").trim();
+    const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
+    return edge > 0 ? edge : 0;
   }
 
   /**
@@ -11366,13 +11504,15 @@
       return;
     }
     const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
-    const hiCandidate = String(meissaDomOverlayDesiredHiUrl() || "").trim();
-    const hiTarget = meissaDomOverlayUrlInCooldown(hiCandidate) ? "" : hiCandidate;
+    const fastNow = String(meissaDomOverlayCurrentFastUrl() || "").trim();
+    const hiReady = meissaDomOverlayIsHiReadyForCurrent();
     const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
-    if (hiTarget && !hiResolved && domSrcNow !== hiTarget && meissaDomOverlayHiResolveInFlight) {
-      pointsLayer.replaceChildren();
-      if (status) status.textContent = "대체 뷰: 고화질 URL 준비 중...";
-      return;
+    if (hiResolved && hiReady && domSrcNow !== hiResolved) {
+      try {
+        domImg.src = hiResolved;
+      } catch (_) {
+        /* ignore */
+      }
     }
     const domRect = getDisplayedImageRectInWrap(domImg, stage);
     if (!(domRect.w > 2 && domRect.h > 2)) {
@@ -11450,10 +11590,17 @@
     }
     pointsLayer.replaceChildren(frag);
     if (status) {
-      const srcNow = String(domImg.currentSrc || domImg.src || "").trim();
-      const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
-      const hiHint = edge > 0 ? `고화질 URL(장변≈${edge}px)` : "URL 이미지";
-      status.textContent = `대체 뷰: ${hiHint} 위 좌표 ${shown}개 표시${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
+      const edge = meissaDomOverlayCurrentSourceEdgeHint();
+      const hiHint = edge > 0 ? `URL 이미지(장변≈${edge}px)` : "URL 이미지";
+      const qualityTag =
+        hiResolved && hiReady
+          ? "고화질 적용"
+          : fastNow
+            ? "빠른 표시(고화질 백그라운드 준비)"
+            : "URL 준비 중";
+      status.textContent =
+        `대체 뷰: ${hiHint} · ${qualityTag} · 좌표 ${shown}개 표시` +
+        `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}`;
     }
   }
 
