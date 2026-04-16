@@ -436,6 +436,8 @@
   const MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS = 1300;
   /** 버튼 URL 단일 모드: 실패 시 후보 재시도 최대 횟수(속도·안정 절충). */
   const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES = 3;
+  /** 버튼 URL 단일 모드: 이 장변(px) 미만 후보는 저화질로 간주해 배제(예: 700x). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE = 7000;
   /** true: 정사·시공 적합도에서 RGB/형태 분석 실패를 planD(평면)로 초록 승격하지 않고 미판정으로 유지 */
   const MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS = true;
   /**
@@ -13677,11 +13679,10 @@
       buildCartaOrthoDirectUrl(pid, sid, "orthophoto_7000x.png"),
       buildCartaOrthoDirectUrl(pid, sid, "orthophoto_12000x.png"),
       buildCartaOrthoDirectUrl(pid, sid, "orthophoto_25000x.png"),
-      buildCartaOrthoDirectUrl(pid, sid, "orthophoto_700x.png"),
     ].filter(Boolean);
     const all = [];
     const seen = new Set();
-    for (const u of [...guessed, ...fromResources]) {
+    for (const u of [...fromResources, ...guessed]) {
       const s = normalizeMeissaSignedUrl(u);
       if (!s || seen.has(s)) continue;
       seen.add(s);
@@ -14478,11 +14479,21 @@
           const orderedCandidates = Array.isArray(signedOrthoUrls)
             ? signedOrthoUrls.map((u) => String(u || "").trim()).filter(Boolean)
             : [];
+          const highCandidates = orderedCandidates.filter((u) => {
+            const edge = Number(meissa2dOrthoNominalLongEdgeFromImgSrc(u)) || 0;
+            return edge >= MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE;
+          });
+          if (!highCandidates.length) {
+            orthoImgLoadPromise = Promise.resolve({ ok: false, message: "button-url-high-not-found" });
+            pushMeissa2dLoadLine(
+              `정사: 고화질 버튼 URL(장변>=${MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE}px) 후보가 없어 중단`
+            );
+          }
           let tryUrls = [];
-          if (orderedCandidates.length) {
+          if (highCandidates.length) {
             try {
-              const probePool = orderedCandidates
-                .slice(0, Math.min(6, orderedCandidates.length))
+              const probePool = highCandidates
+                .slice(0, Math.min(6, highCandidates.length))
                 .map((url) => ({ url }));
               const winner = await firstReachableTile(probePool, {
                 timeoutMs: MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS,
@@ -14497,7 +14508,7 @@
             } catch (_) {
               // ignore probe failures; keep ordered fallback list
             }
-            for (const u of orderedCandidates) {
+            for (const u of highCandidates) {
               if (!u || tryUrls.includes(u)) continue;
               tryUrls.push(u);
               if (tryUrls.length >= Math.max(1, MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES)) break;
