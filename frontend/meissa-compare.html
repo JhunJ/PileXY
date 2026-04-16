@@ -192,6 +192,21 @@
         <div class="meissa-2d-overlay-wrap">
           <img id="meissa-cloud-2d-image-local" class="meissa-cloud-2d-image-local" alt="Meissa 2D 배경" />
         </div>
+        <details class="meissa-dom-overlay-wrap">
+          <summary>대체 뷰(빠른 DOM 오버레이 · URL 이미지 기반)</summary>
+          <div class="meissa-dom-overlay-stage" id="meissa-dom-overlay-stage">
+            <img
+              id="meissa-dom-overlay-image"
+              class="meissa-dom-overlay-image"
+              alt="Meissa URL 정사 대체 뷰"
+            />
+            <div id="meissa-dom-overlay-points" class="meissa-dom-overlay-points" aria-hidden="true"></div>
+          </div>
+          <p class="meissa-note meissa-dom-overlay-note">
+            URL 이미지 위에 파일좌표를 DOM으로 얹는 대체 렌더입니다(캔버스와 독립).
+          </p>
+          <p id="meissa-dom-overlay-status" class="meissa-note meissa-dom-overlay-status"></p>
+        </details>
         <details id="meissa-3d-debug-panel" class="meissa-debug-details">
           <summary>점군 디버그 로그</summary>
           <pre id="meissa-3d-debug-text" class="meissa-debug-pre">아직 디버그 실행 전입니다.</pre>
@@ -406,6 +421,6 @@
     </main>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/meissa-compare.js?v=202603698" defer></script>
+    <script src="/frontend/meissa-compare.js?v=2026041616" defer></script>
   </body>
 </html>

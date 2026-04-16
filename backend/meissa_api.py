@@ -2869,6 +2869,48 @@ def meissa_orthophoto_effective_preview_edge(query_max_edge: Optional[int]) -> i
     return _meissa_orthophoto_preview_max_edge()
 
 
+def meissa_orthophoto_preview_transcode_png_bytes_to_mime(body: bytes, fmt: str) -> Tuple[bytes, str]:
+    """
+    orthophoto-preview 응답용: PNG 바이트를 JPEG 또는 WebP 로 재인코딩(전송·디코드 부담 감소).
+    실패 시 원본 PNG 와 image/png 를 반환한다.
+    """
+    f = (fmt or "png").lower().strip()
+    if f == "png" or not body or len(body) < 32:
+        return body, "image/png"
+    if f not in ("jpeg", "webp"):
+        return body, "image/png"
+    try:
+        __import__("PIL.Image", fromlist=["Image"])
+        from PIL import Image  # type: ignore
+    except ImportError:
+        return body, "image/png"
+    try:
+        im = Image.open(io.BytesIO(body))
+        im.load()
+    except Exception:
+        return body, "image/png"
+    buf = io.BytesIO()
+    try:
+        if f == "jpeg":
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGBA")
+            rgb = Image.new("RGB", im.size, (255, 255, 255))
+            if im.mode == "RGBA":
+                rgb.paste(im, mask=im.split()[-1])
+            else:
+                rgb.paste(im)
+            rgb.save(buf, format="JPEG", quality=86, optimize=True)
+            return buf.getvalue(), "image/jpeg"
+        if f == "webp":
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGBA")
+            im.save(buf, format="WEBP", quality=82, method=4)
+            return buf.getvalue(), "image/webp"
+    except Exception:
+        return body, "image/png"
+    return body, "image/png"
+
+
 def _meissa_orthophoto_passthrough_max_bytes() -> int:
     """IHDR 패스스루 허용 최대 다운로드 크기(초과 시 Pillow로 edge_lim까지 재샘플·재압축)."""
     try:
@@ -3038,6 +3080,100 @@ def _meissa_orthophoto_request_headers(access_token: str) -> List[Dict[str, str]
         rows.append({**_auth_header(access_token), "Accept": "*/*", "User-Agent": _MEISSA_UA})
     rows.append({"Accept": "*/*", "User-Agent": _MEISSA_UA})
     return rows
+
+
+def _meissa_orthophoto_preview_from_resource_urls(
+    access_token: str,
+    snapshot_id: str,
+    edge_lim: int,
+    cap: int,
+    pt_cap: int,
+    headers_try: List[Dict[str, str]],
+    timeout: Tuple[int, int],
+) -> Optional[Dict[str, Any]]:
+    """
+    export/orthophoto 고정 경로가 실패할 때,
+    snapshot resources/detail에 담긴 서명 URL(다운로드 버튼 링크)을 추적해 PNG를 가져온다.
+    """
+    sid = str(snapshot_id).strip()
+    if not sid:
+        return None
+    try:
+        resources = meissa_list_snapshot_resources(access_token, sid)
+    except Exception:
+        resources = []
+    if not resources:
+        return None
+
+    candidates: List[Tuple[int, str]] = []
+    seen_urls: set[str] = set()
+    for r in resources[:32]:
+        rid = r.get("id")
+        name_l = str(r.get("name") or "").lower()
+        type_l = str(r.get("type") or "").lower()
+        urls: List[str] = []
+        urls.extend(_resource_urls_from_payload(r))
+        raw = r.get("raw")
+        if isinstance(raw, dict):
+            urls.extend(_resource_urls_from_payload(raw))
+        if rid is not None:
+            for path in _resource_detail_candidates(sid, str(rid)):
+                d = _meissa_get_soft(path, access_token)
+                if d is None:
+                    continue
+                urls.extend(_resource_urls_from_payload(d))
+                urls.extend(_resource_urls_from_payload(_unwrap_result(d)))
+        for u in urls:
+            us = str(u or "").strip()
+            if not us or not us.startswith("http") or us in seen_urls:
+                continue
+            seen_urls.add(us)
+            lu = us.lower()
+            score = 0
+            if "/export/orthophoto/" in lu:
+                score += 40
+            if "orthophoto_25000x.png" in lu:
+                score += 60
+            if "orthophoto" in lu:
+                score += 20
+            if "signature=" in lu and "expires=" in lu:
+                score += 10
+            if "orthophoto" in name_l:
+                score += 8
+            if "ortho" in type_l or "raster" in type_l:
+                score += 4
+            if score > 0:
+                candidates.append((score, us))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    for _, url in candidates[:16]:
+        for headers in headers_try:
+            res = _meissa_carta_stream_to_tempfile(url, headers, cap, ".png", timeout)
+            tag = res[0]
+            if tag != "ok":
+                continue
+            path, total = res[1], int(res[2])
+            pstr = str(path)
+            wh = _png_ihdr_dimensions(pstr)
+            preview = _meissa_raster_file_to_preview_png_bytes(
+                pstr,
+                edge_lim,
+                source_label="resource-signed-url",
+                png_passthrough=bool(wh and max(wh) <= edge_lim and total <= pt_cap),
+            )
+            if preview and preview.get("ok"):
+                return {
+                    "ok": True,
+                    "snapshotId": sid,
+                    "body": preview["body"],
+                    "width": preview["width"],
+                    "height": preview["height"],
+                    "source": f"{preview.get('source', 'resource-signed-url')}",
+                    "sourceUrl": url,
+                }
+    return None
 
 
 def _meissa_orthophoto_pillow_resample() -> Any:
@@ -3433,6 +3569,20 @@ def meissa_get_carta_orthophoto_preview_png(
                     "projectId": pid,
                 }
 
+    signed_fallback = _meissa_orthophoto_preview_from_resource_urls(
+        access_token,
+        sid,
+        edge_lim,
+        cap,
+        pt_cap,
+        headers_try,
+        ortho_timeout,
+    )
+    if signed_fallback and signed_fallback.get("ok"):
+        out_fb = dict(signed_fallback)
+        out_fb["projectId"] = pid
+        return out_fb
+
     if not _meissa_orthophoto_tif_fallback_enabled():
         msg = (
             f"Carta export 최대 PNG({_meissa_orthophoto_export_png_filenames()[0]}) 를 가져오지 못했습니다. "
@@ -3536,6 +3686,25 @@ def meissa_orthophoto_disk_cache_file_path(project_id: Any, snapshot_id: Any, ed
     return os.path.join(_meissa_orthophoto_disk_cache_dir(), name)
 
 
+def meissa_orthophoto_disk_cache_encoded_file_path(
+    project_id: Any, snapshot_id: Any, edge_lim: int, fmt: str
+) -> str:
+    """
+    PNG 원본 캐시에서 변환한 인코딩(jpeg/webp) 결과 파일 경로.
+    정사 단일 경로(webp) 재요청 시 재인코딩 비용을 줄인다.
+    """
+    pid = _meissa_orthophoto_disk_cache_safe_segment(project_id)
+    sid = _meissa_orthophoto_disk_cache_safe_segment(snapshot_id)
+    rev = _meissa_orthophoto_disk_cache_rev()
+    el = max(1024, min(16384, int(edge_lim)))
+    f = (fmt or "").strip().lower()
+    if f not in ("jpeg", "webp"):
+        f = "png"
+    ext = "jpg" if f == "jpeg" else f
+    name = f"ortho_{pid}_{sid}_e{el}_r{rev}.{ext}"
+    return os.path.join(_meissa_orthophoto_disk_cache_dir(), name)
+
+
 def meissa_orthophoto_disk_cache_path_if_valid(
     project_id: Any, snapshot_id: Any, edge_lim: Optional[int] = None
 ) -> Optional[str]:
@@ -3553,6 +3722,29 @@ def meissa_orthophoto_disk_cache_path_if_valid(
     except OSError:
         return None
     if not os.path.isfile(path) or st.st_size < 64:
+        return None
+    age = time.time() - st.st_mtime
+    if age > ttl:
+        return None
+    return path
+
+
+def meissa_orthophoto_disk_cache_encoded_path_if_valid(
+    project_id: Any, snapshot_id: Any, edge_lim: Optional[int], fmt: str
+) -> Optional[str]:
+    """TTL 이내·크기 양호한 인코딩(jpeg/webp) 캐시 경로."""
+    f = (fmt or "").strip().lower()
+    if f not in ("jpeg", "webp"):
+        return None
+    el = int(edge_lim) if edge_lim is not None else _meissa_orthophoto_preview_max_edge()
+    el = max(1024, min(16384, el))
+    path = meissa_orthophoto_disk_cache_encoded_file_path(project_id, snapshot_id, el, f)
+    ttl = _meissa_orthophoto_disk_cache_ttl_sec()
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    if not os.path.isfile(path) or st.st_size < 32:
         return None
     age = time.time() - st.st_mtime
     if age > ttl:
@@ -3589,6 +3781,41 @@ def meissa_orthophoto_write_disk_cache(
     el = int(edge_lim) if edge_lim is not None else _meissa_orthophoto_preview_max_edge()
     el = max(1024, min(16384, el))
     path = meissa_orthophoto_disk_cache_file_path(project_id, snapshot_id, el)
+    d = os.path.dirname(path)
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        return
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "wb") as wf:
+            wf.write(body)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            if os.path.isfile(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
+        return
+
+
+def meissa_orthophoto_write_disk_cache_encoded(
+    project_id: Any,
+    snapshot_id: Any,
+    body: bytes,
+    edge_lim: Optional[int],
+    fmt: str,
+) -> None:
+    """PNG 캐시를 변환한 jpeg/webp 결과 저장."""
+    f = (fmt or "").strip().lower()
+    if f not in ("jpeg", "webp"):
+        return
+    if not body or len(body) < 32:
+        return
+    el = int(edge_lim) if edge_lim is not None else _meissa_orthophoto_preview_max_edge()
+    el = max(1024, min(16384, el))
+    path = meissa_orthophoto_disk_cache_encoded_file_path(project_id, snapshot_id, el, f)
     d = os.path.dirname(path)
     try:
         os.makedirs(d, exist_ok=True)

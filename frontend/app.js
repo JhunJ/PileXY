@@ -5,8 +5,8 @@ const API_BASE_URL =
 
 const PhaseMessages = {
   idle: "Ready.",
-  uploading: "Uploading DXF...",
-  parsing: "Parsing DXF... (다른 사용자 업로드 시 잠시 걸릴 수 있습니다)",
+  uploading: "Uploading CAD file...",
+  parsing: "Parsing CAD file... (다른 사용자 업로드 시 잠시 걸릴 수 있습니다)",
   matching: "Matching circles and texts...",
   duplicates: "Building duplicate index...",
   ready: "Ready.",
@@ -50,6 +50,7 @@ const toggleTextsInput = document.getElementById("toggle-texts");
 const toggleMatchLinesInput = document.getElementById("toggle-match-lines");
 const toggleFoundationLabelVizInput = document.getElementById("toggle-foundation-label-viz");
 const togglePfPolyLinkVizInput = document.getElementById("toggle-pf-poly-link-viz");
+const toggleFoundationAreaHatchVizInput = document.getElementById("toggle-foundation-area-hatch-viz");
 const toggleBuildingHatchInput = document.getElementById("toggle-building-hatch");
 const toggleParkingHatchInput = document.getElementById("toggle-parking-hatch");
 const toggleTowerCraneHatchInput = document.getElementById("toggle-tower-crane-hatch");
@@ -154,6 +155,7 @@ const LOAD_WORK_FAV_PROJECTS_KEY = "pilexy:load-fav-projects";
 const LOAD_WORK_FAV_WORK_IDS_KEY = "pilexy:load-fav-work-ids";
 const SETTINGS_CONTEXT_STORAGE_KEY = "pilexy:outline-settings-context";
 const GA_MEASUREMENT_ID_STORAGE_KEY = "pilexy:ga-measurement-id";
+const VERSION_COMPARE_EXCEL_CACHE_KEY = "pilexy:version-compare-excel-result-v1";
 let gaBootstrapped = false;
 
 function normalizeGaMeasurementId(value) {
@@ -394,7 +396,7 @@ const DEFAULT_FILTER = {
   pileNumberHyphenFormat: false,
   /** 중심·반지름이 같은 원끼리는 겹침 중복으로 묶지 않음 (DXF상 동일 위치 중복 엔티티 등) */
   excludeIdenticalGeometryDuplicates: true,
-  /** T4-1 형식: T=타워크레인, 4=호기, 뒤=파일번호 (동-번호와 동시 가능 — 매칭마다 T형식 우선) */
+  /** T/TC4-1 형식: T/TC=타워크레인, 4=호기, 뒤=파일번호 (동-번호와 동시 가능 — 매칭마다 T/TC 형식 우선) */
   towerCraneNumberFormat: false,
 };
 
@@ -1893,6 +1895,23 @@ function bindEvents() {
       requestRedraw();
     });
   }
+  if (toggleFoundationAreaHatchVizInput) {
+    toggleFoundationAreaHatchVizInput.checked = state.construction?.foundationAreaHatchVisible !== false;
+    toggleFoundationAreaHatchVizInput.addEventListener("change", (event) => {
+      if (!state.construction) state.construction = {};
+      state.construction.foundationAreaHatchVisible = event.target.checked;
+      const panelHatchBtn = document.getElementById("construction-foundation-hatch-visibility");
+      if (panelHatchBtn) {
+        const hatchOn = state.construction.foundationAreaHatchVisible !== false;
+        panelHatchBtn.textContent = hatchOn ? "가시성 끄기" : "가시성 켜기";
+        panelHatchBtn.title = hatchOn
+          ? "캔버스 면적 해치를 숨깁니다 (지표 선택은 유지됩니다)."
+          : "면적 해치를 다시 표시합니다.";
+        panelHatchBtn.setAttribute("aria-pressed", hatchOn ? "false" : "true");
+      }
+      requestRedraw();
+    });
+  }
   if (toggleBuildingHatchInput) {
     toggleBuildingHatchInput.addEventListener("change", (event) => {
       state.showBuildingHatch = event.target.checked;
@@ -2141,6 +2160,7 @@ function bindEvents() {
     versionCompareProject.addEventListener("change", () => {
       fillVersionCompareOldNewByProject(versionCompareProject.value || "");
       resetVersionCompareExcelCompareResult();
+      void restoreVersionCompareExcelResultFromCache();
     });
   }
   if (versionCompareOldSource) {
@@ -2192,6 +2212,20 @@ function bindEvents() {
   if (versionCompareExcelApply) {
     versionCompareExcelApply.addEventListener("click", runVersionCompareExcelCompare);
   }
+  if (versionCompareExcelIssues) {
+    versionCompareExcelIssues.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const filterBtn = target.closest("[data-vc-excel-filter]");
+      if (!(filterBtn instanceof HTMLElement)) return;
+      const nextFilter = String(filterBtn.dataset.vcExcelFilter || "all");
+      if (!nextFilter || versionCompareExcelIssueFilter === nextFilter) return;
+      versionCompareExcelIssueFilter = nextFilter;
+      if (versionCompareExcelLastResult) {
+        renderVersionCompareExcelResult(versionCompareExcelLastResult, versionCompareExcelLastRenderOptions);
+      }
+    });
+  }
   if (versionCompareExcelFile) {
     versionCompareExcelFile.addEventListener("change", async () => {
       resetVersionCompareExcelInspectState();
@@ -2200,6 +2234,7 @@ function bindEvents() {
         setVersionCompareExcelStatus("새 엑셀 파일을 확인하는 중입니다.");
         openVersionCompareExcelModal();
         await inspectVersionCompareExcelFile();
+        await restoreVersionCompareExcelResultFromCache();
       } else {
         setVersionCompareExcelStatus("");
       }
@@ -2285,7 +2320,7 @@ function updateUploadButtonState() {
   uploadButton.disabled = !fileInput.files || fileInput.files.length === 0;
   if (selectedFileName) {
     const file = fileInput.files && fileInput.files[0];
-    selectedFileName.textContent = file ? file.name : "선택된 DXF 파일 없음";
+    selectedFileName.textContent = file ? file.name : "선택된 DXF/DWG 파일 없음";
   }
 }
 
@@ -2628,7 +2663,7 @@ function sendVersionCompareExcelRequest(formData, callbacks = {}) {
 async function handleUpload(event) {
   event.preventDefault();
   if (!fileInput.files || !fileInput.files[0]) {
-    setUploadStatus("Please choose a DXF file.", true);
+    setUploadStatus("DXF/DWG 파일을 선택하세요.", true);
     return;
   }
   readManualHistoryReuseControlsToState();
@@ -2643,13 +2678,13 @@ async function handleUpload(event) {
   try {
     uploadButton.disabled = true;
     setPhase("uploading", 0);
-    setUploadStatus(useChunked ? "Uploading DXF (chunked)…" : "Uploading DXF...");
+    setUploadStatus(useChunked ? "Uploading CAD file (chunked)..." : "Uploading CAD file...");
     
     const payload = useChunked
       ? await sendChunkedUploadRequest(file, filterValues, getDesiredBuildingCount())
       : await sendUploadRequest(file, filterValues, getDesiredBuildingCount());
     setPhase("matching", 95);
-    setUploadStatus("Processing DXF...");
+    setUploadStatus("Processing CAD file...");
     handlePayload(payload);
     // 클라이언트 전용 옵션(동-번호·타워·동일 기하 중복 제외)은 서버 filter에 없음 → 체크박스 기준으로 확정 후 파생 상태 재계산
     state.filter.pileNumberHyphenFormat = !!filterValues.pileNumberHyphenFormat;
@@ -2676,7 +2711,7 @@ async function handleUpload(event) {
     if (state.circles?.length > 0) {
       setUploadStatus("처리 완료. CSV/XLSX 다운로드 버튼을 눌러 저장할 수 있습니다.");
     } else {
-      setUploadStatus("DXF 처리 완료. 현재 필터에 맞는 원이 없습니다.");
+      setUploadStatus("CAD 처리 완료. 현재 필터에 맞는 원이 없습니다.");
     }
     fileInput.value = "";
     updateUploadButtonState();
@@ -3321,7 +3356,8 @@ function updateCircleTable() {
  */
 function getMatchedTextNumber(matchedText) {
   if (matchedText == null || matchedText === "") return NaN;
-  const s = String(matchedText).trim();
+  const s = normalizePileTextHyphens(String(matchedText).trim());
+  if (s.includes("-")) return NaN;
   const digits = s.replace(/\D/g, "");
   return digits.length ? parseInt(digits, 10) : NaN;
 }
@@ -3333,8 +3369,8 @@ function normalizePileTextHyphens(value) {
 /** 첫 번째 `-` 기준: 앞쪽 숫자=동키, 뒤쪽 첫 숫자 그룹=파일 번호 */
 function parseHyphenPileText(matchedText) {
   const s = normalizePileTextHyphens(String(matchedText ?? "").replace(/\s+/g, "")).trim();
-  /** T4-1 형만 타워(호기-파일). 앞에 T 없이 4-1만 있으면 동-번호이므로 여기서 하이픈으로 보지 않음 */
-  if (/^T\d+-\d+$/i.test(s)) {
+  /** T/TC4-1 형은 타워(호기-파일). 앞에 T/TC 없이 4-1만 있으면 동-번호 */
+  if (/^(?:T|TC)\d+-\d+$/i.test(s)) {
     return { hasHyphen: false, dongKey: null, seqNum: NaN };
   }
   const idx = s.indexOf("-");
@@ -3347,17 +3383,23 @@ function parseHyphenPileText(matchedText) {
   return { hasHyphen: true, dongKey, seqNum };
 }
 
-/** 예: T4-1 — 앞에 T가 있을 때만 타워(호기-번호). 4-1만 있으면 타워가 아님(동-번호) */
+/** 예: T4-1, TC4-1 — 앞에 T/TC가 있을 때만 타워(호기-번호). 4-1만 있으면 타워가 아님(동-번호) */
 function parseTowerCranePileText(matchedText) {
   const noSpace = String(matchedText ?? "").replace(/\s+/g, "");
   const s = normalizePileTextHyphens(noSpace);
-  const m = s.match(/^T(\d+)-(\d+)$/i);
-  if (!m) return { isTower: false, craneNum: null, seqNum: NaN };
-  const craneNum = parseInt(m[1], 10);
-  const seqNum = parseInt(m[2], 10);
+  const m = s.match(/^(T|TC)(\d+)-(\d+)$/i);
+  if (!m) return { isTower: false, prefix: null, craneNum: null, seqNum: NaN };
+  const prefix = m[1].toUpperCase();
+  const craneNum = parseInt(m[2], 10);
+  const seqNum = parseInt(m[3], 10);
   const ok =
     Number.isInteger(craneNum) && craneNum >= 1 && Number.isInteger(seqNum) && seqNum >= 1;
-  return { isTower: ok, craneNum: ok ? craneNum : null, seqNum: ok ? seqNum : NaN };
+  return {
+    isTower: ok,
+    prefix: ok ? prefix : null,
+    craneNum: ok ? craneNum : null,
+    seqNum: ok ? seqNum : NaN,
+  };
 }
 
 function extractLeadingIntFromAreaName(buildingName) {
@@ -3443,7 +3485,7 @@ function getSameBuildingNumberGroupKey(circle) {
 function getSameBuildingDuplicateDisplayLabel(circle) {
   const mt = circle.matched_text?.text;
   const t0 = parseTowerCranePileText(mt);
-  if (t0.isTower) return `T${t0.craneNum}-${t0.seqNum}`;
+  if (t0.isTower) return `${t0.prefix || "TC"}${t0.craneNum}-${t0.seqNum}`;
   if (state.filter?.pileNumberHyphenFormat) {
     const p = parseHyphenPileText(mt);
     if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
@@ -3805,10 +3847,10 @@ function updateBuildingSeqSummary() {
     buildingSeqSummaryHint.style.display = tower || hyphen ? "block" : "none";
     if (tower && hyphen) {
       buildingSeqSummaryHint.textContent =
-        "T4-1(T 접두)만 타워 호기 집계, 4-1처럼 T 없는 하이픈은 동-번호(앞=동키)로 집계합니다.";
+        "T4-1/TC4-1(T/TC 접두)만 타워 호기 집계, 4-1처럼 T/TC 없는 하이픈은 동-번호(앞=동키)로 집계합니다.";
     } else if (tower) {
       buildingSeqSummaryHint.textContent =
-        "T4-1만 타워(호기−파일). 4-1 형식은 동-번호(앞 숫자=동키, −뒤=파일 번호)로 집계합니다.";
+        "T4-1/TC4-1만 타워(호기−파일). 4-1 형식은 동-번호(앞 숫자=동키, −뒤=파일 번호)로 집계합니다.";
     } else if (hyphen) {
       buildingSeqSummaryHint.textContent =
         "동-번호 형식: 하이픈 앞은 동키, 뒤는 파일 번호만 사용합니다.";
@@ -3983,6 +4025,7 @@ const ERROR_TYPE_LABELS = {
   MATCH_DISTANCE_EXCEEDED: "거리초과",
   SAME_BUILDING_NUMBER_DUPLICATE: "동·미지정 내 번호중복",
   TEXT_DONG_BUILDING_MISMATCH: "동키↔윤곽 동명 불일치",
+  NUMERIC_HYPHEN_FORMAT_INVALID: "숫자 포맷 에러",
 };
 
 const COORD_PRECISION = 6;
@@ -3996,7 +4039,7 @@ function foundationPfOnlyFromTextValue(value) {
   const compact = normalized.replace(/\s+/g, "");
   if (!compact) return false;
   if (/^[0-9.\-]+$/.test(compact)) return false;
-  if (/^([Tt])(\d+)-(\d+)$/.test(compact)) return false;
+  if (/^(?:T|TC)(\d+)-(\d+)$/i.test(compact)) return false;
   const c0 = compact[0]?.toUpperCase();
   if (c0 !== "P" && c0 !== "F") return false;
   if (compact.length === 1) return true;
@@ -4008,6 +4051,13 @@ function isFoundationPfOnlyTextRecord(text) {
   if (!text || typeof text !== "object") return false;
   if (text.foundation_pf_only === true) return true;
   return foundationPfOnlyFromTextValue(text.text);
+}
+
+function isAmbiguousNumericHyphenText(value) {
+  const compact = normalizePileTextHyphens(String(value ?? "").trim()).replace(/\s+/g, "");
+  if (!compact) return false;
+  if (/^(?:T|TC)\d+-\d+$/i.test(compact)) return false;
+  return /^\d{3,}-\d+$/.test(compact);
 }
 
 function countMatchableTexts(texts) {
@@ -4040,8 +4090,19 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     }
     const circleIds = textToCircleIds.get(String(text.id)) || [];
     text.matched_circle_ids = circleIds;
+    let hasError = false;
+    if (isAmbiguousNumericHyphenText(text.text)) {
+      hasError = true;
+      errors.push({
+        error_type: "NUMERIC_HYPHEN_FORMAT_INVALID",
+        text_id: text.id,
+        text_value: text.text,
+        circle_ids: circleIds,
+        message: `TEXT ${text.text} has ambiguous numeric hyphen format (expected pure number).`,
+      });
+    }
     if (circleIds.length > 1) {
-      text.has_error = true;
+      hasError = true;
       errors.push({
         error_type: "TEXT_MULTI_MATCH",
         text_id: text.id,
@@ -4050,7 +4111,7 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
         message: `TEXT ${text.text} matches ${circleIds.length} circles.`,
       });
     } else if (circleIds.length === 0) {
-      text.has_error = true;
+      hasError = true;
       errors.push({
         error_type: "TEXT_NO_MATCH",
         text_id: text.id,
@@ -4058,9 +4119,8 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
         circle_ids: [],
         message: `TEXT ${text.text} has no matching circle.`,
       });
-    } else {
-      text.has_error = false;
     }
+    text.has_error = hasError;
   });
   circles.forEach((circle) => {
     const codes = [];
@@ -4072,6 +4132,9 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     const tidKey = ctid != null && ctid !== "" ? String(ctid) : "";
     const linkedCircleIds = tidKey ? textToCircleIds.get(tidKey) || [] : [];
     if (linkedCircleIds.length > 1) codes.push("TEXT_MULTI_MATCH");
+    if (isAmbiguousNumericHyphenText(circle.matched_text?.text)) {
+      codes.push("NUMERIC_HYPHEN_FORMAT_INVALID");
+    }
     if (circle.match_distance_exceeded && circle.manual_match !== true) {
       codes.push("MATCH_DISTANCE_EXCEEDED");
       errors.push({
@@ -8079,7 +8142,15 @@ let versionCompareExcelSelectionState = {
   activeField: "building",
   selectedSheets: [],
   buildingSourceMode: "sheet",
+  /** 시트명 → 헤더 행(1-based). 시트마다 레이아웃이 다를 때 비교 시 각각 적용 */
+  headerRowBySheet: {},
+  /** 번호/X/Y 열 헤더 셀에 보이는 글자 — 시트마다 헤더 행을 이 글자로 자동 탐지 */
+  headerMarkers: { number: "", x: "", y: "" },
 };
+let versionCompareExcelIssueFilter = "all";
+let versionCompareExcelLastResult = null;
+let versionCompareExcelLastRenderOptions = {};
+const VERSION_COMPARE_EXCEL_SEVERE_DIFF_THRESHOLD = 0.75;
 setVersionCompareExcelBuildingSourceMode(versionCompareExcelSelectionState.buildingSourceMode, { updateSuggestions: false });
 
 function normalizeLoadWorkProjectName(item) {
@@ -9641,10 +9712,10 @@ async function populateVersionCompareSelects() {
     versionCompareProject.appendChild(option);
   });
   const activeProject = getActiveProjectName();
-  if ([...versionCompareProject.options].some((option) => option.value === previousValue)) {
-    versionCompareProject.value = previousValue;
-  } else if ([...versionCompareProject.options].some((option) => option.value === activeProject)) {
+  if ([...versionCompareProject.options].some((option) => option.value === activeProject)) {
     versionCompareProject.value = activeProject;
+  } else if ([...versionCompareProject.options].some((option) => option.value === previousValue)) {
+    versionCompareProject.value = previousValue;
   } else {
     versionCompareProject.value = "";
   }
@@ -9715,12 +9786,143 @@ function openVersionCompareExcelModal() {
   versionCompareExcelModal.setAttribute("aria-hidden", "false");
   updateVersionCompareExcelApplyState();
   versionCompareExcelModal.focus({ preventScroll: true });
+  void restoreVersionCompareExcelResultFromCache();
 }
 
 function closeVersionCompareExcelModal() {
   if (!versionCompareExcelModal) return;
   versionCompareExcelModal.classList.remove("open");
   versionCompareExcelModal.setAttribute("aria-hidden", "true");
+}
+
+function getVersionCompareExcelCacheProjectName() {
+  const selected = normalizeProjectName(versionCompareProject?.value || "");
+  return selected || normalizeProjectName(getActiveProjectName());
+}
+
+function getVersionCompareExcelFileSignature(file) {
+  if (!file) return "";
+  const name = String(file.name || "").trim();
+  const size = Number(file.size || 0);
+  if (!name) return "";
+  return `${name}::${size}`;
+}
+
+function buildVersionCompareExcelCacheLookupKey(file) {
+  const project = getVersionCompareExcelCacheProjectName();
+  const signature = getVersionCompareExcelFileSignature(file);
+  if (!project || !signature) return "";
+  return `${project}::${signature}`;
+}
+
+function readVersionCompareExcelCacheMap() {
+  try {
+    const raw = localStorage.getItem(VERSION_COMPARE_EXCEL_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function writeVersionCompareExcelCacheMap(cacheMap) {
+  try {
+    localStorage.setItem(VERSION_COMPARE_EXCEL_CACHE_KEY, JSON.stringify(cacheMap || {}));
+  } catch (_) {}
+}
+
+function saveVersionCompareExcelResultCache(result, renderOptions = {}) {
+  const file = versionCompareExcelFile?.files?.[0];
+  const lookupKey = buildVersionCompareExcelCacheLookupKey(file);
+  if (!lookupKey) return;
+  const cacheMap = readVersionCompareExcelCacheMap();
+  cacheMap[lookupKey] = {
+    savedAt: new Date().toISOString(),
+    result,
+    options: renderOptions,
+  };
+  writeVersionCompareExcelCacheMap(cacheMap);
+}
+
+async function fetchVersionCompareExcelResultFromServer(file) {
+  const projectName = getVersionCompareExcelCacheProjectName();
+  const fileSignature = getVersionCompareExcelFileSignature(file);
+  if (!projectName || !fileSignature) return null;
+  const params = new URLSearchParams();
+  params.set("project_context", projectName);
+  params.set("file_signature", fileSignature);
+  const response = await fetch(`${API_BASE_URL}/api/excel/compare-cache?${params.toString()}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`서버 저장 비교 결과 조회 실패 (${response.status})`);
+  }
+  const data = await response.json();
+  if (!data || typeof data !== "object" || !data.result || typeof data.result !== "object") {
+    return null;
+  }
+  return data;
+}
+
+async function fetchLatestVersionCompareExcelResultFromServer() {
+  const projectName = getVersionCompareExcelCacheProjectName();
+  if (!projectName) return null;
+  const params = new URLSearchParams();
+  params.set("project_context", projectName);
+  const response = await fetch(`${API_BASE_URL}/api/excel/compare-cache/latest?${params.toString()}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`서버 최신 비교 결과 조회 실패 (${response.status})`);
+  }
+  const data = await response.json();
+  if (!data || typeof data !== "object" || !data.result || typeof data.result !== "object") {
+    return null;
+  }
+  return data;
+}
+
+async function restoreVersionCompareExcelResultFromCache() {
+  const file = versionCompareExcelFile?.files?.[0];
+  const lookupKey = buildVersionCompareExcelCacheLookupKey(file);
+  if (!lookupKey) {
+    try {
+      const latest = await fetchLatestVersionCompareExcelResultFromServer();
+      if (!latest?.result) return false;
+      const renderOptions = {
+        singleVersion: true,
+        targetLabel: getSelectedVersionCompareLabel("new"),
+      };
+      renderVersionCompareExcelResult(latest.result, renderOptions);
+      setVersionCompareExcelStatus("서버에 저장된 최근 엑셀 비교 결과를 불러왔습니다.");
+      return true;
+    } catch (error) {
+      console.warn(error);
+      return false;
+    }
+  }
+  const cacheMap = readVersionCompareExcelCacheMap();
+  const hit = cacheMap[lookupKey];
+  if (hit && hit.result) {
+    renderVersionCompareExcelResult(hit.result, hit.options || {});
+    setVersionCompareExcelStatus("이전에 저장된 엑셀 비교 결과를 불러왔습니다.");
+    return true;
+  }
+  try {
+    const serverHit = await fetchVersionCompareExcelResultFromServer(file);
+    if (!serverHit?.result) return false;
+    const renderOptions = {
+      singleVersion: true,
+      targetLabel: getSelectedVersionCompareLabel("new"),
+    };
+    renderVersionCompareExcelResult(serverHit.result, renderOptions);
+    saveVersionCompareExcelResultCache(serverHit.result, renderOptions);
+    setVersionCompareExcelStatus("서버에 저장된 엑셀 비교 결과를 불러왔습니다.");
+    return true;
+  } catch (error) {
+    console.warn(error);
+    return false;
+  }
 }
 
 function makeExcelColumnLetter(index) {
@@ -9756,10 +9958,21 @@ function getVersionCompareExcelFieldInput(fieldKey) {
 
 function ensureVersionCompareExcelSelectionState() {
   if (!versionCompareExcelSelectionState || typeof versionCompareExcelSelectionState !== "object") {
-    versionCompareExcelSelectionState = { activeField: "building", selectedSheets: [], buildingSourceMode: "sheet" };
+    versionCompareExcelSelectionState = {
+      activeField: "building",
+      selectedSheets: [],
+      buildingSourceMode: "sheet",
+      headerRowBySheet: {},
+    };
   }
   if (!Array.isArray(versionCompareExcelSelectionState.selectedSheets)) {
     versionCompareExcelSelectionState.selectedSheets = [];
+  }
+  if (!versionCompareExcelSelectionState.headerRowBySheet || typeof versionCompareExcelSelectionState.headerRowBySheet !== "object") {
+    versionCompareExcelSelectionState.headerRowBySheet = {};
+  }
+  if (!versionCompareExcelSelectionState.headerMarkers || typeof versionCompareExcelSelectionState.headerMarkers !== "object") {
+    versionCompareExcelSelectionState.headerMarkers = { number: "", x: "", y: "" };
   }
   if (!["sheet", "column"].includes(versionCompareExcelSelectionState.buildingSourceMode)) {
     versionCompareExcelSelectionState.buildingSourceMode = versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column";
@@ -9828,6 +10041,15 @@ function getVersionCompareExcelColumnLetter(sheetInfo, columnIndex) {
 }
 
 function getVersionCompareExcelHeaderRowNumber(sheetInfo) {
+  const name = sheetInfo?.name;
+  ensureVersionCompareExcelSelectionState();
+  const stored = name && Object.prototype.hasOwnProperty.call(versionCompareExcelSelectionState.headerRowBySheet, name)
+    ? versionCompareExcelSelectionState.headerRowBySheet[name]
+    : null;
+  if (stored != null) {
+    const n = Number(stored);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
   const fallback = Number(sheetInfo?.suggestedHeaderRow) || 1;
   const rowNumber = Number(versionCompareExcelHeaderRow?.value);
   return Number.isFinite(rowNumber) && rowNumber > 0 ? Math.trunc(rowNumber) : fallback;
@@ -9837,6 +10059,23 @@ function getVersionCompareExcelHeaderRowValues(sheetInfo) {
   const headerRowNumber = getVersionCompareExcelHeaderRowNumber(sheetInfo);
   const headerRow = (sheetInfo?.preview || []).find((row) => row.rowNumber === headerRowNumber);
   return Array.isArray(headerRow?.values) ? headerRow.values : [];
+}
+
+/** 현재 시트·헤더 행·열 지정으로 번호/X/Y 열 헤더 셀 글자를 저장 — 서버에서 시트마다 동일 글자 행을 찾음 */
+function syncVersionCompareExcelHeaderMarkersFromSelection() {
+  const sheetInfo = getVersionCompareSelectedSheetInfo();
+  ensureVersionCompareExcelSelectionState();
+  if (!sheetInfo) return;
+  const headers = getVersionCompareExcelHeaderRowValues(sheetInfo);
+  ["number", "x", "y"].forEach((key) => {
+    const input = getVersionCompareExcelFieldInput(key);
+    const spec = String(input?.value || "").trim();
+    if (!spec) return;
+    const idx = findVersionCompareExcelColumnIndex(sheetInfo, spec);
+    if (idx >= 0 && headers[idx] != null && String(headers[idx]).trim() !== "") {
+      versionCompareExcelSelectionState.headerMarkers[key] = String(headers[idx]).trim();
+    }
+  });
 }
 
 function resetVersionCompareExcelFieldValues() {
@@ -9850,11 +10089,13 @@ function resetVersionCompareExcelFieldValues() {
 
 function resetVersionCompareExcelInspectState() {
   versionCompareExcelInspection = null;
-  versionCompareExcelSelectionState = {
-    activeField: "building",
-    selectedSheets: [],
-    buildingSourceMode: versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column",
-  };
+    versionCompareExcelSelectionState = {
+      activeField: "building",
+      selectedSheets: [],
+      buildingSourceMode: versionCompareExcelUseSheetBuilding?.checked ? "sheet" : "column",
+      headerRowBySheet: {},
+      headerMarkers: { number: "", x: "", y: "" },
+    };
   if (versionCompareExcelSheet) {
     versionCompareExcelSheet.innerHTML = "";
     versionCompareExcelSheet.value = "";
@@ -9874,6 +10115,9 @@ function resetVersionCompareExcelInspectState() {
 }
 
 function resetVersionCompareExcelCompareResult() {
+  versionCompareExcelIssueFilter = "all";
+  versionCompareExcelLastResult = null;
+  versionCompareExcelLastRenderOptions = {};
   if (versionCompareExcelSummary) {
     versionCompareExcelSummary.innerHTML = "";
   }
@@ -10017,6 +10261,18 @@ function renderVersionCompareExcelSelectionSummary() {
       </span>
     </div>
   `;
+  ensureVersionCompareExcelSelectionState();
+  const hm = versionCompareExcelSelectionState.headerMarkers || {};
+  const hmOk = Boolean(hm.number && hm.x && hm.y);
+  const headerMarkerHtml = hmOk
+    ? `
+    <div class="version-compare-excel-selection-item">
+      <strong>헤더 찾기</strong>
+      <span class="version-compare-excel-selection-value" title="각 시트에서 아래 글자가 동시에 나타나는 행을 헤더로 사용합니다.">
+        헤더명 기준 자동 · 번호 ${escapeHtml(hm.number)} · X ${escapeHtml(hm.x)} · Y ${escapeHtml(hm.y)}
+      </span>
+    </div>`
+    : "";
   const fieldHtml = VERSION_COMPARE_EXCEL_FIELDS.map((field) => {
     const detail = getVersionCompareExcelSelectionDetails(sheetInfo, field.key);
     const badge = detail.letter
@@ -10029,7 +10285,7 @@ function renderVersionCompareExcelSelectionSummary() {
       </div>
     `;
   }).join("");
-  versionCompareExcelSelectionSummary.innerHTML = headerRowHtml + metaHtml + fieldHtml;
+  versionCompareExcelSelectionSummary.innerHTML = headerRowHtml + metaHtml + headerMarkerHtml + fieldHtml;
 }
 
 function renderVersionCompareExcelSheetTabs() {
@@ -10103,6 +10359,10 @@ function setVersionCompareExcelHeaderRow(rowNumber, options = {}) {
   const { applySuggestions = false } = options;
   const sheetInfo = getVersionCompareSelectedSheetInfo();
   const nextRow = Math.max(1, Number(rowNumber) || Number(sheetInfo?.suggestedHeaderRow) || 1);
+  if (sheetInfo?.name) {
+    ensureVersionCompareExcelSelectionState();
+    versionCompareExcelSelectionState.headerRowBySheet[sheetInfo.name] = nextRow;
+  }
   if (versionCompareExcelHeaderRow) {
     versionCompareExcelHeaderRow.value = String(nextRow);
   }
@@ -10114,13 +10374,20 @@ function setVersionCompareExcelHeaderRow(rowNumber, options = {}) {
   renderVersionCompareExcelPreview();
 }
 
-function handleVersionCompareExcelSheetChange(sheetName) {
+function handleVersionCompareExcelSheetChange(sheetName, options = {}) {
+  const { applySuggestions = false } = options;
   if (!versionCompareExcelSheet) return;
   const nextSheetName = sheetName || versionCompareExcelInspection?.sheetNames?.[0] || "";
   versionCompareExcelSheet.value = nextSheetName;
   renderVersionCompareExcelSheetTabs();
   const sheetInfo = getVersionCompareSelectedSheetInfo();
-  setVersionCompareExcelHeaderRow(sheetInfo?.suggestedHeaderRow || 1, { applySuggestions: true });
+  ensureVersionCompareExcelSelectionState();
+  const saved = sheetInfo?.name != null ? versionCompareExcelSelectionState.headerRowBySheet[sheetInfo.name] : null;
+  const rowToUse =
+    saved != null && Number(saved) > 0
+      ? Number(saved)
+      : sheetInfo?.suggestedHeaderRow || 1;
+  setVersionCompareExcelHeaderRow(rowToUse, { applySuggestions });
   resetVersionCompareExcelCompareResult();
 }
 
@@ -10204,7 +10471,7 @@ function renderVersionCompareExcelPreview() {
         </div>
       </div>
     </div>
-    <p class="version-compare-excel-preview-tip">1. 왼쪽 행 번호를 눌러 헤더 행을 정합니다. 2. 파란 강조 대상 항목을 고른 뒤 헤더 셀을 클릭하면 컬럼이 지정됩니다.</p>
+    <p class="version-compare-excel-preview-tip">1. 왼쪽 행 번호를 눌러 헤더 행을 정합니다. 2. 파란 강조 대상 항목을 고른 뒤 헤더 셀을 클릭하면 컬럼이 지정됩니다. 번호·X·Y 헤더 글자가 모두 잡히면 시트마다 그 글자가 있는 행을 자동으로 찾습니다.</p>
     <div class="version-compare-excel-table-wrap">
       <table class="version-compare-excel-table">
         <thead>
@@ -10228,6 +10495,7 @@ function renderVersionCompareExcelPreview() {
       );
     });
   });
+  syncVersionCompareExcelHeaderMarkersFromSelection();
 }
 
 async function inspectVersionCompareExcelFile() {
@@ -10252,10 +10520,18 @@ async function inspectVersionCompareExcelFile() {
       throw new Error(await response.text());
     }
     versionCompareExcelInspection = await response.json();
+    const headerRowBySheetInit = {};
+    (versionCompareExcelInspection.sheets || []).forEach((sh) => {
+      if (sh?.name) {
+        headerRowBySheetInit[sh.name] = Math.max(1, Number(sh.suggestedHeaderRow) || 1);
+      }
+    });
     versionCompareExcelSelectionState = {
       activeField: getVersionCompareExcelBuildingSourceMode() === "sheet" ? "number" : "building",
       selectedSheets: [...(versionCompareExcelInspection.sheetNames || [])],
       buildingSourceMode: getVersionCompareExcelBuildingSourceMode(),
+      headerRowBySheet: headerRowBySheetInit,
+      headerMarkers: { number: "", x: "", y: "" },
     };
     if (versionCompareExcelSheet) {
       versionCompareExcelSheet.innerHTML = "";
@@ -10272,7 +10548,7 @@ async function inspectVersionCompareExcelFile() {
     }
     renderVersionCompareExcelSheetTabs();
     setVersionCompareExcelBuildingSourceMode(versionCompareExcelSelectionState.buildingSourceMode, { updateSuggestions: false });
-    handleVersionCompareExcelSheetChange(firstSheetName);
+    handleVersionCompareExcelSheetChange(firstSheetName, { applySuggestions: true });
     setUploadStatus("엑셀 샘플을 불러왔습니다.");
     setVersionCompareExcelStatus("엑셀 샘플을 불러왔습니다.");
   } catch (error) {
@@ -10287,6 +10563,8 @@ async function inspectVersionCompareExcelFile() {
 
 function renderVersionCompareExcelResult(result, options = {}) {
   if (!versionCompareExcelSummary || !versionCompareExcelIssues) return;
+  versionCompareExcelLastResult = result;
+  versionCompareExcelLastRenderOptions = { ...options };
   const summary = result.summary || {};
   const sheetSummaries = Array.isArray(result.sheetSummaries) ? result.sheetSummaries : [];
   const labels = result.versionLabels || { old: "이전 버전", new: "현재 버전" };
@@ -10360,35 +10638,97 @@ function renderVersionCompareExcelResult(result, options = {}) {
     versionCompareExcelIssues.innerHTML = '<div class="empty-row">불일치 항목이 없습니다.</div>';
     return;
   }
+  const pickIssueDistance = (issue) => {
+    if (issue?.newCircle?.distance != null && Number.isFinite(Number(issue.newCircle.distance))) {
+      return Number(issue.newCircle.distance);
+    }
+    if (issue?.oldCircle?.distance != null && Number.isFinite(Number(issue.oldCircle.distance))) {
+      return Number(issue.oldCircle.distance);
+    }
+    return null;
+  };
+  const issueFilterType = (issue) => {
+    const status = String(issue?.status || "");
+    if (status === "coord-mismatch") {
+      const dist = pickIssueDistance(issue);
+      if (dist != null && dist >= VERSION_COMPARE_EXCEL_SEVERE_DIFF_THRESHOLD) return "big-diff";
+      return "small-diff";
+    }
+    if (status.startsWith("missing-")) return "missing";
+    return "other";
+  };
+  const filterCounts = { all: issues.length, "big-diff": 0, "small-diff": 0, missing: 0 };
+  issues.forEach((issue) => {
+    const t = issueFilterType(issue);
+    if (Object.prototype.hasOwnProperty.call(filterCounts, t)) filterCounts[t] += 1;
+  });
+  const allowedFilters = new Set(["all", "big-diff", "small-diff", "missing"]);
+  if (!allowedFilters.has(versionCompareExcelIssueFilter)) versionCompareExcelIssueFilter = "all";
+  const filteredIssues = issues.filter((issue) => {
+    if (versionCompareExcelIssueFilter === "all") return true;
+    return issueFilterType(issue) === versionCompareExcelIssueFilter;
+  });
   const issueColumns = singleVersion
     ? `<th>${escapeHtml(targetLabel)}</th>`
     : `<th>${escapeHtml(labels.old)}</th><th>${escapeHtml(labels.new)}</th>`;
+  const filterBadges = [
+    { key: "all", label: "전체", count: filterCounts.all },
+    { key: "big-diff", label: "차이 큰거", count: filterCounts["big-diff"] },
+    { key: "small-diff", label: "차이 작은거", count: filterCounts["small-diff"] },
+    { key: "missing", label: "누락", count: filterCounts.missing },
+  ];
   versionCompareExcelIssues.innerHTML = `
+    <div class="version-compare-excel-issue-filters">
+      ${filterBadges.map((badge) => `
+        <button
+          type="button"
+          class="version-compare-excel-issue-filter${versionCompareExcelIssueFilter === badge.key ? " is-active" : ""}"
+          data-vc-excel-filter="${badge.key}"
+        >
+          ${escapeHtml(badge.label)} <span>${badge.count}</span>
+        </button>
+      `).join("")}
+    </div>
     <div class="version-compare-excel-table-wrap">
       <table class="version-compare-excel-table">
         <thead>
           <tr>
-            <th>행</th>
+            <th>시트명 · 비교 번호</th>
             <th>상태</th>
             <th>동</th>
-            <th>번호</th>
             <th>엑셀 좌표</th>
             ${issueColumns}
           </tr>
         </thead>
         <tbody>
-          ${issues.map((issue) => `
-            <tr>
-              <td>${escapeHtml(issue.sheetName || "-")} · ${issue.excelRow ?? "-"}</td>
+          ${filteredIssues.map((issue) => {
+            const status = String(issue?.status || "");
+            const dist = pickIssueDistance(issue);
+            const rowClass =
+              status === "coord-mismatch"
+                ? dist != null && dist >= VERSION_COMPARE_EXCEL_SEVERE_DIFF_THRESHOLD
+                  ? "is-severe-mismatch"
+                  : "is-mismatch"
+                : status.startsWith("missing-")
+                  ? "is-missing"
+                  : "";
+            return `
+            <tr class="${rowClass}">
+              <td>${escapeHtml(issue.sheetName || "-")} · ${escapeHtml(issue.number || "-")}</td>
               <td>${escapeHtml(statusLabel[issue.status] || issue.status || "-")}</td>
               <td>${escapeHtml(issue.buildingName || "-")}</td>
-              <td>${escapeHtml(issue.number || "-")}</td>
               <td>${formatNumber(issue.excelX)}, ${formatNumber(issue.excelY)}</td>
               ${singleVersion
-                ? `<td>${(issue.newCircle || issue.oldCircle) ? `${formatNumber((issue.newCircle || issue.oldCircle).x)}, ${formatNumber((issue.newCircle || issue.oldCircle).y)} (${formatNumber((issue.newCircle || issue.oldCircle).distance, 3)})` : "-"}</td>`
-                : `<td>${issue.oldCircle ? `${formatNumber(issue.oldCircle.x)}, ${formatNumber(issue.oldCircle.y)} (${formatNumber(issue.oldCircle.distance, 3)})` : "-"}</td><td>${issue.newCircle ? `${formatNumber(issue.newCircle.x)}, ${formatNumber(issue.newCircle.y)} (${formatNumber(issue.newCircle.distance, 3)})` : "-"}</td>`}
+                ? `<td>${(issue.newCircle || issue.oldCircle) ? `${formatNumber((issue.newCircle || issue.oldCircle).x)}, ${formatNumber((issue.newCircle || issue.oldCircle).y)} (${formatNumber((issue.newCircle || issue.oldCircle).distance, 3)}) · 번호 ${(issue.newCircle || issue.oldCircle).number ?? "-"}` : "-"}</td>`
+                : `<td>${issue.oldCircle ? `${formatNumber(issue.oldCircle.x)}, ${formatNumber(issue.oldCircle.y)} (${formatNumber(issue.oldCircle.distance, 3)}) · 번호 ${issue.oldCircle.number ?? "-"}` : "-"}</td><td>${issue.newCircle ? `${formatNumber(issue.newCircle.x)}, ${formatNumber(issue.newCircle.y)} (${formatNumber(issue.newCircle.distance, 3)}) · 번호 ${issue.newCircle.number ?? "-"}` : "-"}</td>`}
             </tr>
-          `).join("")}
+          `;
+          }).join("")}
+          ${!filteredIssues.length ? `
+            <tr>
+              <td colspan="${singleVersion ? 5 : 6}" class="version-compare-excel-issues-empty">선택한 필터에 해당하는 항목이 없습니다.</td>
+            </tr>
+          ` : ""}
         </tbody>
       </table>
     </div>
@@ -10445,6 +10785,24 @@ async function runVersionCompareExcelCompare() {
     formData.append("sheet_name", sheetInfo.name);
     formData.append("sheet_names_json", JSON.stringify(selectedSheetNames));
     formData.append("header_row", String(getVersionCompareExcelHeaderRowNumber(sheetInfo)));
+    const inspectSheets = versionCompareExcelInspection?.sheets || [];
+    const headerRowsPayload = {};
+    selectedSheetNames.forEach((sheetNm) => {
+      const sInf = inspectSheets.find((s) => s.name === sheetNm);
+      headerRowsPayload[sheetNm] = getVersionCompareExcelHeaderRowNumber(
+        sInf || { name: sheetNm, suggestedHeaderRow: 1 },
+      );
+    });
+    formData.append("header_rows_json", JSON.stringify(headerRowsPayload));
+    ensureVersionCompareExcelSelectionState();
+    syncVersionCompareExcelHeaderMarkersFromSelection();
+    const hm = versionCompareExcelSelectionState.headerMarkers || {};
+    if (hm.number && hm.x && hm.y) {
+      formData.append(
+        "header_markers_json",
+        JSON.stringify({ number: hm.number, x: hm.x, y: hm.y }),
+      );
+    }
     formData.append("number_column", numberColumn);
     formData.append("x_column", xColumn);
     formData.append("y_column", yColumn);
@@ -10460,6 +10818,8 @@ async function runVersionCompareExcelCompare() {
     );
     formData.append("version_a_label", labels.current || labels.old);
     formData.append("version_b_label", labels.current || labels.new);
+    formData.append("project_context", getVersionCompareExcelCacheProjectName());
+    formData.append("file_signature", getVersionCompareExcelFileSignature(file));
     formData.append("building_source_mode", buildingSourceMode);
     formData.append("use_sheet_name_as_building", buildingSourceMode === "sheet" ? "true" : "false");
     if (buildingColumn && buildingSourceMode !== "sheet") {
@@ -10480,6 +10840,10 @@ async function runVersionCompareExcelCompare() {
       },
     });
     renderVersionCompareExcelResult(result, {
+      singleVersion,
+      targetLabel: labels.current || labels.new,
+    });
+    saveVersionCompareExcelResultCache(result, {
       singleVersion,
       targetLabel: labels.current || labels.new,
     });

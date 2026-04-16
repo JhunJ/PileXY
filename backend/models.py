@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -208,6 +209,7 @@ class MatchError(BaseModel):
         "CIRCLE_NO_MATCH",
         "MATCH_DISTANCE_EXCEEDED",
         "SAME_BUILDING_NUMBER_DUPLICATE",
+        "NUMERIC_HYPHEN_FORMAT_INVALID",
     ]
     text_id: Optional[str] = None
     text_value: Optional[str] = None
@@ -392,6 +394,14 @@ class MeissaLoginRequest(BaseModel):
     @model_validator(mode="after")
     def _meissa_login_pair(self) -> "MeissaLoginRequest":
         otp = (self.verification_code or "").strip()
+        if otp:
+            otp = re.sub(r"\s+", "", otp)
+            if re.fullmatch(r"\d{6,12}", otp):
+                self.verification_code = otp
+            else:
+                # OTP 입력란이 숨겨진 상태에서 브라우저 자동완성 문자열이 들어온 경우는 2FA 시도로 보지 않는다.
+                otp = ""
+                self.verification_code = None
         em = (self.email or "").strip()
         pw = self.password if self.password is not None else ""
         if otp:

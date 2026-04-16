@@ -52,6 +52,18 @@
     snapshotId: document.getElementById("meissa-snapshot-id"),
     meissaCloud3dFrame: document.getElementById("meissa-cloud-3d-frame"),
     meissaCloud2dImageLocal: document.getElementById("meissa-cloud-2d-image-local"),
+    meissaDomOverlayStage:
+      document.getElementById("meissa-dom-overlay-stage") ||
+      document.getElementById("meissa-2d-url-overlay-wrap"),
+    meissaDomOverlayImage:
+      document.getElementById("meissa-dom-overlay-image") ||
+      document.getElementById("meissa-2d-url-overlay-img"),
+    meissaDomOverlayPoints:
+      document.getElementById("meissa-dom-overlay-points") ||
+      document.getElementById("meissa-2d-url-overlay-points"),
+    meissaDomOverlayStatus:
+      document.getElementById("meissa-dom-overlay-status") ||
+      document.getElementById("meissa-2d-url-overlay-status"),
     meissaCloud3dPlaceholder: document.getElementById("meissa-cloud-3d-placeholder"),
     meissaOpen3dTab: document.getElementById("meissa-open-3d-tab"),
     meissaCloudSessionPrime: document.getElementById("meissa-cloud-session-prime"),
@@ -186,6 +198,9 @@
   let meissa2dOrthoHiPendingSince = 0;
   let meissa2dOrthoHiPendingBadgeTicker = 0;
   let meissa2dRecenterTimer = null;
+  let meissa2dViewSettleTimer = 0;
+  let meissa2dOrthoViewportHiLocalRaf = 0;
+  let meissa2dOrthoViewportHiLocalLastLogTs = 0;
   let meissa2dTileState = {
     snapshotId: "",
     projectId: "",
@@ -205,7 +220,79 @@
   let meissa2dPointTileCache = new Map();
   let meissa2dPointTileCacheSid = "";
   let meissa2dPointsRaf = 0;
-  /** @type {Array<{x:number,y:number,r:number,circle:Record<string, unknown>,tooltip:string}>} */
+  let meissaDomOverlayRaf = 0;
+  let meissaDomOverlayPointers = new Map();
+  let meissaDomOverlayScale = 1;
+  let meissaDomOverlayTx = 0;
+  let meissaDomOverlayTy = 0;
+  let meissaDomOverlayPinchLastDist = 0;
+  /** @type {Map<string, string>} project:snapshot -> high-res target URL */
+  let meissaDomOverlayHiUrlBySnapshot = new Map();
+  /** @type {Map<string, string>} project:snapshot -> fast first URL */
+  let meissaDomOverlayFastUrlBySnapshot = new Map();
+  /** @type {Map<string, boolean>} project:snapshot -> high-res decoded/ready */
+  let meissaDomOverlayHiReadyBySnapshot = new Map();
+  /** @type {Map<string, number>} project:snapshot -> preload in flight token */
+  let meissaDomOverlayHiPreloadInFlight = new Map();
+  let meissaDomOverlayHiResolveInFlight = false;
+  let meissaDomOverlayHiLastResolveTs = 0;
+  const MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS = 7000;
+  /** 실패한 URL은 잠시 재시도를 미뤄 메인 이미지로 안정 폴백한다. */
+  const MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS = 120000;
+  /** 대체뷰 고화질 프리로드 타임아웃(ms). */
+  const MEISSA_DOM_OVERLAY_HI_PRELOAD_TIMEOUT_MS = 45000;
+  /**
+   * true(기본): 대체뷰 <img>는 메인 정사(#meissa-cloud-2d-image-local)와 동일한 src만 사용.
+   * 별도 버튼 URL 선해결·히든 Image 프리로드·강제 고화질 src 교체를 하지 않아 체감 지연을 줄인다.
+   * false: 예전처럼 resolveMeissaOrthoButtonUrls 로 고선명 URL을 대체뷰에 직접 물림(느릴 수 있음).
+   * 런타임 끄기: window.__MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE__ = false
+   */
+  const MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE = (() => {
+    try {
+      if (typeof window !== "undefined" && window.__MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE__ === false) {
+        return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  })();
+  /**
+   * 대체뷰 orthophoto-preview 응답 포맷: png | jpeg | webp.
+   * jpeg/webp 는 API `?fmt=` 로 요청(서버에서 PNG→손실 압축, 전송량 감소). png 는 기존 미러/버튼 URL 로직.
+   * 끄고 PNG만: window.__MEISSA_DOM_OVERLAY_PREVIEW_FMT__ = "png"
+   */
+  const MEISSA_DOM_OVERLAY_PREVIEW_FMT = (() => {
+    try {
+      const w = typeof window !== "undefined" ? window.__MEISSA_DOM_OVERLAY_PREVIEW_FMT__ : undefined;
+      if (w === "png" || w === "jpeg" || w === "webp") return w;
+    } catch (_) {
+      /* ignore */
+    }
+    return "webp";
+  })();
+  /** 대체뷰는 고화질 단일 요청을 강제한다(초기 저화질 선표시 생략). */
+  const MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE = 16384;
+  function meissaDomOverlayUsesLossyApiPreview() {
+    if (isMeissa2dButtonUrlOnlySingleMode()) return false;
+    const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
+    return f === "jpeg" || f === "webp";
+  }
+  /** @type {Map<string, number>} url -> retryAfterTs */
+  let meissaDomOverlayBadUrlUntil = new Map();
+  /** 대체뷰 orthophoto-preview 응답 헤더 로그(project:snapshot 기준). */
+  let meissaDomOverlayHeaderLogBySnapshot = new Map();
+  /** 중복 포맷 로그 방지용 시그니처(project:snapshot 기준). */
+  let meissaDomOverlayHeaderSigBySnapshot = new Map();
+  /** 동일 URL 헤더 재조회 최소 간격(ms). */
+  const MEISSA_DOM_OVERLAY_HEADER_PROBE_MIN_INTERVAL_MS = 12000;
+  /** 번호/좌표가 잠깐 사라지는 체감을 막기 위해 warmup 생략(항상 정밀 오버레이 렌더). */
+  const MEISSA_2D_OVERLAY_WARMUP_MS = 0;
+  const MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES = 260;
+  /** 확대 배율이 충분히 크면 warmup 중에도 라벨/피킹을 유지(줌인 시 좌표 미표시 체감 완화). */
+  const MEISSA_2D_OVERLAY_WARMUP_LABELS_SCALE_THRESHOLD = 1.2;
+  let meissa2dOverlayWarmUntil = 0;
+  /** @type {Array<{x:number,y:number,r:number,circle:Record<string, unknown>,tooltip?:string,fit?:Record<string, unknown>|null}>} */
   let meissa2dPickHits = [];
   /** 말뚝 데이터셋: Ctrl+클릭으로 토글되는 circle id */
   let meissaDatasetSelectedIds = new Set();
@@ -214,6 +301,8 @@
   /** 마우스 호버로 강조할 도면 원 id (노란 링) */
   let meissa2dHoverCircleId = null;
   let meissa2dHoverRaf = 0;
+  const MEISSA_2D_HOVER_SUPPRESS_MS_AFTER_ZOOM = 180;
+  let meissa2dHoverSuppressUntil = 0;
   /** @type {{ x: number, y: number }|null} */
   let meissa2dPointerDownClient = null;
   let meissa2dIframeFocusHintTimer = 0;
@@ -226,6 +315,17 @@
   let meissa2dOverlayMode = "meissa";
   /** intrinsic+georef 대형 정사: 전체 이미지 캔버스 대신 뷰포트 창만 고해상 백킹(확대 시 글자·점 선명) */
   let meissa2dViewportSharpOverlayActive = false;
+  /** 원본 이미지가 taint되어 getImageData 실패할 때 뷰포트 hi-canvas 픽셀을 분석용 소스로 사용 */
+  let meissa2dOrthoPatchImageSource = null;
+  /** taint 대비: same-origin orthophoto-preview 분석용 이미지(표시용과 분리) */
+  let meissa2dOrthoAnalysisImage = null;
+  let meissa2dOrthoAnalysisImageKey = "";
+  let meissa2dOrthoAnalysisImageInFlight = false;
+  let meissa2dOrthoAnalysisImageLastFailTs = 0;
+  let meissa2dOrthoAnalysisImageFailKey = "";
+  let meissa2dOrthoAnalysisImageReqSeq = 0;
+  let meissa2dOrthoAnalysisPrimeSig = "";
+  let meissa2dOrthoAnalysisPrimeInFlight = false;
   /** 타일 모자이크를 직사각형 뷰에 늘리지 않기 위한 정사각 뷰포트(화면 px) */
   let meissa2dMapViewport = { offX: 0, offY: 0, side: 0 };
   /** @type {Record<string, {crs:string, yMode:"xyz"|"tms"}>} */
@@ -250,7 +350,6 @@
   const meissaOrthoPdamQueuedIds = new Set();
   let meissaOrthoPdamIdleCallbackId = 0;
   let meissaOrthoPdamOverlayFlushRaf = 0;
-
   function pushMeissaOrthoAnalyzeDebugEntry(entry) {
     if (!entry || !Array.isArray(entry.lines) || !entry.lines.length) return;
     meissaOrthoAnalyzeDebugTail.unshift({
@@ -300,22 +399,52 @@
   /** @type {HTMLCanvasElement|null} */
   let meissa2dOrthoPatchCanvas = null;
   /** false: 2D와 3D를 함께 로드(기본). true로 두면 2D만 우선. */
-  const MEISSA_2D_PRIORITY_MODE = false;
+  const MEISSA_2D_PRIORITY_MODE = true;
   /** false: 상단 iframe을 Meissa /3d 뷰어로 연다(기본). true면 스냅샷(2D) URL만 사용. */
-  const MEISSA_3D_EXCLUDED = false;
+  const MEISSA_3D_EXCLUDED = true;
   /** false: 공식 Meissa 화면을 페이지 안 iframe에 띄우지 않고 새 탭 링크만 맞춤(임베드 3D·로그인 뷰 제거). */
   const MEISSA_CLOUD_3D_FRAME_VISIBLE = true;
-  /** true: Carta 타일·모자이크·휠 타일 z/recenter 제거. 정사(orthophoto/raw/dataUrl)+georef만 매칭, 확대는 CSS matrix만. */
+  /** true: 심플 2D 모드 활성화(대체뷰·정사 이미지 중심). */
   const MEISSA_2D_SIMPLE_ORTHO = true;
-  /** true: orthophoto-preview 를 max_edge=저해상(3072) 단일만 쓰고 뷰포트 패치 고해상도 끔(검증·저대역용).
-   * false(기본): 3072로 먼저 빠르게 표시한 뒤 8192로 교체(이중 요청 순차) — 체감 속도와 확대 선명도 균형. */
+  /** true: 심플 모드에서도 타일(피라미드) 우선으로 즉시 표시해 초기 체감속도를 높인다. */
+  const MEISSA_2D_SIMPLE_TILE_FIRST_MODE = true;
+  /** true: orthophoto-preview 를 max_edge=저해상(3072) 단일만 사용(속도 우선).
+   * false(기본): 3072 선표시 뒤 8192로 교체(이중 요청 순차). */
   const MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES = false;
+  /** true: 저해상 선표시 없이 고화질(max_edge=8192) 단일 1회만 요청. */
+  const MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY = true;
   /**
-   * true(기본): 확대 영역 crop 뷰패치·관련 배지 끔(메인 orthophoto 만).
-   * 뷰패치를 다시 쓰려면 로드 전에 window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ = false
+   * true: 정사 로딩을 단일 경로로 고정.
+   * Carta 버튼 URL PNG 소스를 서버에서 받아 webp로 변환/캐시한 API만 사용한다.
    */
-  const MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI =
-    typeof window === "undefined" || window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ !== false;
+  const MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP = true;
+  const MEISSA_ORTHOPHOTO_UNIFIED_FMT = "webp";
+  const MEISSA_ORTHOPHOTO_UNIFIED_EDGE = 16384;
+  /** true: 단일 모드에서 orthophoto-preview/API 폴백 없이 "다운로드 버튼 URL"만 사용. */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY = true;
+  /** true면 <img src> 직접 경로 사용, false면 API fetch→blob 경로만 사용(안정 우선). */
+  const MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM = true;
+  /** 예전처럼 Authorization(JWT) + project_id만으로 orthophoto-preview 호출(서버 기본 캐시/사이징 경로 우선). */
+  const MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL = true;
+  /** 저해상 PNG 고정 모드(max_edge). */
+  const MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE = 3072;
+  /** 정사 preview 대기 상한(ms) — 지연 시 빠르게 RAW/JSON 폴백으로 넘어가 체감 정지를 줄인다. */
+  const MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS = 18000;
+  /** 버튼 URL 단일 모드: 한 URL 다운로드/디코드 최대 대기(ms). 초과 시 멈춤 대신 실패로 전환. */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS = 95000;
+  /** 버튼 URL 단일 모드: 죽은 URL 선별용 짧은 도달성 점검(ms). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS = 1300;
+  /** 버튼 URL 단일 모드: 실패 시 후보 재시도 최대 횟수(속도·안정 절충). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES = 3;
+  /** 버튼 URL 단일 모드: 이 장변(px) 미만 후보는 저화질로 간주해 배제(예: 700x). */
+  const MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE = 7000;
+  /** true: 정사·시공 적합도에서 RGB/형태 분석 실패를 planD(평면)로 초록 승격하지 않고 미판정으로 유지 */
+  const MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS = true;
+  /**
+   * false(기본): 확대 시 뷰포트 고해상 crop 패치를 사용해 줌 블러를 줄인다.
+   * 강제로 끄려면 로드 전에 window.__MEISSA_ORTHO_DISABLE_VIEWPORT_HI__ = true
+   */
+  const MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI = true;
   /** PDAM 대시보드 POST — 무제한 대기 시 비교 UI가 멈춘 것처럼 보임 */
   const MEISSA_DASHBOARD_FETCH_MS = 180000;
   /** nearest-z 단건 — 한 건이 무한 대기면 전체 워커가 진행 불가 */
@@ -337,12 +466,23 @@
   const MEISSA_2D_ZOOM_MOSAIC_CSS_MAX = 5.5;
   /** 정사 letterbox 대비 점 매핑 엄격 클리핑 여유(px). ±2만 쓰면 저해상·부동소수에서 점이 전부 탈락할 수 있음 */
   const MEISSA_2D_IMG_EDGE_MARGIN_CSS = 20;
+  /** georef 매핑이 경계에서 과도하게 탈락할 때 사용할 느슨 클리핑 여유(px). */
+  const MEISSA_2D_IMG_EDGE_MARGIN_CSS_RELAXED = 220;
   /** false: 스냅샷 선택 시 Meissa 점군 API·누적 로더를 돌리지 않음(정사·2D 점만). 수동 디버그 버튼은 예외. */
   const MEISSA_POINT_CLOUD_AUTOLOAD = false;
   /** Carta/Meissa 타일 z 범위 — 모자이크 휠 줌은 정수 z만 바꾸고 CSS scale은 1로 둔다(구글맵식 격자 정합). */
   const MEISSA_MOSAIC_TILE_Z_MIN = 18;
   const MEISSA_MOSAIC_TILE_Z_MAX = 23;
   const MEISSA_TILE_HINTS_KEY = "pilexy-meissa-tile-hints-v1";
+
+  function isMeissa2dButtonUrlOnlySingleMode() {
+    return Boolean(
+      MEISSA_2D_SIMPLE_ORTHO &&
+        MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY &&
+        MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY &&
+        !MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP
+    );
+  }
   /** Meissa API JWT — 새로고침·재방문 시 iframe·목록 API 자동 복원(공유 PC에서는 브라우저 로그아웃으로 삭제). */
   const MEISSA_JWT_STORAGE_KEY = "pilexy-meissa-access-jwt-v1";
   /** iframe 에 마지막으로 연 cloud.meissa.ai 경로(쿼리 제외) — 아래에서만 로그인한 경우 쿠키와 함께 재진입 완화. */
@@ -2366,8 +2506,15 @@
     const m = new Map();
     const rows = dashboard?.mapping?.circleMappings || [];
     rows.forEach((row) => {
-      if (row.circleId != null && String(row.circleId).trim() !== "") {
-        m.set(String(row.circleId), row);
+      const cidRaw =
+        row?.circleId ??
+        row?.circle_id ??
+        row?.circleID ??
+        row?.circle_id_str ??
+        row?.circleIdStr ??
+        row?.id;
+      if (cidRaw != null && String(cidRaw).trim() !== "") {
+        m.set(String(cidRaw), row);
       }
     });
     return m;
@@ -2387,7 +2534,7 @@
    */
   function isPdamCircleMappingInstalled(row) {
     if (!row || typeof row !== "object") return false;
-    const st = String(row.status ?? row.mappingStatus ?? "").trim().toLowerCase();
+    const st = String(row.status ?? row.mappingStatus ?? row.mapping_status ?? "").trim().toLowerCase();
     if (st === "installed" || st === "complete" || st === "done") return true;
     if (st === "pending") return false;
     const dateStr =
@@ -2397,11 +2544,11 @@
           ? String(row.construction_date).trim()
           : "";
     const hasDate = dateStr !== "";
-    const remRaw = row.pileRemaining ?? row.pile_remaining;
+    const remRaw = row.pileRemaining ?? row.pile_remaining ?? row.remain ?? row.remaining;
     const hasRem = remRaw != null && String(remRaw).trim() !== "";
-    const penRaw = row.penetrationDepth ?? row.penetration_depth;
+    const penRaw = row.penetrationDepth ?? row.penetration_depth ?? row.penetration;
     const hasPen = penRaw != null && String(penRaw).trim() !== "" && Number.isFinite(Number(penRaw));
-    const boreRaw = row.boringDepth ?? row.boring_depth;
+    const boreRaw = row.boringDepth ?? row.boring_depth ?? row.boring;
     const hasBore = boreRaw != null && String(boreRaw).trim() !== "" && Number.isFinite(Number(boreRaw));
     if (hasDate) return true;
     if (hasPen || hasBore) return true;
@@ -3033,6 +3180,293 @@
     return span;
   }
 
+  /** 정사·시공 적합도 계산용: UI 오프셋(X,Y)을 파일 좌표에 반영 */
+  function meissa2dReadOffsetXY() {
+    const ox = parseNumber(els.offsetX?.value) || 0;
+    const oy = parseNumber(els.offsetY?.value) || 0;
+    return { ox, oy };
+  }
+
+  function meissa2dCurrentProjectSnapshotKey() {
+    const projectId = (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
+    const sid = (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
+    if (!projectId || !sid) return "";
+    return `${projectId}:${sid}`;
+  }
+
+  function meissa2dBuildAnalysisImageCandidates(projectId, sid) {
+    const out = [];
+    const seen = new Set();
+    const push = (url, source) => {
+      const s = String(url || "").trim();
+      if (!s || seen.has(s)) return;
+      seen.add(s);
+      out.push({ url: s, source: String(source || "") });
+    };
+    if (!isMeissa2dButtonUrlOnlySingleMode()) {
+      push(
+        buildOrthophotoPreviewImgUrl(
+          sid,
+          projectId,
+          meissaAccess,
+          MEISSA_ORTHOPHOTO_PREVIEW_EDGE
+        ),
+        "preview"
+      );
+    }
+    push(meissa2dRawUrlBySnapshot.get(String(sid || "").trim()), "raw-cache");
+    push(els.meissaCloud2dImageLocal?.getAttribute?.("src"), "img-src");
+    return out;
+  }
+
+  function meissa2dHasReadyOrthoAnalysisImage() {
+    const key = meissa2dCurrentProjectSnapshotKey();
+    return Boolean(
+      key &&
+        meissa2dOrthoAnalysisImage &&
+        meissa2dOrthoAnalysisImageKey === key &&
+        Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) > 8 &&
+        Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) > 8
+    );
+  }
+
+  /**
+   * 이미 화면에 표시·디코드된 정사 이미지를 분석 소스로 우선 채택.
+   * 분석용 재요청(CORS/서명만료) 실패로 계산이 멈추는 경우를 줄인다.
+   */
+  function meissa2dAdoptVisibleOrthoImageForAnalysis(key) {
+    if (
+      meissa2dOrthoAnalysisImage &&
+      meissa2dOrthoAnalysisImageKey === key &&
+      Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) > 8 &&
+      Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) > 8
+    ) {
+      return true;
+    }
+    const imgEl = els.meissaCloud2dImageLocal;
+    if (!imgEl) return false;
+    if (!hasRenderableOverlayImage(imgEl)) return false;
+    if (!useFullGeorefForOverlayImage(imgEl)) return false;
+    const nw = Number(imgEl.naturalWidth || 0);
+    const nh = Number(imgEl.naturalHeight || 0);
+    if (nw <= 8 || nh <= 8) return false;
+    if (meissa2dOrthoAnalysisImage === imgEl && meissa2dOrthoAnalysisImageKey === key) return true;
+    meissa2dOrthoAnalysisImage = imgEl;
+    meissa2dOrthoAnalysisImageKey = key;
+    meissa2dOrthoAnalysisImageFailKey = "";
+    meissa2dOrthoPatchImageSource = null;
+    meissa2dOrthoAnalysisImageInFlight = false;
+    bumpMeissa2dOrthoRgbFitCache();
+    scheduleRenderMeissa2dPointsOverlay();
+    scheduleMeissaOrthoOffsetPanelRefresh(120);
+    return true;
+  }
+
+  /**
+   * 분석용 이미지는 전체 원본 재다운로드 대신 preview(max_edge=3072) blob으로 고정.
+   * 고해상 원본(예: 17k x 20k)을 다시 받아 분석 준비하는 비용/지연을 줄인다.
+   */
+  async function meissa2dPrimeAnalysisImageFromDisplayedSrc(reason) {
+    const key = meissa2dCurrentProjectSnapshotKey();
+    const imgEl = els.meissaCloud2dImageLocal;
+    if (!key || !imgEl) return false;
+    if (!hasRenderableOverlayImage(imgEl)) return false;
+    if (!useFullGeorefForOverlayImage(imgEl)) return false;
+    const srcShown = String(imgEl.currentSrc || imgEl.getAttribute("src") || "").trim();
+    if (!srcShown) return false;
+    if (srcShown.startsWith("blob:")) {
+      return meissa2dAdoptVisibleOrthoImageForAnalysis(key);
+    }
+    const [projectId, sid] = key.split(":");
+    if (!projectId || !sid || !meissaAccess) return false;
+    const previewUrl = MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
+      ? buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE)
+      : buildOrthophotoPreviewImgUrl(
+          sid,
+          projectId,
+          meissaAccess,
+          MEISSA_ORTHOPHOTO_PREVIEW_EDGE
+        );
+    if (!previewUrl) return false;
+    const sig = `${key}|preview:${MEISSA_ORTHOPHOTO_PREVIEW_EDGE}`;
+    if (
+      meissa2dOrthoAnalysisPrimeSig === sig &&
+      meissa2dOrthoAnalysisImage &&
+      meissa2dOrthoAnalysisImageKey === key &&
+      Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) > 8 &&
+      Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) > 8
+    ) {
+      return true;
+    }
+    if (meissa2dOrthoAnalysisPrimeInFlight) return false;
+    meissa2dOrthoAnalysisPrimeInFlight = true;
+    try {
+      const res = await fetchWithTimeout(
+        previewUrl,
+        MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
+          ? { method: "GET", headers: { Authorization: `JWT ${meissaAccess}` } }
+          : { method: "GET" },
+        90000
+      );
+      if (!res || !res.ok) return false;
+      const blob = await res.blob();
+      if (!blob || Number(blob.size || 0) <= 32) return false;
+      const im = await decodeBlobToImage(blob);
+      if (!im || Number(im.naturalWidth || 0) <= 8 || Number(im.naturalHeight || 0) <= 8) return false;
+      if (meissa2dCurrentProjectSnapshotKey() !== key) return false;
+      meissa2dOrthoAnalysisImage = im;
+      meissa2dOrthoAnalysisImageKey = key;
+      meissa2dOrthoAnalysisImageFailKey = "";
+      meissa2dOrthoPatchImageSource = null;
+      meissa2dOrthoAnalysisImageInFlight = false;
+      meissa2dOrthoAnalysisPrimeSig = sig;
+      bumpMeissa2dOrthoRgbFitCache();
+      scheduleRenderMeissa2dPointsOverlay();
+      scheduleMeissaOrthoOffsetPanelRefresh(120);
+      try {
+        pushMeissa2dLoadLine(
+          `정사 분석 소스 고정(preview-blob): ${im.naturalWidth}×${im.naturalHeight}${reason ? ` · ${reason}` : ""}`
+        );
+      } catch (_) {
+        /* ignore */
+      }
+      return true;
+    } catch (_) {
+      try {
+        pushMeissa2dLoadLine("정사 분석 소스 blob 고정 실패 — 현재 표시 이미지로 계속 시도");
+      } catch (_) {
+        /* ignore */
+      }
+      return false;
+    } finally {
+      meissa2dOrthoAnalysisPrimeInFlight = false;
+    }
+  }
+
+  function meissa2dAdoptHiCanvasPatchSource(reason) {
+    if (MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS) return false;
+    const hi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+    if (!hi || hi.tagName !== "CANVAS") return false;
+    try {
+      const hctx = hi.getContext("2d");
+      if (!hctx) return false;
+      const t = hctx.getImageData(0, 0, 1, 1);
+      if (!t || !t.data) return false;
+      meissa2dOrthoPatchImageSource = hi;
+      void reason;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function meissa2dEnsureOrthoAnalysisImage() {
+    const key = meissa2dCurrentProjectSnapshotKey();
+    if (!key) return;
+    if (Date.now() - Number(meissa2dOrthoAnalysisImageLastFailTs || 0) < 1200) return;
+    if (meissa2dAdoptVisibleOrthoImageForAnalysis(key)) return;
+    if (!meissaAccess) return;
+    if (meissa2dOrthoAnalysisImageInFlight) return;
+    if (
+      meissa2dOrthoAnalysisImage &&
+      meissa2dOrthoAnalysisImageKey === key &&
+      Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) > 8 &&
+      Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) > 8
+    ) {
+      return;
+    }
+    const [projectId, sid] = key.split(":");
+    if (!projectId || !sid) return;
+    const candidates = meissa2dBuildAnalysisImageCandidates(projectId, sid);
+    if (!candidates.length) return;
+    meissa2dOrthoAnalysisImage = null;
+    meissa2dOrthoAnalysisImageKey = "";
+    meissa2dOrthoPatchImageSource = null;
+    meissa2dOrthoAnalysisImageInFlight = true;
+    const reqSeq = ++meissa2dOrthoAnalysisImageReqSeq;
+    let idx = 0;
+    const tryNext = () => {
+      if (reqSeq !== meissa2dOrthoAnalysisImageReqSeq) return;
+      if (meissa2dCurrentProjectSnapshotKey() !== key) {
+        meissa2dOrthoAnalysisImageInFlight = false;
+        return;
+      }
+      if (idx >= candidates.length) {
+        meissa2dOrthoAnalysisImageInFlight = false;
+        meissa2dOrthoAnalysisImageLastFailTs = Date.now();
+        tryMeissa2dOrthoViewportHiPaintCachedSync();
+        const hiAdopted = MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS
+          ? false
+          : meissa2dAdoptHiCanvasPatchSource("analysis-image-all-failed");
+        if (meissa2dOrthoAnalysisImageFailKey !== key) {
+          meissa2dOrthoAnalysisImageFailKey = key;
+          try {
+            pushMeissa2dLoadLine(
+              hiAdopted
+                ? "정사 분석용 이미지 로드 실패(CORS/URL) — hi-canvas 폴백으로 분석 재시도"
+                : "정사 분석용 이미지 로드 실패(CORS/URL) — 미산출(imagedata) 가능"
+            );
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        if (hiAdopted) {
+          bumpMeissa2dOrthoRgbFitCache();
+          scheduleRenderMeissa2dPointsOverlay();
+          scheduleMeissaOrthoOffsetPanelRefresh(120);
+        }
+        return;
+      }
+      const cand = candidates[idx++];
+      const im = new Image();
+      if (!String(cand.url).startsWith("blob:")) im.crossOrigin = "anonymous";
+      im.decoding = "async";
+      im.onload = () => {
+        if (reqSeq !== meissa2dOrthoAnalysisImageReqSeq) return;
+        if (meissa2dCurrentProjectSnapshotKey() !== key) {
+          meissa2dOrthoAnalysisImageInFlight = false;
+          return;
+        }
+        if (Number(im.naturalWidth || 0) <= 8 || Number(im.naturalHeight || 0) <= 8) {
+          tryNext();
+          return;
+        }
+        meissa2dOrthoAnalysisImageInFlight = false;
+        meissa2dOrthoAnalysisImage = im;
+        meissa2dOrthoAnalysisImageKey = key;
+        meissa2dOrthoAnalysisImageFailKey = "";
+        bumpMeissa2dOrthoRgbFitCache();
+        scheduleRenderMeissa2dPointsOverlay();
+        scheduleMeissaOrthoOffsetPanelRefresh(120);
+      };
+      im.onerror = () => {
+        if (reqSeq !== meissa2dOrthoAnalysisImageReqSeq) return;
+        if (meissa2dCurrentProjectSnapshotKey() !== key) {
+          meissa2dOrthoAnalysisImageInFlight = false;
+          return;
+        }
+        tryNext();
+      };
+      im.src = cand.url;
+    };
+    tryNext();
+  }
+
+  function meissa2dPickUsablePatchImageSourceForAnalyze(nw, nh) {
+    const src = meissa2dOrthoPatchImageSource;
+    if (!src) return null;
+    const sw = Math.max(1, Math.round(Number(src?.naturalWidth || src?.videoWidth || src?.width || 0)));
+    const sh = Math.max(1, Math.round(Number(src?.naturalHeight || src?.videoHeight || src?.height || 0)));
+    if (sw <= 8 || sh <= 8) return null;
+    // 뷰포트 부분 캔버스(전체 정사보다 훨씬 작음)를 전체 natural 좌표로 오인해 크롭이 틀어지는 경우 방지.
+    if (MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS) {
+      const rw = sw / Math.max(1, nw);
+      const rh = sh / Math.max(1, nh);
+      if (rw < 0.94 || rh < 0.94) return null;
+    }
+    return src;
+  }
+
   /**
    * georef 전역 bbox 기준: 도면 좌표 → 정사 래스터 자연 픽셀(중심 근사).
    * @returns {{ ix: number, iy: number, nw: number, nh: number, nx: number, ny: number } | null}
@@ -3050,21 +3484,40 @@
     const maxY = Number(geo.bbox.maxY);
     if (!(maxX > minX && maxY > minY)) return null;
     const { srcCrs, dstCrs } = resolveMeissa2dGeorefCrsPair(geo, projectId, sid);
-    let wx = Number(fx);
-    let wy = Number(fy);
-    if (!Number.isFinite(wx) || !Number.isFinite(wy)) return null;
-    if (srcCrs !== dstCrs && ensureProj4Defs()) {
-      try {
-        const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
-        wx = Number(pp?.[0]);
-        wy = Number(pp?.[1]);
-      } catch (_) {
-        return null;
-      }
+    const baseX = Number(fx);
+    const baseY = Number(fy);
+    if (!Number.isFinite(baseX) || !Number.isFinite(baseY)) return null;
+    const { ox, oy } = meissa2dReadOffsetXY();
+    const candidates = [{ wx: baseX + ox, wy: baseY + oy }];
+    // 오프셋이 과대/오입력된 현장에서는 원좌표 재시도로 no-georef 전량 미산출을 피한다.
+    if (Math.abs(ox) > 1e-9 || Math.abs(oy) > 1e-9) {
+      candidates.push({ wx: baseX, wy: baseY });
     }
-    const nx = (wx - minX) / (maxX - minX);
-    const ny = (maxY - wy) / (maxY - minY);
-    if (nx < -0.03 || nx > 1.03 || ny < -0.03 || ny > 1.03) return null;
+    let nx = NaN;
+    let ny = NaN;
+    let mapped = false;
+    for (const cand of candidates) {
+      let wx = Number(cand.wx);
+      let wy = Number(cand.wy);
+      if (!Number.isFinite(wx) || !Number.isFinite(wy)) continue;
+      if (srcCrs !== dstCrs && ensureProj4Defs()) {
+        try {
+          const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
+          wx = Number(pp?.[0]);
+          wy = Number(pp?.[1]);
+        } catch (_) {
+          continue;
+        }
+      }
+      const tx = (wx - minX) / (maxX - minX);
+      const ty = (maxY - wy) / (maxY - minY);
+      if (tx < -0.03 || tx > 1.03 || ty < -0.03 || ty > 1.03) continue;
+      nx = tx;
+      ny = ty;
+      mapped = true;
+      break;
+    }
+    if (!mapped) return null;
     const nw = Math.round(Number(imgEl.naturalWidth || 0));
     const nh = Math.round(Number(imgEl.naturalHeight || 0));
     if (nw <= 8 || nh <= 8) return null;
@@ -3623,8 +4076,33 @@
     }
     const pctx = cnv.getContext("2d");
     if (!pctx) return { delta: null, validDetection: false };
+    const patchSrc = meissa2dPickUsablePatchImageSourceForAnalyze(nw, nh);
+    const srcEl =
+      (meissa2dOrthoAnalysisImage &&
+        meissa2dOrthoAnalysisImageKey === meissa2dCurrentProjectSnapshotKey() &&
+        Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) > 8 &&
+        Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) > 8
+        ? meissa2dOrthoAnalysisImage
+        : null) ||
+      patchSrc ||
+      imgEl;
+    if (!srcEl) return { delta: null, reason: "analysis-image-missing", validDetection: false };
+    const srcW = Math.max(
+      1,
+      Math.round(Number(srcEl?.naturalWidth || srcEl?.videoWidth || srcEl?.width || nw))
+    );
+    const srcH = Math.max(
+      1,
+      Math.round(Number(srcEl?.naturalHeight || srcEl?.videoHeight || srcEl?.height || nh))
+    );
+    const kx = srcW / Math.max(1, nw);
+    const ky = srcH / Math.max(1, nh);
+    const sxSrc = Math.max(0, Math.min(srcW - 1, Math.floor(sx * kx)));
+    const sySrc = Math.max(0, Math.min(srcH - 1, Math.floor(sy * ky)));
+    const swSrc = Math.max(1, Math.min(srcW - sxSrc, Math.ceil(sw * kx)));
+    const shSrc = Math.max(1, Math.min(srcH - sySrc, Math.ceil(sh * ky)));
     try {
-      pctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+      pctx.drawImage(srcEl, sxSrc, sySrc, swSrc, shSrc, 0, 0, sw, sh);
     } catch (_) {
       return { delta: null, reason: "taint", validDetection: false };
     }
@@ -3632,7 +4110,29 @@
     try {
       im = pctx.getImageData(0, 0, sw, sh);
     } catch (_) {
-      return { delta: null, reason: "imagedata", validDetection: false };
+      // 원본 이미지가 CORS taint일 때, same-origin 뷰포트 hi-canvas를 1회 폴백 소스로 시도.
+      if (!MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS) {
+        try {
+          const hi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+          if (hi && hi.tagName === "CANVAS") {
+            const hctx = hi.getContext("2d");
+            if (hctx) {
+              const t = hctx.getImageData(0, 0, 1, 1);
+              if (t && t.data) {
+                meissa2dOrthoPatchImageSource = hi;
+                pctx.clearRect(0, 0, sw, sh);
+                pctx.drawImage(hi, sx, sy, sw, sh, 0, 0, sw, sh);
+                im = pctx.getImageData(0, 0, sw, sh);
+              }
+            }
+          }
+        } catch (_) {
+          // ignore and keep original imagedata failure
+        }
+      }
+      if (!im) {
+        return { delta: null, reason: "imagedata", validDetection: false };
+      }
     }
     const data = im.data;
     const cx = ix - sx + 0.5;
@@ -4045,6 +4545,10 @@
         : `패치 ${sw}×${sh}px · 도면중심 (${cx.toFixed(2)},${cy.toFixed(2)}) · 검은코어+이중 밝은띠(어깨·링내·링외·바깥오프셋)로 말뚝 형태 확인`,
     ];
     if (pileCappedLikely) {
+      const capDx = Math.max(-rCore * 2.2, Math.min(rCore * 2.2, Number.isFinite(locMinDx) ? locMinDx : 0));
+      const capDy = Math.max(-rCore * 2.2, Math.min(rCore * 2.2, Number.isFinite(locMinDy) ? locMinDy : 0));
+      const capCx = cx + capDx;
+      const capCy = cy + capDy;
       return {
         delta: Math.max(0, Number.isFinite(deltaEff) ? deltaEff * 0.12 : 0),
         darkestNorm: Math.min(0.22, darkestNorm),
@@ -4054,9 +4558,9 @@
         ringWeightSum: 0,
         textureWeightSum: 0,
         edgeWeightSum: 0,
-        centroidPx: cx,
-        centroidPy: cy,
-        patchDistDesignPx: 0,
+        centroidPx: capCx,
+        centroidPy: capCy,
+        patchDistDesignPx: Math.hypot(capDx, capDy),
         detectMode: "capped",
         detectionScore: 0.41,
         validDetection: true,
@@ -4140,6 +4644,10 @@
     }
     if (!passBrightRim) {
       if (diskCap && meissa2dOrthoDiskCapFromMetrics(diskCap, minDUiGate)) {
+        const capDx = Math.max(-rCore * 2.2, Math.min(rCore * 2.2, Number.isFinite(locMinDx) ? locMinDx : 0));
+        const capDy = Math.max(-rCore * 2.2, Math.min(rCore * 2.2, Number.isFinite(locMinDy) ? locMinDy : 0));
+        const capCx = cx + capDx;
+        const capCy = cy + capDy;
         return {
           delta: Math.max(0, Number.isFinite(deltaEff) ? deltaEff * 0.12 : 0),
           darkestNorm: Math.min(0.22, darkestNorm),
@@ -4149,9 +4657,9 @@
           ringWeightSum: 0,
           textureWeightSum: 0,
           edgeWeightSum: 0,
-          centroidPx: cx,
-          centroidPy: cy,
-          patchDistDesignPx: 0,
+          centroidPx: capCx,
+          centroidPy: capCy,
+          patchDistDesignPx: Math.hypot(capDx, capDy),
           detectMode: "capped",
           detectionScore: 0.41,
           validDetection: true,
@@ -4487,14 +4995,31 @@
       }
       const qDesign = meissa2dOrthoRingCoreDeltaLocal(lum, sw, sh, cx, cy, rCore, rRingIn, rRingOut, orthoClipOpt);
       const minQDesign = fastOrtho ? 1.58 : 1.74;
+      const qDetectedNow = meissa2dOrthoRingCoreDeltaLocal(
+        lum,
+        sw,
+        sh,
+        centroidPx,
+        centroidPy,
+        rCore,
+        rRingIn,
+        rRingOut,
+        orthoClipOpt
+      );
       if (
         Number.isFinite(qDesign) &&
         qDesign > -1e5 &&
         qDesign >= minQDesign &&
+        (!Number.isFinite(qDetectedNow) || qDesign >= qDetectedNow + 0.85) &&
         rdAfter > 11
       ) {
-        centroidPx = cx;
-        centroidPy = cy;
+        // 기존 "완전 중심 고정(=오프셋 0)" 대신, 설계 중심 쪽으로만 부분 보정해 0 쏠림을 방지.
+        const keepDriftPx = Math.min(6.5, Math.max(2.8, patchMin * 0.04));
+        const pull = Math.max(keepDriftPx, Math.min(rdAfter, keepDriftPx));
+        const ux = rdAfter > 1e-6 ? (centroidPx - cx) / rdAfter : 0;
+        const uy = rdAfter > 1e-6 ? (centroidPy - cy) / rdAfter : 0;
+        centroidPx = cx + ux * pull;
+        centroidPy = cy + uy * pull;
         const d0 = meissa2dOrthoRingCoreDeltaAt(
           lum,
           sw,
@@ -4507,8 +5032,9 @@
           orthoClipOpt
         );
         if (d0.delta != null && Number.isFinite(d0.delta)) deltaAtDetect = d0.delta;
+        const rdPulled = Math.hypot(centroidPx - cx, centroidPy - cy);
         debugLines.push(
-          `도면중심고정: 도면 링Δ=${qDesign.toFixed(2)} ≥ ${minQDesign.toFixed(2)} → ${rdAfter.toFixed(1)}px 검출 무시`
+          `도면중심보정: 도면 링Δ=${qDesign.toFixed(2)}(검출 ${Number.isFinite(qDetectedNow) ? qDetectedNow.toFixed(2) : "—"}) · ${rdAfter.toFixed(1)}px → ${rdPulled.toFixed(1)}px`
         );
       }
     }
@@ -4551,6 +5077,97 @@
     return "";
   }
 
+  function meissa2dBuildPlanFallbackFitById(id, reason, extras) {
+    if (MEISSA_ORTHO_PDAM_STRICT_IMAGE_ANALYSIS) {
+      const rr = String(reason || "").trim().toLowerCase();
+      if (
+        rr &&
+        rr !== "not-installed" &&
+        rr !== "plan" &&
+        rr !== "plan-fallback"
+      ) {
+        return null;
+      }
+    }
+    const rec = state.meissaCompareByCircleId?.get?.(String(id ?? ""));
+    const planDAbs = rec?.planD != null ? Math.abs(Number(rec.planD)) : NaN;
+    if (!Number.isFinite(planDAbs)) return null;
+    const { greenM, yellowM, orangeM } = meissaOrthoImageOffsetThresholdsM();
+    let tier = "red";
+    if (planDAbs <= greenM) tier = "ok";
+    else if (planDAbs <= yellowM) tier = "yellow";
+    else if (planDAbs <= orangeM) tier = "orange";
+    return {
+      tier,
+      delta: Number.isFinite(Number(extras?.delta)) ? Number(extras.delta) : null,
+      offsetM: planDAbs,
+      patchDistDesignPx: Number.isFinite(Number(extras?.patchDistDesignPx))
+        ? Number(extras.patchDistDesignPx)
+        : null,
+      ringAsym: Number.isFinite(Number(extras?.ringAsym)) ? Number(extras.ringAsym) : undefined,
+      darkestNorm: Number.isFinite(Number(extras?.darkestNorm)) ? Number(extras.darkestNorm) : undefined,
+      detectMode: "plan-fallback",
+      detectionScore: Number.isFinite(Number(extras?.detectionScore)) ? Number(extras.detectionScore) : undefined,
+      offsetEstimateFallback: true,
+      reason: `fallback:${String(reason || "plan").trim() || "plan"}`,
+      footprintOverlap: extras?.footprintOverlap ?? null,
+      pileCapped: false,
+      diskCap: extras?.diskCap ?? null,
+    };
+  }
+
+  const MEISSA_ORTHO_GEOM_DEDUP_EPS = 1e-4;
+
+  function meissa2dCircleGeomDedupKey(circle) {
+    const cx = Number(circle?.center_x ?? circle?.centerX);
+    const cy = Number(circle?.center_y ?? circle?.centerY);
+    const rad = meissa2dPileRadiusFileUnits(circle);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rad) || rad <= 0) return "";
+    const q = (v) => Math.round(v / MEISSA_ORTHO_GEOM_DEDUP_EPS);
+    return `${q(cx)}:${q(cy)}:${q(rad)}`;
+  }
+
+  function meissa2dOrthoCirclePriorityScore(circle) {
+    const id = String(circle?.id ?? "");
+    const row = state.pdamByCircleId?.get?.(id);
+    let score = 0;
+    if (isPdamCircleMappingInstalled(row)) score += 200;
+    if (row) score += 40;
+    if (circle?.matched_text_id != null && String(circle.matched_text_id).trim() !== "") score += 24;
+    if (circle?.matched_text?.text != null && String(circle.matched_text.text).trim() !== "") score += 16;
+    if (Number.isFinite(Number(circle?.center_x)) && Number.isFinite(Number(circle?.center_y))) score += 6;
+    if (Number.isFinite(meissa2dPileRadiusFileUnits(circle))) score += 6;
+    return score;
+  }
+
+  function meissa2dDedupCirclesForOrthoPdam(circles) {
+    const src = Array.isArray(circles) ? circles : [];
+    if (!src.length) return src;
+    const pickedByGeom = new Map();
+    const out = [];
+    for (const c of src) {
+      const key = meissa2dCircleGeomDedupKey(c);
+      if (!key) {
+        out.push(c);
+        continue;
+      }
+      const prev = pickedByGeom.get(key);
+      if (!prev) {
+        pickedByGeom.set(key, c);
+        out.push(c);
+        continue;
+      }
+      const prevScore = meissa2dOrthoCirclePriorityScore(prev);
+      const nowScore = meissa2dOrthoCirclePriorityScore(c);
+      if (nowScore > prevScore) {
+        const idx = out.indexOf(prev);
+        if (idx >= 0) out[idx] = c;
+        pickedByGeom.set(key, c);
+      }
+    }
+    return out;
+  }
+
   /** ortho_pdam 툴팁: 원 내부 비율 + 패치 전체 암부/밝은띠 대비 도면 원 포획(달·일식). */
   function meissaOrthoFootprintOverlapTooltipLines(fp) {
     if (!fp || !Number.isFinite(fp.darkLumPct)) return "";
@@ -4591,6 +5208,15 @@
       });
     }
     if (an.reason || an.delta == null) {
+      const outFallback = meissa2dBuildPlanFallbackFitById(id, an.reason || "analyze", {
+        delta: null,
+        patchDistDesignPx: null,
+        footprintOverlap: null,
+      });
+      if (outFallback) {
+        meissa2dOrthoRgbFitCache.set(ck, outFallback);
+        return outFallback;
+      }
       const miss = {
         tier: "na",
         delta: null,
@@ -4612,6 +5238,19 @@
         ringAsym: an.ringAsym,
         darkestNorm: an.darkestNorm,
       });
+      const outFallback = meissa2dBuildPlanFallbackFitById(id, an.orthoSkipReason || "low-confidence", {
+        delta: an.delta,
+        patchDistDesignPx: an.patchDistDesignPx ?? null,
+        ringAsym: an.ringAsym,
+        darkestNorm: an.darkestNorm,
+        detectionScore: an.detectionScore,
+        footprintOverlap: an.footprintOverlap ?? null,
+        diskCap: an.diskCap ?? null,
+      });
+      if (outFallback) {
+        meissa2dOrthoRgbFitCache.set(ck, outFallback);
+        return outFallback;
+      }
       const miss = {
         tier: "na",
         delta: an.delta,
@@ -4689,7 +5328,9 @@
     } else if (mode === "bright") {
       if (tier === "ok" && (an.spread85 < 10 || (an.detectionScore || 0) < 0.28)) tier = "yellow";
     } else if (mode === "capped") {
-      if (tier === "ok" && (an.spread85 || 0) > 24) tier = "yellow";
+      // 캡(저대비)은 구멍형보다 중심 추정 신뢰가 낮아 "양호" 고정 오판을 줄이기 위해 최소 yellow로 제한.
+      if (tier === "ok") tier = "yellow";
+      if ((an.spread85 || 0) > 28 && tier === "yellow") tier = "orange";
     } else if (mode === "ring" || mode === "edge") {
       if (tier === "ok" && (an.ringAsym > 18 || an.delta > minD * 1.2)) tier = "yellow";
     } else if (mode === "texture") {
@@ -4772,46 +5413,55 @@
   }
 
   function scheduleMeissaOrthoPdamPrefetch() {
+    meissa2dEnsureOrthoAnalysisImage();
     if (meissaOrthoPdamIdleCallbackId) return;
-    const ric =
-      window.requestIdleCallback ||
-      function (cb) {
-        return window.setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), 48);
-      };
-    meissaOrthoPdamIdleCallbackId = ric(
-      (deadline) => {
-        meissaOrthoPdamIdleCallbackId = 0;
-        let slice = 0;
-        const maxPerSlice = 12;
-        let anyComputed = false;
-        while (meissaOrthoPdamPrefetchQueue.length > 0 && slice < maxPerSlice) {
-          if (deadline.timeRemaining && deadline.timeRemaining() < 4 && !deadline.didTimeout && slice > 0) break;
-          const nid = meissaOrthoPdamPrefetchQueue.shift();
-          meissaOrthoPdamQueuedIds.delete(nid);
-          const c = meissaFindCircleById(nid);
-          if (c) {
-            const ck = `${meissa2dOrthoRgbFitCacheGen}:${nid}`;
-            if (!meissa2dOrthoRgbFitCache.has(ck)) {
-              const nat = fileCoordToOrthoNaturalPixel(c?.center_x, c?.center_y);
-              if (nat) {
-                meissa2dComputeOrthoPdamRgbFitSyncFromNat(c, nid, ck, nat);
-                anyComputed = true;
-              }
+    meissaOrthoPdamIdleCallbackId = window.setTimeout(() => {
+      meissaOrthoPdamIdleCallbackId = 0;
+      let slice = 0;
+      const maxPerSlice = meissa2dDragging ? 4 : 32;
+      const budgetMs = meissa2dDragging ? 6 : 24;
+      const t0 = (typeof performance !== "undefined" && performance.now)
+        ? performance.now()
+        : Date.now();
+      let anyComputed = false;
+      while (meissaOrthoPdamPrefetchQueue.length > 0 && slice < maxPerSlice) {
+        const nid = meissaOrthoPdamPrefetchQueue.shift();
+        meissaOrthoPdamQueuedIds.delete(nid);
+        const c = meissaFindCircleById(nid);
+        if (c) {
+          const ck = `${meissa2dOrthoRgbFitCacheGen}:${nid}`;
+          if (!meissa2dOrthoRgbFitCache.has(ck)) {
+            const nat = fileCoordToOrthoNaturalPixel(c?.center_x, c?.center_y);
+            if (nat) {
+              meissa2dComputeOrthoPdamRgbFitSyncFromNat(c, nid, ck, nat);
+              anyComputed = true;
             }
           }
-          slice++;
         }
-        if (meissaOrthoPdamPrefetchQueue.length > 0) scheduleMeissaOrthoPdamPrefetch();
-        if (anyComputed && !meissaOrthoPdamOverlayFlushRaf) {
-          meissaOrthoPdamOverlayFlushRaf = requestAnimationFrame(() => {
-            meissaOrthoPdamOverlayFlushRaf = 0;
-            renderMeissa2dPointsOverlay();
-            scheduleMeissaOrthoOffsetPanelRefresh();
-          });
-        }
-      },
-      { timeout: 520 }
-    );
+        slice++;
+        const tn = (typeof performance !== "undefined" && performance.now)
+          ? performance.now()
+          : Date.now();
+        if (tn - t0 >= budgetMs) break;
+      }
+      if (meissaOrthoPdamPrefetchQueue.length > 0) {
+        const delay = meissa2dDragging ? 24 : 4;
+        meissaOrthoPdamIdleCallbackId = window.setTimeout(() => {
+          meissaOrthoPdamIdleCallbackId = 0;
+          scheduleMeissaOrthoPdamPrefetch();
+        }, delay);
+      }
+      if (anyComputed && !meissaOrthoPdamOverlayFlushRaf) {
+        meissaOrthoPdamOverlayFlushRaf = requestAnimationFrame(() => {
+          meissaOrthoPdamOverlayFlushRaf = 0;
+          scheduleRenderMeissa2dPointsOverlay();
+          if (!meissa2dDragging) {
+            const hasAnalysis = meissa2dHasReadyOrthoAnalysisImage();
+            scheduleMeissaOrthoOffsetPanelRefresh(hasAnalysis ? 320 : 560);
+          }
+        });
+      }
+    }, 0);
   }
 
   /**
@@ -4822,9 +5472,22 @@
    */
   function meissa2dGetOrthoPdamRgbFit(circle, opts) {
     const forceSync = Boolean(opts?.forceSync);
+    meissa2dEnsureOrthoAnalysisImage();
     const id = String(circle?.id ?? "");
     if (!id) return { tier: "na", delta: null, offsetM: null };
-    const row = state.pdamByCircleId?.get?.(id);
+    let row = state.pdamByCircleId?.get?.(id);
+    if (!row && state.pdamByCircleId?.size) {
+      const idNum = Number(id);
+      if (Number.isFinite(idNum)) {
+        row = state.pdamByCircleId.get(String(idNum));
+      }
+      if (!row) {
+        row =
+          state.pdamByCircleId.get(String(id).trim()) ||
+          state.pdamByCircleId.get(String(id).replace(/^0+/, "")) ||
+          null;
+      }
+    }
     if (!isPdamCircleMappingInstalled(row)) {
       return { tier: "na", delta: null, offsetM: null, reason: "not-installed" };
     }
@@ -4835,16 +5498,75 @@
     }
     const ck = `${meissa2dOrthoRgbFitCacheGen}:${id}`;
     const hit = meissa2dOrthoRgbFitCache.get(ck);
-    if (hit) return hit;
+    if (hit) {
+      if (
+        (hit.offsetM != null && Number.isFinite(Number(hit.offsetM))) ||
+        (hit.tier && hit.tier !== "na")
+      ) {
+        return hit;
+      }
+      const r = String(hit.reason || "");
+      const shouldPromoteFromPlan =
+        r === "imagedata" ||
+        r === "taint" ||
+        r === "analysis-image-loading" ||
+        r === "analysis-image-missing" ||
+        r === "analyze" ||
+        r === "offset" ||
+        r === "low-confidence";
+      if (shouldPromoteFromPlan) {
+        const outFallback = meissa2dBuildPlanFallbackFitById(id, r || "cached-na", {
+          delta: hit.delta,
+          patchDistDesignPx: hit.patchDistDesignPx,
+          ringAsym: hit.ringAsym,
+          darkestNorm: hit.darkestNorm,
+          detectionScore: hit.detectionScore,
+          footprintOverlap: hit.footprintOverlap,
+          diskCap: hit.diskCap,
+        });
+        if (outFallback) {
+          meissa2dOrthoRgbFitCache.set(ck, outFallback);
+          return outFallback;
+        }
+      }
+      if (hit.reason !== "no-georef") return hit;
+      // georef/offset 상태가 뒤늦게 안정되면 기존 no-georef 캐시를 재평가해 복구한다.
+      const natRetry = fileCoordToOrthoNaturalPixel(circle?.center_x, circle?.center_y);
+      if (!natRetry) return hit;
+      meissa2dOrthoRgbFitCache.delete(ck);
+      if (!forceSync) {
+        meissaOrthoPdamEnqueue(id);
+        return { tier: "na", delta: null, offsetM: null, reason: "pending" };
+      }
+      return meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, natRetry);
+    }
     const nat = fileCoordToOrthoNaturalPixel(circle?.center_x, circle?.center_y);
     if (!nat) {
-      const miss = { tier: "na", delta: null, offsetM: null, reason: "no-georef" };
-      meissa2dOrthoRgbFitCache.set(ck, miss);
-      return miss;
+      const outFallback = meissa2dBuildPlanFallbackFitById(id, "no-georef", {});
+      if (outFallback) return outFallback;
+      return { tier: "na", delta: null, offsetM: null, reason: "no-georef" };
     }
     if (!forceSync) {
       meissaOrthoPdamEnqueue(id);
+      const outFallback = meissa2dBuildPlanFallbackFitById(id, "pending", {});
+      if (outFallback) return outFallback;
       return { tier: "na", delta: null, offsetM: null, reason: "pending" };
+    }
+    if (
+      (!meissa2dOrthoAnalysisImage ||
+        meissa2dOrthoAnalysisImageKey !== meissa2dCurrentProjectSnapshotKey() ||
+        Number(meissa2dOrthoAnalysisImage.naturalWidth || 0) <= 8 ||
+        Number(meissa2dOrthoAnalysisImage.naturalHeight || 0) <= 8) &&
+      !meissa2dOrthoAnalysisImageInFlight
+    ) {
+      meissa2dEnsureOrthoAnalysisImage();
+      meissaOrthoPdamEnqueue(id);
+      const outFallback = meissa2dBuildPlanFallbackFitById(id, "analysis-image-loading", {});
+      if (outFallback) {
+        meissa2dOrthoRgbFitCache.set(ck, outFallback);
+        return outFallback;
+      }
+      return { tier: "na", delta: null, offsetM: null, reason: "analysis-image-loading" };
     }
     return meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, nat);
   }
@@ -5073,6 +5795,11 @@
     ctx.restore();
   }
 
+  function markMeissa2dOverlayWarmup() {
+    const until = Date.now() + MEISSA_2D_OVERLAY_WARMUP_MS;
+    if (until > meissa2dOverlayWarmUntil) meissa2dOverlayWarmUntil = until;
+  }
+
   function meissa2dHexToRgba(hex, alpha) {
     const s = String(hex || "")
       .replace("#", "")
@@ -5154,7 +5881,7 @@
     return { fill: "rgba(220, 38, 38, 0.46)", stroke: "rgba(127, 29, 29, 0.55)", dotRScale: 1.28 };
   }
 
-  function meissa2dDotPaintForCircle(circle) {
+  function meissa2dDotPaintForCircle(circle, orthoFitOverride) {
     const mode = meissa2dColorModeValue();
     const row = state.pdamByCircleId?.get?.(String(circle?.id ?? ""));
     const installed = isPdamCircleMappingInstalled(row);
@@ -5162,14 +5889,12 @@
     const neutralStroke = "rgba(51, 65, 85, 0.48)";
     const grayUnavail = "rgba(148, 163, 184, 0.34)";
     const grayStroke = "rgba(71, 85, 105, 0.5)";
-    const rec = state.meissaCompareByCircleId?.get?.(String(circle?.id ?? ""));
-
     if (mode === "ortho_pdam") {
       /** 미시공은 RGB·평면 폴백 없이 회색(시공 말뚝만 정사 적합도 색). */
       if (!installed) {
         return { fill: grayUnavail, stroke: grayStroke, dotRScale: 1 };
       }
-      const fit = meissa2dGetOrthoPdamRgbFit(circle, { forceSync: true });
+      const fit = orthoFitOverride || meissa2dGetOrthoPdamRgbFit(circle, { forceSync: false });
       if (fit.reason === "pending") {
         return {
           fill: "rgba(148, 186, 222, 0.38)",
@@ -5177,7 +5902,8 @@
           dotRScale: 1.04,
         };
       }
-      if (fit.tier === "na") return meissa2dDotPaintPlanDeviationFromRec(rec);
+      // 정사·시공 적합도에서는 미판정을 planD(평면) 색으로 폴백하면 "초록으로 계산됨"처럼 보일 수 있다.
+      if (fit.tier === "na") return { fill: grayUnavail, stroke: grayStroke, dotRScale: 1 };
       /** 캡(저대비) 말뚝은 등급(초록/노랑/주황)과 관계없이 보라로 표시 */
       if (
         fit.pileCapped &&
@@ -5250,7 +5976,7 @@
     return { fill: neutralFill, stroke: neutralStroke, dotRScale: 1 };
   }
 
-  function meissa2dPushPickHit(px, py, hitR, circle) {
+  function meissa2dBuildPickTooltip(circle, orthoFitOverride) {
     const labelRaw = String(circle?.matched_text?.text ?? "").trim() || "(번호 없음)";
     const bracket = meissa2dFormatCircleLocationBracket(circle);
     const label = bracket ? `${labelRaw}\n${bracket}` : labelRaw;
@@ -5282,14 +6008,27 @@
       pdamLine += `\n평면 편차: ${Number(cmp.planD).toFixed(3)} m`;
     }
     if (tipMode === "ortho_pdam") {
-      const fit = meissa2dGetOrthoPdamRgbFit(circle, { forceSync: true });
+      const fit = orthoFitOverride || meissa2dGetOrthoPdamRgbFit(circle, { forceSync: false });
+      if (
+        fit?.tier === "na" &&
+        (fit.reason === "not-installed" || fit.reason === "pending" || fit.reason === "analysis-image-loading")
+      ) {
+        const hardFallback = meissa2dBuildPlanFallbackFitById(String(circle?.id ?? ""), fit.reason || "soft-na", {});
+        if (hardFallback) {
+          fit.tier = hardFallback.tier;
+          fit.offsetM = hardFallback.offsetM;
+          fit.reason = hardFallback.reason;
+          fit.detectMode = fit.detectMode || hardFallback.detectMode;
+        }
+      }
       if (fit.offsetM != null && Number.isFinite(fit.offsetM)) {
         pdamLine += `\n정사 추정 중심 오프셋: ${meissaOrthoFormatOffsetM(fit.offsetM)} m`;
         if (fit.patchDistDesignPx != null && Number.isFinite(fit.patchDistDesignPx)) {
           pdamLine += ` (도면대비 ${fit.patchDistDesignPx.toFixed(2)} px)`;
         }
       } else if (fit.tier === "na") {
-        pdamLine += `\n정사 추정 오프셋: (미산출)`;
+        if (fit.reason === "pending") pdamLine += `\n정사 추정 오프셋: 계산 중…`;
+        else pdamLine += `\n정사 추정 오프셋: (미산출)`;
       }
       if (fit.delta != null && Number.isFinite(fit.delta)) {
         pdamLine += `\n코어·링 명암차: ${fit.delta.toFixed(1)}`;
@@ -5301,8 +6040,17 @@
       pdamLine += meissaOrthoFootprintOverlapTooltipLines(fit.footprintOverlap);
     }
     const coordLine = `도면 X,Y,Z: ${Number.isFinite(cx) ? cx.toFixed(3) : "-"}, ${Number.isFinite(cy) ? cy.toFixed(3) : "-"}, ${cz != null ? cz.toFixed(3) : "-"}`;
-    const tooltip = [label, coordLine, pdamLine].filter(Boolean).join("\n");
-    meissa2dPickHits.push({ x: px, y: py, r: Math.max(6, hitR), circle, tooltip });
+    return [label, coordLine, pdamLine].filter(Boolean).join("\n");
+  }
+
+  function meissa2dPushPickHit(px, py, hitR, circle, orthoFitOverride) {
+    meissa2dPickHits.push({
+      x: px,
+      y: py,
+      r: Math.max(6, hitR),
+      circle,
+      fit: orthoFitOverride || null,
+    });
   }
 
   function meissa2dClearExpiredInboundFocus() {
@@ -5361,7 +6109,13 @@
     });
   }
 
+  function meissa2dSuppressHoverFor(ms) {
+    const until = Date.now() + Math.max(0, Number(ms) || 0);
+    if (until > meissa2dHoverSuppressUntil) meissa2dHoverSuppressUntil = until;
+  }
+
   function setMeissa2dHoverPickFromBest(best) {
+    if (Date.now() < meissa2dHoverSuppressUntil) return;
     const next = best?.circle != null ? String(best.circle.id ?? "") : "";
     const cur = meissa2dHoverCircleId == null ? "" : String(meissa2dHoverCircleId);
     if (cur === next) return;
@@ -5382,7 +6136,11 @@
   }
 
   function applyMeissaInboundFocusFromIframeData(data) {
-    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const circlesBase = Array.isArray(state.circles) ? state.circles : [];
+    const circles =
+      meissa2dColorModeValue() === "ortho_pdam"
+        ? meissa2dDedupCirclesForOrthoPdam(circlesBase)
+        : circlesBase;
     if (!circles.length) return;
     const cidRaw = data.circleId ?? data.circle_id ?? data.circleID;
     if (cidRaw != null && String(cidRaw).trim() !== "") {
@@ -6311,7 +7069,7 @@
   }
 
   /** 정사 미리보기: <img src> 용(Authorization 대신 access_token 쿼리). maxEdge 생략 시 16384. */
-  function buildOrthophotoPreviewImgUrl(snapshotId, projectId, accessToken, maxEdge) {
+  function buildOrthophotoPreviewImgUrl(snapshotId, projectId, accessToken, maxEdge, previewFmt) {
     const e = Number(maxEdge);
     const edge =
       Number.isFinite(e) && e >= 1024 ? Math.min(16384, Math.round(e)) : 16384;
@@ -6320,6 +7078,21 @@
       access_token: normalizeMeissaAccessToken(accessToken),
       max_edge: String(edge),
     });
+    const pf = String(previewFmt || "png").toLowerCase();
+    if (pf === "jpeg" || pf === "webp") {
+      params.set("fmt", pf);
+    }
+    return `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(String(snapshotId).trim())}/orthophoto-preview?${params}`;
+  }
+
+  /** 백엔드 대리호출 URL(JWT 헤더). 예전 버전과 동일하게 max_edge 생략 가능. */
+  function buildOrthophotoPreviewApiUrl(snapshotId, projectId, maxEdge) {
+    const params = new URLSearchParams({
+      project_id: String(projectId || "").trim(),
+    });
+    if (Number.isFinite(Number(maxEdge)) && Number(maxEdge) > 0) {
+      params.set("max_edge", String(Math.round(Number(maxEdge))));
+    }
     return `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(String(snapshotId).trim())}/orthophoto-preview?${params}`;
   }
 
@@ -6339,7 +7112,7 @@
   })();
   /** 팬 중 매 프레임 fetch 방지 — 멈춘 뒤 한 번만 요청 */
   /** 팬·휠 연속 시 fetch 남발 방지 — 캐시 히트는 별도 즉시 경로 */
-  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_DEBOUNCE_MS = 24;
+  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_DEBOUNCE_MS = 72;
   /** full 픽셀 crop 을 그리드에 맞춤 — 살짝 움직여도 같은 타일이면 캐시 히트 */
   const MEISSA_ORTHOPHOTO_VIEWPORT_CROP_SNAP_PX = 512;
   /**
@@ -6354,8 +7127,8 @@
    * 서버가 고해상만 404이고 저해상 캐시만 있을 때 3/3 재시도까지 모두 실패하던 구멍을 막음.
    */
   const MEISSA_ORTHOPHOTO_FULL_IMAGE_FALLBACK_EDGES = [6144, 4096, MEISSA_ORTHOPHOTO_PREVIEW_EDGE];
-  /** 확대 뷰 crop 패치 — 메인 정사와 동일 max_edge */
-  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_EDGE = MEISSA_ORTHOPHOTO_FULL_MAX_EDGE;
+  /** 확대 뷰 crop 패치 — base 정사보다 더 높은 edge를 허용해 줌 선명도 확보 */
+  const MEISSA_ORTHOPHOTO_VIEWPORT_HI_EDGE = 16384;
   /** 고해상 orthophoto-preview GET — PNG가 커서 여유 있게 둠 */
   const MEISSA_ORTHOPHOTO_HIGH_FETCH_MS = 600000;
   /**
@@ -6366,8 +7139,10 @@
    */
   const MEISSA_ORTHOPHOTO_MAIN_HIGH_USE_FETCH =
     typeof window === "undefined" || window.__MEISSA_ORTHO_MAIN_HIGH_USE_FETCH__ !== false;
-  /** overlay-2d-image/raw 등 대용량: 짧은 타임아웃은 서버 지연 시 Abort로 JSON 폴백까지 막음 */
-  const MEISSA_OVERLAY_2D_RAW_FETCH_MS = 600000;
+  /** overlay-2d-image/raw 단계 타임아웃(ms). 속도 우선(빠른 폴백) */
+  const MEISSA_OVERLAY_2D_RAW_FETCH_MS = 22000;
+  /** overlay-2d-image(JSON/dataUrl) 단계 타임아웃(ms). */
+  const MEISSA_OVERLAY_2D_JSON_FETCH_MS = 18000;
 
   /** orthophoto-preview URL이 세션 캐시에 있어도 재사용하면 안 되는 저해상 tier(확대해도 번짐). */
   function meissa2dOrthophotoUrlIsSubFullTier(url) {
@@ -6381,6 +7156,29 @@
       return me < MEISSA_ORTHOPHOTO_FULL_MAX_EDGE;
     } catch (_) {
       return /[?&]max_edge=(6144|4096|3072|2048|1024)\b/.test(s);
+    }
+  }
+
+  /** 버튼 URL(export/orthophoto) 계열은 모바일 브라우저 내부 다운샘플로 줌 블러를 유발하기 쉬움. */
+  function meissa2dOrthophotoUrlIsButtonExport(url) {
+    const s = String(url || "").trim().toLowerCase();
+    if (!s) return false;
+    return s.includes("/export/orthophoto/") || /orthophoto_\d+x\.png/.test(s);
+  }
+
+  function meissa2dSignedUrlIsExpired(url) {
+    const s = String(url || "").trim();
+    if (!s || s.startsWith("blob:") || s.startsWith("data:")) return false;
+    try {
+      const u = new URL(s, window.location.origin);
+      const expRaw = (u.searchParams.get("Expires") || "").trim();
+      if (!/^\d+$/.test(expRaw)) return false;
+      const exp = Number(expRaw);
+      if (!Number.isFinite(exp) || exp <= 0) return false;
+      const nowSec = Math.floor(Date.now() / 1000);
+      return nowSec >= exp - 10;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -6451,6 +7249,17 @@
     } catch (_) {
       return NaN;
     }
+  }
+
+  /** URL 쿼리(max_edge) 또는 파일명(orthophoto_25000x.png)에서 기대 장변(px) 추정 */
+  function meissa2dOrthoNominalLongEdgeFromImgSrc(imgSrc) {
+    const me = meissa2dOrthoMaxEdgeFromImgSrc(imgSrc);
+    if (Number.isFinite(me) && me > 0) return me;
+    const u = String(imgSrc || "");
+    const m = u.match(/orthophoto_(\d+)x\.png/i);
+    if (!m) return NaN;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : NaN;
   }
 
   /** 메인 <img>가 잘못된 캐시 엔트리를 물지 않게(고해상 URL만) */
@@ -6796,6 +7605,7 @@
     return new Promise((resolve) => {
       let settled = false;
       let lowFailed = false;
+      let lowDecodeRepairAttempts = 0;
       let highProbeFailed = false;
       let highImageProbeStarted = false;
       /** 메인 img 가 고해상(URL 또는 blob) 로드 중이면 true */
@@ -7297,7 +8107,27 @@
 
       const onImgLoad = () => {
         if (!isMeissa2dLoadCurrent(loadSeq, sid)) return;
-        if (imgEl.naturalWidth <= 0) return;
+        markMeissa2dOverlayWarmup();
+        const nowW = Number(imgEl.naturalWidth || 0);
+        const nowH = Number(imgEl.naturalHeight || 0);
+        if (nowW <= 0) return;
+        const nowAr = nowH > 0 ? nowW / nowH : Number.POSITIVE_INFINITY;
+        const suspiciousDecode = nowW > 200 && (nowH < 48 || nowAr > 10);
+        if (!mainLoadingHigh && suspiciousDecode && lowDecodeRepairAttempts < 1 && low) {
+          lowDecodeRepairAttempts += 1;
+          scheduleHighPrefetchOnce();
+          try {
+            const repairedLow = withOrthophotoImgCacheBust(low);
+            setMeissa2dRawUrlForSnapshot(String(sid).trim(), repairedLow);
+            imgEl.src = repairedLow;
+            pushMeissa2dLoadLine(
+              "정사: 저해상 디코드 비율이 비정상이라 재요청합니다(깨짐 복구 시도 1/1)"
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          return;
+        }
         meissa2dOrthoInteractReady = true;
         if (!firstDecodeDone) {
           firstDecodeDone = true;
@@ -7822,6 +8652,15 @@
   }
 
   function clearMeissa2dOrthoViewportHi() {
+    if (meissa2dOrthoViewportHiLocalRaf) {
+      try {
+        window.cancelAnimationFrame(meissa2dOrthoViewportHiLocalRaf);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dOrthoViewportHiLocalRaf = 0;
+    }
+    meissa2dOrthoViewportHiLocalLastLogTs = 0;
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoHiBadgeProgTimer) {
@@ -7849,6 +8688,14 @@
       }
       meissa2dOrthoViewportHiTimer = 0;
     }
+    if (meissa2dViewSettleTimer) {
+      try {
+        window.clearTimeout(meissa2dViewSettleTimer);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dViewSettleTimer = 0;
+    }
     if (meissa2dOrthoViewportHiAbort) {
       try {
         meissa2dOrthoViewportHiAbort.abort();
@@ -7859,6 +8706,14 @@
     }
     meissa2dOrthoViewportHiLastKey = "";
     meissa2dOrthoViewportHiLayoutMeta = null;
+    meissa2dOrthoPatchImageSource = null;
+    meissa2dOrthoAnalysisImage = null;
+    meissa2dOrthoAnalysisImageKey = "";
+    meissa2dOrthoAnalysisImageInFlight = false;
+    meissa2dOrthoAnalysisImageFailKey = "";
+    meissa2dOrthoAnalysisImageReqSeq++;
+    meissa2dOrthoAnalysisPrimeSig = "";
+    meissa2dOrthoAnalysisPrimeInFlight = false;
     const hi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
     if (hi) {
       if (hi.tagName === "CANVAS") {
@@ -7879,6 +8734,15 @@
 
   /** 뷰패치만 끄고 배지(replay·고화질 줄)는 건드리지 않음 */
   function shutdownMeissa2dOrthoViewportHiOnly() {
+    if (meissa2dOrthoViewportHiLocalRaf) {
+      try {
+        window.cancelAnimationFrame(meissa2dOrthoViewportHiLocalRaf);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dOrthoViewportHiLocalRaf = 0;
+    }
+    meissa2dOrthoViewportHiLocalLastLogTs = 0;
     meissa2dOrthoViewportHi503Streak = 0;
     meissa2dOrthoViewportHiFetchInFlight = false;
     if (meissa2dOrthoViewportHiTimer) {
@@ -7888,6 +8752,14 @@
         /* ignore */
       }
       meissa2dOrthoViewportHiTimer = 0;
+    }
+    if (meissa2dViewSettleTimer) {
+      try {
+        window.clearTimeout(meissa2dViewSettleTimer);
+      } catch (_) {
+        /* ignore */
+      }
+      meissa2dViewSettleTimer = 0;
     }
     if (meissa2dOrthoViewportHiAbort) {
       try {
@@ -7899,6 +8771,14 @@
     }
     meissa2dOrthoViewportHiLastKey = "";
     meissa2dOrthoViewportHiLayoutMeta = null;
+    meissa2dOrthoPatchImageSource = null;
+    meissa2dOrthoAnalysisImage = null;
+    meissa2dOrthoAnalysisImageKey = "";
+    meissa2dOrthoAnalysisImageInFlight = false;
+    meissa2dOrthoAnalysisImageFailKey = "";
+    meissa2dOrthoAnalysisImageReqSeq++;
+    meissa2dOrthoAnalysisPrimeSig = "";
+    meissa2dOrthoAnalysisPrimeInFlight = false;
     try {
       clearMeissa2dOrthoViewportHiTileCache();
     } catch (_) {
@@ -7939,7 +8819,7 @@
       el.className = "meissa-cloud-2d-ortho-viewport-hi";
       el.setAttribute("aria-hidden", "true");
       el.style.cssText =
-        "position:absolute;pointer-events:none;z-index:2;display:none;image-rendering:crisp-edges;";
+        "position:absolute;pointer-events:none;z-index:2;display:none;image-rendering:auto;";
       const pts = document.getElementById("meissa-cloud-2d-points-overlay");
       if (pts && pts.parentNode === root) root.insertBefore(el, pts);
       else root.appendChild(el);
@@ -7949,6 +8829,116 @@
       else root.appendChild(el);
     }
     return el;
+  }
+
+  /**
+   * 버튼 URL 단일 모드 전용: orthophoto-preview 네트워크 없이
+   * 현재 메인 <img>에서 보이는 영역만 고해상 캔버스로 즉시 재표본화한다.
+   * (CSS transform에 고정된 저해상 텍스처가 확대되는 느낌을 줄임)
+   */
+  function renderMeissa2dOrthoViewportHiFromMainImageLocal() {
+    if (!MEISSA_2D_SIMPLE_ORTHO) return;
+    const img = els.meissaCloud2dImageLocal;
+    const wrap = document.querySelector(".meissa-2d-overlay-wrap");
+    if (!img || !wrap || !hasRenderableOverlayImage(img)) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    if (img.getAttribute("data-meissa-2d-intrinsic-layout") !== "1") {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const nw = Math.round(Number(img.naturalWidth || 0));
+    const nh = Math.round(Number(img.naturalHeight || 0));
+    if (nw < 32 || nh < 32) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const sPan = meissa2dPanzoomScaleSanitized();
+    const tx = Number(meissa2dViewTx) || 0;
+    const ty = Number(meissa2dViewTy) || 0;
+    const ww = Math.max(1, Number(wrap.clientWidth || 1));
+    const wh = Math.max(1, Number(wrap.clientHeight || 1));
+    const viewLeft = -tx / sPan;
+    const viewTop = -ty / sPan;
+    const viewW = Math.max(1, ww / sPan);
+    const viewH = Math.max(1, wh / sPan);
+    const ix0 = Math.max(0, Math.floor(viewLeft));
+    const iy0 = Math.max(0, Math.floor(viewTop));
+    const ix1 = Math.min(nw, Math.ceil(viewLeft + viewW));
+    const iy1 = Math.min(nh, Math.ceil(viewTop + viewH));
+    const visW = Math.max(1, ix1 - ix0);
+    const visH = Math.max(1, iy1 - iy0);
+    if (visW < 8 || visH < 8) {
+      const hi0 = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (hi0) hi0.style.display = "none";
+      return;
+    }
+    const vpPx = meissa2dOverlayPixelScaleForViewportCanvas(ww, wh, sPan);
+    const cnv = ensureMeissa2dOrthoViewportHiCanvas();
+    if (!cnv) return;
+    const ctx = cnv.getContext("2d");
+    if (!ctx) return;
+    const bw = Math.max(1, Math.round(visW * vpPx));
+    const bh = Math.max(1, Math.round(visH * vpPx));
+    if (cnv.width !== bw || cnv.height !== bh) {
+      cnv.width = bw;
+      cnv.height = bh;
+    }
+    meissa2dOrthoViewportHiLayoutMeta = {
+      type: "local-main-image",
+      left: ix0,
+      top: iy0,
+      width: visW,
+      height: visH,
+      pxScale: vpPx,
+    };
+    cnv.style.display = "block";
+    cnv.style.position = "absolute";
+    cnv.style.zIndex = "2";
+    syncMeissa2dOrthoViewportHiLayout();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, bw, bh);
+    ctx.setTransform(vpPx, 0, 0, vpPx, 0, 0);
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    let prevQuality = "low";
+    try {
+      if ("imageSmoothingQuality" in ctx) prevQuality = ctx.imageSmoothingQuality;
+    } catch (_) {
+      /* ignore */
+    }
+    ctx.imageSmoothingEnabled = true;
+    try {
+      if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, ix0, iy0, visW, visH, 0, 0, visW, visH);
+    } finally {
+      ctx.imageSmoothingEnabled = prevSmooth;
+      try {
+        if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = prevQuality;
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    const now = Date.now();
+    if (now - Number(meissa2dOrthoViewportHiLocalLastLogTs || 0) > 1200) {
+      meissa2dOrthoViewportHiLocalLastLogTs = now;
+      pushMeissa2dLoadLine(
+        `정사: 줌 캔버스 재갱신 view ${Math.round(visW)}×${Math.round(visH)} · back ${bw}×${bh} · scale×${sPan.toFixed(2)}`
+      );
+    }
+  }
+
+  function scheduleMeissa2dOrthoViewportHiFromMainImageLocal() {
+    if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+    if (meissa2dOrthoViewportHiLocalRaf) return;
+    meissa2dOrthoViewportHiLocalRaf = window.requestAnimationFrame(() => {
+      meissa2dOrthoViewportHiLocalRaf = 0;
+      if (!isMeissa2dButtonUrlOnlySingleMode()) return;
+      renderMeissa2dOrthoViewportHiFromMainImageLocal();
+    });
   }
 
   function syncMeissa2dOrthoViewportHiLayout() {
@@ -7965,6 +8955,10 @@
   /** 메인 <img>가 이미 full max_edge 급이면 crop 캔버스는 이중 합성으로 깨짐·번짐만 유발 */
   function meissa2dOrthoViewportHiRedundantWithMainImg(imgEl) {
     if (!imgEl || !MEISSA_2D_SIMPLE_ORTHO || MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES) return false;
+    const srcKind = getMeissa2dImageDataSource(imgEl);
+    // 버튼 URL(export PNG)은 모바일 브라우저에서 내부 다운샘플될 수 있어
+    // naturalWidth가 커도 뷰포트 패치 fetch를 유지한다.
+    if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") return false;
     const nw = Math.round(Number(imgEl.naturalWidth || 0));
     const nh = Math.round(Number(imgEl.naturalHeight || 0));
     if (nw < 32 || nh < 32) return false;
@@ -8046,6 +9040,10 @@
 
   function scheduleMeissa2dOrthoViewportHiFetch() {
     if (!MEISSA_2D_SIMPLE_ORTHO) return;
+    if (isMeissa2dButtonUrlOnlySingleMode()) {
+      scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
+      return;
+    }
     if (MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI) {
       shutdownMeissa2dOrthoViewportHiOnly();
       try {
@@ -8143,8 +9141,8 @@
   }
 
   /**
-   * 뷰포트 정사 패치 전용: 줌·팬마다 전체를 다시 그릴 때 다운스케일 보간(high)이
-   * ‘픽셀을 다시 쓰며 번지는’ 느낌을 줌. 평면비교용 선예도 우선 → 항상 최근접(보간 끔).
+   * 뷰포트 정사 패치 전용: 사진 기반 정사 이미지는 최근접(보간 끔)으로 확대하면
+   * 줌 중 계단·깨짐이 도드라진다. 확대/축소 비율에 맞춰 스무딩을 켜서 시각 품질을 우선한다.
    */
   function drawOrthoTilePatch(ctx, im, iw, ih, dx, dy, dw, dh) {
     const prevS = ctx.imageSmoothingEnabled;
@@ -8154,9 +9152,14 @@
     } catch (_) {
       /* ignore */
     }
-    ctx.imageSmoothingEnabled = false;
+    const scaleX = Math.max(1e-6, Number(dw) / Math.max(1, Number(iw) || 1));
+    const scaleY = Math.max(1e-6, Number(dh) / Math.max(1, Number(ih) || 1));
+    const isUpscale = scaleX > 1.03 || scaleY > 1.03;
+    ctx.imageSmoothingEnabled = true;
     try {
-      if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = "low";
+      if ("imageSmoothingQuality" in ctx) {
+        ctx.imageSmoothingQuality = isUpscale ? "high" : "medium";
+      }
       ctx.drawImage(im, 0, 0, iw, ih, dx, dy, dw, dh);
     } finally {
       ctx.imageSmoothingEnabled = prevS;
@@ -8282,18 +9285,34 @@
 
     let guessFullW = Number(geo.width);
     let guessFullH = Number(geo.height);
+    const srcKind = getMeissa2dImageDataSource(img);
+    const nominalLong = meissa2dOrthoNominalLongEdgeFromImgSrc(img?.src || "");
     const geoHasLarger =
       Number.isFinite(guessFullW) &&
       Number.isFinite(guessFullH) &&
       guessFullW > nw * 1.12 &&
       guessFullH > nh * 1.12;
     if (!geoHasLarger) {
-      if (nw > MEISSA_ORTHOPHOTO_FULL_MAX_EDGE + 256) {
-        setMeissa2dOrthoHiBadge("", "idle");
-        return { t: "clear" };
+      if (srcKind === "orthophoto-button-url" || srcKind === "orthophoto-export") {
+        const targetLong = Number.isFinite(nominalLong)
+          ? nominalLong
+          : Math.max(MEISSA_ORTHOPHOTO_FULL_MAX_EDGE * 2, Math.max(nw, nh));
+        const ar = nw / Math.max(1, nh);
+        if (ar >= 1) {
+          guessFullW = Math.min(56000, Math.max(nw, targetLong));
+          guessFullH = Math.min(56000, Math.max(nh, Math.round(guessFullW / Math.max(1e-9, ar))));
+        } else {
+          guessFullH = Math.min(56000, Math.max(nh, targetLong));
+          guessFullW = Math.min(56000, Math.max(nw, Math.round(guessFullH * ar)));
+        }
+      } else {
+        if (nw > MEISSA_ORTHOPHOTO_FULL_MAX_EDGE + 256) {
+          setMeissa2dOrthoHiBadge("", "idle");
+          return { t: "clear" };
+        }
+        guessFullW = Math.min(56000, Math.max(nw * 4, nw));
+        guessFullH = Math.min(56000, Math.round(nh * (guessFullW / Math.max(nw, 1))));
       }
-      guessFullW = Math.min(56000, Math.max(nw * 4, nw));
-      guessFullH = Math.min(56000, Math.round(nh * (guessFullW / Math.max(nw, 1))));
     }
     const cached = meissa2dOrthoFullPxBySnapshot[snapKey];
     let effFullW = Number(cached?.w) > 0 ? Number(cached.w) : guessFullW;
@@ -8825,7 +9844,19 @@
     const a = String(imgEl?.getAttribute?.("data-meissa-2d-source") || "").trim();
     if (a) return a;
     const src = String(imgEl?.getAttribute?.("src") || "").trim();
-    if (src.includes("cs.carta.is") && src.includes("/orthophoto/")) return "carta-tile";
+    if (!src) return "";
+    try {
+      const u = new URL(src, window.location.origin);
+      const p = String(u.pathname || "").toLowerCase();
+      // 슬리피 타일 경로 (/universal/orthophoto/{z}/{x}/{y}.png)만 타일로 본다.
+      if (p.includes("/universal/orthophoto/")) return "carta-tile";
+      // export/orthophoto/{filename}.png 는 전체 정사 이미지다(타일 아님).
+      if (p.includes("/export/orthophoto/")) return "orthophoto-export";
+    } catch (_) {
+      const low = src.toLowerCase();
+      if (low.includes("/universal/orthophoto/")) return "carta-tile";
+      if (low.includes("/export/orthophoto/")) return "orthophoto-export";
+    }
     return "";
   }
 
@@ -8836,7 +9867,17 @@
   function useFullGeorefForOverlayImage(imgEl) {
     const s = getMeissa2dImageDataSource(imgEl);
     if (s === "carta-tile") return false;
-    if (s === "orthophoto-tif" || s === "raw" || s === "raw-cache" || s === "data-url") return true;
+    if (
+      s === "orthophoto-tif" ||
+      s === "orthophoto-preview" ||
+      s === "raw" ||
+      s === "raw-cache" ||
+      s === "data-url" ||
+      s === "orthophoto-export" ||
+      s === "orthophoto-button-url"
+    ) {
+      return true;
+    }
     const iw = Number(imgEl?.naturalWidth || 0);
     const ih = Number(imgEl?.naturalHeight || 0);
     /** 저해상 프리뷰도 전역 bbox letterbox면 georef 매핑 가능. 예전: 512 미만이면 분기 스킵 → 심플 모드에서 점 0개 */
@@ -8915,6 +9956,10 @@
         height: Number.isFinite(Number(g?.height)) ? Number(g.height) : undefined,
       };
       meissa2dGeorefBySnapshot[key] = out;
+      // georef가 늦게 도착하면 기존 no-georef/na 캐시가 남아 미판정 고정될 수 있다.
+      bumpMeissa2dOrthoRgbFitCache();
+      scheduleRenderMeissa2dPointsOverlay();
+      scheduleMeissaOrthoOffsetPanelRefresh();
       return out;
     } catch (_) {
       return null;
@@ -9057,17 +10102,21 @@
 
   /** 모자이크와 정사영상 img를 같은 정사각 프레임에 두어 점·배경 기준을 일치 */
   function syncMeissa2dSquareMapFrameLayout() {
+    const { w: pw, h: ph } = getOverlayWrapSize();
     const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
     const img = els.meissaCloud2dImageLocal;
-    if (MEISSA_2D_SIMPLE_ORTHO) {
-      meissa2dMapViewport = { offX: 0, offY: 0, side: 0 };
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
+      const mapSideSimple = Math.min(pw, ph);
+      const mOffXSimple = (pw - mapSideSimple) / 2;
+      const mOffYSimple = (ph - mapSideSimple) / 2;
+      meissa2dMapViewport = { offX: mOffXSimple, offY: mOffYSimple, side: mapSideSimple };
       if (mosaic) {
         mosaic.style.position = "absolute";
-        mosaic.style.inset = "0";
-        mosaic.style.left = "0";
-        mosaic.style.top = "0";
-        mosaic.style.width = "100%";
-        mosaic.style.height = "100%";
+        mosaic.style.inset = "auto";
+        mosaic.style.left = `${mOffXSimple}px`;
+        mosaic.style.top = `${mOffYSimple}px`;
+        mosaic.style.width = `${mapSideSimple}px`;
+        mosaic.style.height = `${mapSideSimple}px`;
       }
       if (img) {
         img.style.position = "absolute";
@@ -9078,16 +10127,15 @@
         ) {
           applyMeissa2dIntrinsicImgLayout(img);
         } else {
-          img.style.inset = "0";
-          img.style.left = "0";
-          img.style.top = "0";
-          img.style.width = "100%";
-          img.style.height = "100%";
+          img.style.inset = "auto";
+          img.style.left = `${mOffXSimple}px`;
+          img.style.top = `${mOffYSimple}px`;
+          img.style.width = `${mapSideSimple}px`;
+          img.style.height = `${mapSideSimple}px`;
         }
       }
       return;
     }
-    const { w: pw, h: ph } = getOverlayWrapSize();
     const mapSide = Math.min(pw, ph);
     const mOffX = (pw - mapSide) / 2;
     const mOffY = (ph - mapSide) / 2;
@@ -9201,6 +10249,8 @@
    */
   function renderMeissa2dPointsOverlayInFileSpace(ctx, wrapW, wrapH, circles, pixelScale, opts) {
     const onOrtho = Boolean(opts?.overlayOnOrtho);
+    const deferHeavyOverlay = Boolean(opts?.deferHeavyOverlay);
+    const getOrthoFit = typeof opts?.getOrthoFit === "function" ? opts.getOrthoFit : null;
     const ps = Number(pixelScale) > 0 ? Number(pixelScale) : 1;
     const lw = meissa2dOverlayLineWidthCssPx(ps, 1.15);
     const b = getFileCoordBoundsFromCircles(circles);
@@ -9294,7 +10344,8 @@
       if (Number.isFinite(rad) && rad > 1e-6) {
         rPx = Math.abs(rad) * unit;
       }
-      const paint = meissa2dDotPaintForCircle(c);
+      const fit = meissa2dColorModeValue() === "ortho_pdam" && getOrthoFit ? getOrthoFit(c) : null;
+      const paint = meissa2dDotPaintForCircle(c, fit);
       const hasFoot = Number.isFinite(rPx) && rPx >= 0.12 && rPx < maxRF;
       if (hasFoot) {
         meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRF, paint);
@@ -9306,19 +10357,23 @@
       const dotR = meissa2dOverlayDotRadiusCssPx(dotBaseF) * (paint.dotRScale || 1);
       meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, hasFoot);
       meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
-      meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c);
+      if (!deferHeavyOverlay) {
+        meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c, fit);
+      }
       if (meissaDatasetSelectedIds.has(String(c?.id ?? ""))) {
         meissaDatasetDrawSelectionRing(ctx, px, py, pixelScale, hasFoot, rPx, dotR);
       }
     }
-    for (const c of circles) {
-      if (!meissa2dCirclePassesRemainingFilter(c)) continue;
-      const x = Number(c?.center_x);
-      const y = Number(c?.center_y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const px = mapX(x);
-      const py = mapY(y);
-      meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+    if (!deferHeavyOverlay) {
+      for (const c of circles) {
+        if (!meissa2dCirclePassesRemainingFilter(c)) continue;
+        const x = Number(c?.center_x);
+        const y = Number(c?.center_y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const px = mapX(x);
+        const py = mapY(y);
+        meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+      }
     }
     ctx.restore();
   }
@@ -9386,41 +10441,50 @@
       const maxX = Number(geo.bbox.maxX);
       const maxY = Number(geo.bbox.maxY);
       const mapFileToGeorefPx = (ffx, ffy, loose) => {
-        let wx = Number(ffx);
-        let wy = Number(ffy);
-        if (!Number.isFinite(wx) || !Number.isFinite(wy)) return null;
-        if (srcCrs !== dstCrs && ensureProj4Defs()) {
-          try {
-            const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
-            wx = Number(pp?.[0]);
-            wy = Number(pp?.[1]);
-          } catch (_) {
-            return null;
+        const baseX = Number(ffx);
+        const baseY = Number(ffy);
+        if (!Number.isFinite(baseX) || !Number.isFinite(baseY)) return null;
+        const { ox, oy } = meissa2dReadOffsetXY();
+        const candidates = [{ wx: baseX + ox, wy: baseY + oy }];
+        if (Math.abs(ox) > 1e-9 || Math.abs(oy) > 1e-9) candidates.push({ wx: baseX, wy: baseY });
+        for (const cand of candidates) {
+          let wx = Number(cand.wx);
+          let wy = Number(cand.wy);
+          if (!Number.isFinite(wx) || !Number.isFinite(wy)) continue;
+          if (srcCrs !== dstCrs && ensureProj4Defs()) {
+            try {
+              const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
+              wx = Number(pp?.[0]);
+              wy = Number(pp?.[1]);
+            } catch (_) {
+              continue;
+            }
           }
-        }
-        const nx = (wx - minX) / Math.max(1e-9, maxX - minX);
-        const ny = (maxY - wy) / Math.max(1e-9, maxY - minY);
-        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
-        const px = imgRect.x + nx * imgRect.w;
-        const py = imgRect.y + ny * imgRect.h;
-        if (!loose) {
-          const ax0 = imgRect.x;
-          const ay0 = imgRect.y;
-          if (
-            px < ax0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            px > ax0 + imgRect.w + MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            py < ay0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            py > ay0 + imgRect.h + MEISSA_2D_IMG_EDGE_MARGIN_CSS
-          ) {
-            return null;
+          const nx = (wx - minX) / Math.max(1e-9, maxX - minX);
+          const ny = (maxY - wy) / Math.max(1e-9, maxY - minY);
+          if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+          const px = imgRect.x + nx * imgRect.w;
+          const py = imgRect.y + ny * imgRect.h;
+          if (!loose) {
+            const ax0 = imgRect.x;
+            const ay0 = imgRect.y;
+            if (
+              px < ax0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
+              px > ax0 + imgRect.w + MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
+              py < ay0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
+              py > ay0 + imgRect.h + MEISSA_2D_IMG_EDGE_MARGIN_CSS
+            ) {
+              continue;
+            }
           }
+          return { px, py, nx, ny };
         }
-        return { px, py, nx, ny };
+        return null;
       };
       const m = mapFileToGeorefPx(fxx, fyy, false);
       return m ? { px: m.px, py: m.py } : null;
     }
-    if (MEISSA_2D_SIMPLE_ORTHO) return null;
+    if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive()) return null;
     if (imageVisible && getMeissa2dImageDataSource(imgEl) === "carta-tile") {
       const snapKey = `${projectId}:${sid}`;
       const hint = meissa2dSnapshotTileHints[snapKey];
@@ -9571,6 +10635,19 @@
     meissa2dClearPickHits();
     meissa2dClearExpiredInboundFocus();
     const circles = Array.isArray(state.circles) ? state.circles : [];
+    const overlayWarm =
+      Date.now() < meissa2dOverlayWarmUntil && circles.length >= MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES;
+    const effectiveOverlayWarm = false;
+    const renderFitCache = new Map();
+    const getOrthoFitForRender = (circle) => {
+      if (meissa2dColorModeValue() !== "ortho_pdam") return null;
+      const id = String(circle?.id ?? "");
+      if (!id) return null;
+      if (renderFitCache.has(id)) return renderFitCache.get(id);
+      const fit = meissa2dGetOrthoPdamRgbFit(circle, { forceSync: false });
+      renderFitCache.set(id, fit);
+      return fit;
+    };
     if (!circles.length) {
       meissa2dViewportSharpOverlayActive = false;
       meissaOrthoOverlayDoneIds = null;
@@ -9602,7 +10679,10 @@
         meissa2dOverlayMode = "file";
         setMeissa2dLayerVisibility({ showMosaic: false, showImage: false });
       }
-      renderMeissa2dPointsOverlayInFileSpace(ctx, w, h, circles, pxScale);
+      renderMeissa2dPointsOverlayInFileSpace(ctx, w, h, circles, pxScale, {
+        deferHeavyOverlay: overlayWarm,
+        getOrthoFit: getOrthoFitForRender,
+      });
       return;
     }
     {
@@ -9732,36 +10812,48 @@
       let statMaxNy = Number.NEGATIVE_INFINITY;
       ctx.lineWidth = meissa2dOverlayLineWidthCssPx(pxScale, 1.25);
       const mapFileToGeorefPx = (fx, fy, loose) => {
-        let wx = Number(fx);
-        let wy = Number(fy);
-        if (!Number.isFinite(wx) || !Number.isFinite(wy)) return null;
-        if (srcCrs !== dstCrs && ensureProj4Defs()) {
-          try {
-            const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
-            wx = Number(pp?.[0]);
-            wy = Number(pp?.[1]);
-          } catch (_) {
-            return null;
+        const baseX = Number(fx);
+        const baseY = Number(fy);
+        if (!Number.isFinite(baseX) || !Number.isFinite(baseY)) return null;
+        const { ox, oy } = meissa2dReadOffsetXY();
+        const candidates = [{ wx: baseX + ox, wy: baseY + oy }];
+        if (Math.abs(ox) > 1e-9 || Math.abs(oy) > 1e-9) candidates.push({ wx: baseX, wy: baseY });
+        for (const cand of candidates) {
+          let wx = Number(cand.wx);
+          let wy = Number(cand.wy);
+          if (!Number.isFinite(wx) || !Number.isFinite(wy)) continue;
+          if (srcCrs !== dstCrs && ensureProj4Defs()) {
+            try {
+              const pp = window.proj4(srcCrs, dstCrs, [wx, wy]);
+              wx = Number(pp?.[0]);
+              wy = Number(pp?.[1]);
+            } catch (_) {
+              continue;
+            }
           }
-        }
-        const nx = (wx - minX) / Math.max(1e-9, maxX - minX);
-        const ny = (maxY - wy) / Math.max(1e-9, maxY - minY);
-        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
-        const px = imgRect.x + nx * imgRect.w;
-        const py = imgRect.y + ny * imgRect.h;
-        if (!loose) {
-          const ax0 = imgRect.x;
-          const ay0 = imgRect.y;
-          if (
-            px < ax0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            px > ax0 + imgRect.w + MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            py < ay0 - MEISSA_2D_IMG_EDGE_MARGIN_CSS ||
-            py > ay0 + imgRect.h + MEISSA_2D_IMG_EDGE_MARGIN_CSS
-          ) {
-            return null;
+          const nx = (wx - minX) / Math.max(1e-9, maxX - minX);
+          const ny = (maxY - wy) / Math.max(1e-9, maxY - minY);
+          if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+          const px = imgRect.x + nx * imgRect.w;
+          const py = imgRect.y + ny * imgRect.h;
+          if (!loose) {
+            const ax0 = imgRect.x;
+            const ay0 = imgRect.y;
+            const clipMargin = loose
+              ? MEISSA_2D_IMG_EDGE_MARGIN_CSS_RELAXED
+              : MEISSA_2D_IMG_EDGE_MARGIN_CSS;
+            if (
+              px < ax0 - clipMargin ||
+              px > ax0 + imgRect.w + clipMargin ||
+              py < ay0 - clipMargin ||
+              py > ay0 + imgRect.h + clipMargin
+            ) {
+              continue;
+            }
           }
+          return { px, py, nx, ny };
         }
-        return { px, py, nx, ny };
+        return null;
       };
       const rawPl = Array.isArray(state.rawPolylines) ? state.rawPolylines : [];
       const clPl = Array.isArray(state.clusterPolylines) ? state.clusterPolylines : [];
@@ -9777,6 +10869,16 @@
       });
       const sxWorld = imgRect.w / Math.max(1e-9, maxX - minX);
       const syWorld = imgRect.h / Math.max(1e-9, maxY - minY);
+      const georefDrawItems = [];
+      const georefPointByKey = new Map();
+      const georefCircleDrawKey = (c) => {
+        const id = String(c?.id ?? "").trim();
+        if (id) return `id:${id}`;
+        const fx = Number(c?.center_x);
+        const fy = Number(c?.center_y);
+        if (!Number.isFinite(fx) || !Number.isFinite(fy)) return "";
+        return `xy:${fx.toFixed(3)}:${fy.toFixed(3)}`;
+      };
       let dbgGeorefDrawn = 0;
       let dbgGeorefFiltered = 0;
       let dbgGeorefNullMap = 0;
@@ -9804,13 +10906,19 @@
         const maxR = Math.max(imgRect.w, imgRect.h) * 0.49;
         let rPx = NaN;
         if (Number.isFinite(rad) && rad > 1e-6) {
-          const mapL = (fx, fy) => mapFileToGeorefPx(fx, fy, true);
-          rPx = meissa2dPileRadiusPxFromOffsets(mapL, cx, cy, rad);
-          if (!Number.isFinite(rPx)) {
+          if (srcCrs === dstCrs) {
+            // 동일 CRS인 경우 선형 축척으로 반경을 즉시 환산(매 점 3회 map 호출 제거)
             rPx = Math.abs(rad) * (sxWorld + syWorld) * 0.5;
+          } else {
+            const mapL = (fx, fy) => mapFileToGeorefPx(fx, fy, true);
+            rPx = meissa2dPileRadiusPxFromOffsets(mapL, cx, cy, rad);
+            if (!Number.isFinite(rPx)) {
+              rPx = Math.abs(rad) * (sxWorld + syWorld) * 0.5;
+            }
           }
         }
-        const paint = meissa2dDotPaintForCircle(c);
+        const fit = getOrthoFitForRender(c);
+        const paint = meissa2dDotPaintForCircle(c, fit);
         const hasFoot = Number.isFinite(rPx) && rPx >= 0.12 && rPx < maxR;
         if (hasFoot) {
           meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxR, paint);
@@ -9822,15 +10930,41 @@
         const dotR = meissa2dOverlayDotRadiusCssPx(dotBase) * (paint.dotRScale || 1);
         meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, hasFoot);
         meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
-        meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c);
+        if (!effectiveOverlayWarm) {
+          meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c, fit);
+        }
         if (meissaDatasetSelectedIds.has(String(c?.id ?? ""))) {
           meissaDatasetDrawSelectionRing(ctx, px, py, pxScale, hasFoot, rPx, dotR);
         }
+        const k = georefCircleDrawKey(c);
+        if (k) georefPointByKey.set(k, { px, py });
+        georefDrawItems.push({ c, px, py });
       });
+      if (dbgGeorefFiltered >= 40 && dbgGeorefDrawn <= 1 && dbgGeorefNullMap >= dbgGeorefFiltered * 0.9) {
+        // 확대/오프셋 경계 케이스에서 strict 클립이 전량 탈락하면 느슨 매핑으로 한번 더 시도한다.
+        circles.forEach((c) => {
+          if (!meissa2dCirclePassesRemainingFilter(c)) return;
+          const mLoose = mapFileToGeorefPx(c?.center_x, c?.center_y, true);
+          if (!mLoose) return;
+          const key = georefCircleDrawKey(c);
+          if (key && georefPointByKey.has(key)) return;
+          const { px, py } = mLoose;
+          const fit = getOrthoFitForRender(c);
+          const paint = meissa2dDotPaintForCircle(c, fit);
+          const dotR = meissa2dOverlayDotRadiusCssPx(2.15) * (paint.dotRScale || 1);
+          meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, false);
+          meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
+          if (!effectiveOverlayWarm) {
+            meissa2dPushPickHit(px, py, Math.max(dotR + 8, 12), c, fit);
+            meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+          }
+        });
+      }
       if (
         meissa2dColorModeValue() === "ortho_pdam" &&
         meissaOrthoPdamDebugLineFromUi() &&
-        state.pdamByCircleId?.size
+        state.pdamByCircleId?.size &&
+        meissa2dHasReadyOrthoAnalysisImage()
       ) {
         ctx.save();
         ctx.lineWidth = meissa2dOverlayLineWidthCssPx(pxScale, 2.05);
@@ -9841,7 +10975,8 @@
           if (!meissa2dCirclePassesRemainingFilter(c)) return;
           const row = state.pdamByCircleId?.get?.(String(c?.id ?? ""));
           if (!isPdamCircleMappingInstalled(row)) return;
-          const fit = meissa2dGetOrthoPdamRgbFit(c, { forceSync: true });
+          const fit = getOrthoFitForRender(c);
+          if (fit?.reason === "pending" || fit?.tier === "na") return;
           const ndx = fit?.detectDeltaNormX;
           const ndy = fit?.detectDeltaNormY;
           if (ndx == null || ndy == null || !Number.isFinite(Number(ndx)) || !Number.isFinite(Number(ndy))) return;
@@ -9852,7 +10987,8 @@
           const nwr = Math.max(1e-6, natNow.nw);
           const nhr = Math.max(1e-6, natNow.nh);
           if (dnx < -0.1 * nwr || dnx > nwr * 1.1 || dny < -0.1 * nhr || dny > nhr * 1.1) return;
-          const mD = mapFileToGeorefPx(c?.center_x, c?.center_y, false);
+          const k = georefCircleDrawKey(c);
+          const mD = (k && georefPointByKey.get(k)) || mapFileToGeorefPx(c?.center_x, c?.center_y, false);
           if (!mD) return;
           const pxDet = imgRect.x + (dnx / nwr) * imgRect.w;
           const pyDet = imgRect.y + (dny / nhr) * imgRect.h;
@@ -9868,21 +11004,28 @@
         ctx.setLineDash([]);
         ctx.restore();
       }
-      circles.forEach((c) => {
-        if (!meissa2dCirclePassesRemainingFilter(c)) return;
-        const m = mapFileToGeorefPx(c?.center_x, c?.center_y, false);
-        if (!m) return;
-        meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
-      });
+      if (!effectiveOverlayWarm) {
+        georefDrawItems.forEach((it) => {
+          meissa2dDrawCircleLabel(ctx, it.px, it.py, it.c, circles.length);
+        });
+      }
       if (shouldLogStats && statCount > 0) {
+        const mapNullRatePct = dbgGeorefFiltered > 0 ? (100 * dbgGeorefNullMap) / dbgGeorefFiltered : 0;
+        if (mapNullRatePct >= 85) {
+          pushMeissa2dLoadLine(
+            `정사 georef map 낮은 적중률: drawn ${dbgGeorefDrawn}/${dbgGeorefFiltered} · null ${(mapNullRatePct).toFixed(0)}%`
+          );
+        }
         meissa2dDebugLastGeorefStatsTs = nowTs;
       }
       return;
     }
-    if (MEISSA_2D_SIMPLE_ORTHO) {
+    if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive()) {
       const overlayOnOrthoEff = imageVisible || orthoHasSrc;
       renderMeissa2dPointsOverlayInFileSpace(ctx, w, h, circles, pxScale, {
         overlayOnOrtho: overlayOnOrthoEff,
+        deferHeavyOverlay: overlayWarm,
+        getOrthoFit: getOrthoFitForRender,
       });
       ctx.save();
       ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
@@ -9967,7 +11110,8 @@
               const m1 = mapFileToCartaPx(fx + rad, fy, true);
               if (m1) rPx = Math.hypot(m1.px - px, m1.py - py);
             }
-            const paint = meissa2dDotPaintForCircle(c);
+            const fit = getOrthoFitForRender(c);
+            const paint = meissa2dDotPaintForCircle(c, fit);
             const hasFoot = Number.isFinite(rPx) && rPx >= 0.12 && rPx < maxRc;
             if (hasFoot) {
               meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRc, paint);
@@ -9979,17 +11123,21 @@
             const dotR = meissa2dOverlayDotRadiusCssPx(dotBaseC) * (paint.dotRScale || 1);
             meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, hasFoot);
             meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
-            meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c);
+            if (!effectiveOverlayWarm) {
+              meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c, fit);
+            }
           });
-          circles.forEach((c) => {
-            if (!meissa2dCirclePassesRemainingFilter(c)) return;
-            const fx = Number(c?.center_x);
-            const fy = Number(c?.center_y);
-            if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
-            const m = mapFileToCartaPx(fx, fy, false);
-            if (!m) return;
-            meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
-          });
+          if (!effectiveOverlayWarm) {
+            circles.forEach((c) => {
+              if (!meissa2dCirclePassesRemainingFilter(c)) return;
+              const fx = Number(c?.center_x);
+              const fy = Number(c?.center_y);
+              if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
+              const m = mapFileToCartaPx(fx, fy, false);
+              if (!m) return;
+              meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
+            });
+          }
           return;
         }
       }
@@ -10079,7 +11227,8 @@
         const m1 = mapFileToTileOverlayPx(x + rad, y, true);
         if (m1) rPx = Math.hypot(m1.px - px, m1.py - py);
       }
-      const paint = meissa2dDotPaintForCircle(c);
+      const fit = getOrthoFitForRender(c);
+      const paint = meissa2dDotPaintForCircle(c, fit);
       const hasFoot = Number.isFinite(rPx) && rPx >= 0.12 && rPx < maxRt;
       if (hasFoot) {
         meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRt, paint);
@@ -10091,17 +11240,21 @@
       const dotR = meissa2dOverlayDotRadiusCssPx(dotBaseT) * (paint.dotRScale || 1);
       meissa2dDrawOrthoPileCenter(ctx, px, py, dotR, paint, hasFoot);
       meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
-      meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c);
+      if (!effectiveOverlayWarm) {
+        meissa2dPushPickHit(px, py, Math.max(dotR + 6, hasFoot ? rPx * 0.55 : 0), c, fit);
+      }
     });
-    circles.forEach((c) => {
-      if (!meissa2dCirclePassesRemainingFilter(c)) return;
-      const x = Number(c?.center_x);
-      const y = Number(c?.center_y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      const m = mapFileToTileOverlayPx(x, y, false);
-      if (!m) return;
-      meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
-    });
+    if (!effectiveOverlayWarm) {
+      circles.forEach((c) => {
+        if (!meissa2dCirclePassesRemainingFilter(c)) return;
+        const x = Number(c?.center_x);
+        const y = Number(c?.center_y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const m = mapFileToTileOverlayPx(x, y, false);
+        if (!m) return;
+        meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
+      });
+    }
   }
 
   function scheduleRenderMeissa2dPointsOverlay() {
@@ -10109,7 +11262,694 @@
     meissa2dPointsRaf = requestAnimationFrame(() => {
       meissa2dPointsRaf = 0;
       renderMeissa2dPointsOverlay();
-      scheduleMeissaOrthoOffsetPanelRefresh();
+      scheduleRenderMeissaDomOverlay();
+      if (meissa2dColorModeValue() === "ortho_pdam" && !meissa2dDragging) {
+        const hasAnalysis = meissa2dHasReadyOrthoAnalysisImage();
+        scheduleMeissaOrthoOffsetPanelRefresh(hasAnalysis ? 320 : 520);
+      }
+    });
+  }
+
+  function meissaDomOverlayCurrentSnapshotKey() {
+    const projectId =
+      (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
+    const sid =
+      (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
+    if (!projectId || !sid) return "";
+    return `${projectId}:${sid}`;
+  }
+
+  function meissaDomOverlayCurrentPreferredHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const raw = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    if (!raw) return "";
+    if (meissaDomOverlayUrlInCooldown(raw)) return "";
+    return raw;
+  }
+
+  function meissaDomOverlayCurrentFastUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const raw = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
+    if (!raw) return "";
+    if (meissaDomOverlayUrlInCooldown(raw)) return "";
+    return raw;
+  }
+
+  function meissaDomOverlayDesiredHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const cached = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    return cached;
+  }
+
+  function meissaDomOverlayIsHiReadyForCurrent() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return false;
+    return Boolean(meissaDomOverlayHiReadyBySnapshot.get(key));
+  }
+
+  function meissaDomOverlayMarkHiReadyForCurrent(flag) {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return;
+    meissaDomOverlayHiReadyBySnapshot.set(key, Boolean(flag));
+  }
+
+  function meissaDomOverlayMarkHiReadyByKey(key, flag) {
+    const k = String(key || "").trim();
+    if (!k) return;
+    meissaDomOverlayHiReadyBySnapshot.set(k, Boolean(flag));
+  }
+
+  function meissaDomOverlayBuildFastFirstUrl(ordered) {
+    const list = Array.isArray(ordered) ? ordered : [];
+    if (!list.length) return "";
+    const scored = list
+      .map((u) => {
+        const s = String(u || "").trim();
+        const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(s)) || 0);
+        const score = Number(_scoreMeissaOrthoButtonUrl(s)) || 0;
+        return { s, edge, score };
+      })
+      .filter((x) => !!x.s && !meissaDomOverlayUrlInCooldown(x.s))
+      .sort((a, b) => {
+        const aClass = a.edge >= 12000 ? 0 : a.edge >= 7000 ? 1 : 2;
+        const bClass = b.edge >= 12000 ? 0 : b.edge >= 7000 ? 1 : 2;
+        if (aClass !== bClass) return aClass - bClass;
+        if (aClass === 0 && bClass === 0) {
+          // 고해상 클래스에서는 너무 큰 파일(25k)보다 12k를 우선해 first paint를 빠르게 만든다.
+          const aBias = a.edge >= 24000 ? 1 : 0;
+          const bBias = b.edge >= 24000 ? 1 : 0;
+          if (aBias !== bBias) return aBias - bBias;
+        }
+        if (aClass === 1 && bClass === 1) {
+          // 중간 클래스는 7k를 우선.
+          const ad = Math.abs(a.edge - 7000);
+          const bd = Math.abs(b.edge - 7000);
+          if (ad !== bd) return ad - bd;
+        }
+        if (a.edge !== b.edge) return a.edge - b.edge;
+        return b.score - a.score;
+      });
+    return String(scored[0]?.s || "").trim();
+  }
+
+  function meissaDomOverlayFastUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return "";
+    const fast = String(meissaDomOverlayFastUrlBySnapshot.get(key) || "").trim();
+    if (!fast || meissaDomOverlayUrlInCooldown(fast)) return "";
+    return fast;
+  }
+
+  function meissaDomOverlayUrlInCooldown(url) {
+    const s = String(url || "").trim();
+    if (!s) return false;
+    const until = Number(meissaDomOverlayBadUrlUntil.get(s) || 0);
+    if (!(until > Date.now())) {
+      if (until > 0) meissaDomOverlayBadUrlUntil.delete(s);
+      return false;
+    }
+    return true;
+  }
+
+  function markMeissaDomOverlayUrlFailed(url) {
+    const s = String(url || "").trim();
+    if (!s) return;
+    meissaDomOverlayBadUrlUntil.set(
+      s,
+      Date.now() + Math.max(20000, Number(MEISSA_DOM_OVERLAY_BAD_URL_COOLDOWN_MS) || 120000)
+    );
+  }
+
+  function meissaDomOverlayCurrentRequestedFmt() {
+    if (!meissaDomOverlayUsesLossyApiPreview()) return "png";
+    const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "webp").toLowerCase();
+    return f === "jpeg" || f === "webp" ? f : "webp";
+  }
+
+  function meissaDomOverlaySetFormatAttrsOnImage(info) {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg || !info || typeof info !== "object") return;
+    const encodedAs = String(info.encodedAs || "").trim().toLowerCase();
+    const source = String(info.source || "").trim();
+    const requestedFmt = String(info.requestedFmt || "").trim().toLowerCase();
+    const convertStatus = String(info.convertStatus || "").trim().toLowerCase();
+    if (requestedFmt) domImg.setAttribute("data-ortho-requested-fmt", requestedFmt);
+    if (encodedAs) domImg.setAttribute("data-ortho-encoded-as", encodedAs);
+    if (source) domImg.setAttribute("data-ortho-source", source);
+    if (convertStatus) domImg.setAttribute("data-ortho-convert-status", convertStatus);
+  }
+
+  async function meissaDomOverlayProbeFormatHeaders(src) {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    const u = String(src || "").trim();
+    if (!key || !u) return;
+    if (!u.includes("/orthophoto-preview")) {
+      const info = {
+        url: u,
+        requestedFmt: "png",
+        encodedAs: "png",
+        source: "button-url",
+        convertStatus: "none",
+        httpStatus: 0,
+        probe: "skip-non-preview",
+        ts: Date.now(),
+      };
+      meissaDomOverlayHeaderLogBySnapshot.set(key, info);
+      meissaDomOverlaySetFormatAttrsOnImage(info);
+      return;
+    }
+    const prev = meissaDomOverlayHeaderLogBySnapshot.get(key);
+    const now = Date.now();
+    if (
+      prev &&
+      String(prev.url || "").trim() === u &&
+      now - Number(prev.ts || 0) < MEISSA_DOM_OVERLAY_HEADER_PROBE_MIN_INTERVAL_MS
+    ) {
+      meissaDomOverlaySetFormatAttrsOnImage(prev);
+      return;
+    }
+    let requestedFmt = meissaDomOverlayCurrentRequestedFmt();
+    try {
+      const parsed = new URL(u, window.location.href);
+      const qFmt = String(parsed.searchParams.get("fmt") || "").trim().toLowerCase();
+      if (qFmt === "png" || qFmt === "jpeg" || qFmt === "webp") requestedFmt = qFmt;
+    } catch (_) {
+      /* ignore */
+    }
+    let encodedAs = "";
+    let source = "";
+    let httpStatus = 0;
+    let probe = "none";
+    let convertStatus = "unknown";
+    try {
+      let res = await fetch(u, { method: "HEAD", cache: "no-store" });
+      if (Number(res.status) === 405 || Number(res.status) === 501) {
+        probe = "get-fallback";
+        try {
+          res = await fetch(u, {
+            method: "GET",
+            cache: "no-store",
+            headers: { Range: "bytes=0-0" },
+          });
+          try {
+            if (res?.body && typeof res.body.cancel === "function") {
+              res.body.cancel();
+            }
+          } catch (_) {
+            /* ignore */
+          }
+        } catch (_) {
+          res = null;
+        }
+      }
+      if (!res) throw new Error("probe-response-empty");
+      httpStatus = Number(res.status) || 0;
+      if (probe !== "get-fallback") probe = "head";
+      if (res.ok) {
+        encodedAs = String(res.headers.get("X-Ortho-Encoded-As") || "").trim().toLowerCase();
+        source = String(res.headers.get("X-Ortho-Source") || "").trim();
+        const reqHdr = String(res.headers.get("X-Ortho-Requested-Fmt") || "").trim().toLowerCase();
+        if (reqHdr === "png" || reqHdr === "jpeg" || reqHdr === "webp") requestedFmt = reqHdr;
+        if (!encodedAs) {
+          const ct = String(res.headers.get("Content-Type") || "").toLowerCase();
+          if (ct.includes("image/webp")) encodedAs = "webp";
+          else if (ct.includes("image/jpeg")) encodedAs = "jpeg";
+          else if (ct.includes("image/png")) encodedAs = "png";
+        }
+      }
+    } catch (_) {
+      probe = "head-error";
+    }
+    if (requestedFmt === "jpeg" || requestedFmt === "webp") {
+      if (encodedAs === requestedFmt) convertStatus = "ok";
+      else if (encodedAs) convertStatus = "mismatch";
+    } else if (requestedFmt === "png") {
+      if (!encodedAs || encodedAs === "png") convertStatus = "ok";
+      else convertStatus = "mismatch";
+    }
+    const info = {
+      url: u,
+      requestedFmt: requestedFmt || "unknown",
+      encodedAs: encodedAs || "unknown",
+      source: source || "unknown",
+      convertStatus,
+      httpStatus,
+      probe,
+      ts: now,
+    };
+    meissaDomOverlayHeaderLogBySnapshot.set(key, info);
+    meissaDomOverlaySetFormatAttrsOnImage(info);
+    const sig = `${info.requestedFmt}|${info.encodedAs}|${info.convertStatus}|${info.source}|${info.httpStatus}|${u}`;
+    if (String(meissaDomOverlayHeaderSigBySnapshot.get(key) || "") !== sig) {
+      meissaDomOverlayHeaderSigBySnapshot.set(key, sig);
+      pushMeissa2dLoadLine(
+        `대체 뷰 포맷검증: req=${info.requestedFmt} · encoded=${info.encodedAs} · convert=${info.convertStatus} · source=${info.source} · HTTP ${info.httpStatus || "?"} (${info.probe})`
+      );
+    }
+  }
+
+  function bindMeissaDomOverlayImageFallback() {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg || domImg.dataset.meissaDomOverlayImgBound === "1") return;
+    domImg.dataset.meissaDomOverlayImgBound = "1";
+    domImg.addEventListener("error", () => {
+      const failed = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      markMeissaDomOverlayUrlFailed(failed);
+      const hiNow = meissaDomOverlayCurrentPreferredHiUrl();
+      if (failed && hiNow && failed === hiNow) {
+        meissaDomOverlayMarkHiReadyForCurrent(false);
+      }
+      const status = els.meissaDomOverlayStatus;
+      if (status) status.textContent = "대체 뷰: 고화질 URL 로드 실패 → 기본 이미지로 전환 중...";
+      scheduleRenderMeissaDomOverlay();
+    });
+    domImg.addEventListener("load", () => {
+      const loaded = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      if (loaded) meissaDomOverlayBadUrlUntil.delete(loaded);
+      const hiNow = meissaDomOverlayCurrentPreferredHiUrl();
+      if (loaded && hiNow && loaded === hiNow) {
+        meissaDomOverlayMarkHiReadyForCurrent(true);
+      }
+      void meissaDomOverlayProbeFormatHeaders(loaded);
+      scheduleRenderMeissaDomOverlay();
+    });
+  }
+
+  function meissaDomOverlayEnsureHiPreload() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key) return;
+    const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+    if (!hiUrl || meissaDomOverlayIsHiReadyForCurrent()) return;
+    const inFlight = Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0);
+    if (inFlight) return;
+    const token = Date.now();
+    meissaDomOverlayHiPreloadInFlight.set(key, token);
+    const im = new Image();
+    im.onload = () => {
+      if (Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0) !== token) return;
+      meissaDomOverlayHiPreloadInFlight.delete(key);
+      meissaDomOverlayHiReadyBySnapshot.set(key, true);
+      scheduleRenderMeissaDomOverlay();
+    };
+    im.onerror = () => {
+      if (Number(meissaDomOverlayHiPreloadInFlight.get(key) || 0) !== token) return;
+      meissaDomOverlayHiPreloadInFlight.delete(key);
+      markMeissaDomOverlayUrlFailed(hiUrl);
+      scheduleRenderMeissaDomOverlay();
+    };
+    try {
+      im.decoding = "async";
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      im.loading = "eager";
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      im.fetchPriority = "high";
+    } catch (_) {
+      /* ignore */
+    }
+    im.src = hiUrl;
+  }
+
+  async function ensureMeissaDomOverlayHiUrl() {
+    const key = meissaDomOverlayCurrentSnapshotKey();
+    if (!key || !meissaAccess) return;
+    const now = Date.now();
+    const cachedHi = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+    if (
+      cachedHi &&
+      !meissaDomOverlayUrlInCooldown(cachedHi) &&
+      now - Number(meissaDomOverlayHiLastResolveTs || 0) < MEISSA_DOM_OVERLAY_HI_URL_REFRESH_MS
+    ) {
+      meissaDomOverlayEnsureHiPreload();
+      return;
+    }
+    if (meissaDomOverlayHiResolveInFlight) return;
+    const [projectId, sid] = key.split(":");
+    if (!projectId || !sid) return;
+    meissaDomOverlayHiResolveInFlight = true;
+    meissaDomOverlayHiLastResolveTs = now;
+    try {
+      const urls = await resolveMeissaOrthoButtonUrls(sid, projectId);
+      const ordered = Array.isArray(urls)
+        ? urls.map((u) => String(u || "").trim()).filter(Boolean)
+        : [];
+      if (!ordered.length) return;
+      const filtered = ordered.filter((url) => !meissaDomOverlayUrlInCooldown(url));
+      const hiBest = String(pickBestMeissaOrthoButtonUrlForSharpness(filtered) || "").trim();
+      const fastBest = hiBest;
+      if (hiBest) {
+        const prev = String(meissaDomOverlayHiUrlBySnapshot.get(key) || "").trim();
+        meissaDomOverlayHiUrlBySnapshot.set(key, hiBest);
+        if (!prev || prev !== hiBest) {
+          meissaDomOverlayHiReadyBySnapshot.set(key, false);
+        }
+      }
+      if (fastBest) {
+        meissaDomOverlayFastUrlBySnapshot.set(key, fastBest);
+      } else if (hiBest) {
+        meissaDomOverlayFastUrlBySnapshot.set(key, hiBest);
+      }
+      meissaDomOverlayEnsureHiPreload();
+    } catch (_) {
+      /* ignore */
+    } finally {
+      meissaDomOverlayHiResolveInFlight = false;
+    }
+  }
+
+  function syncMeissaDomOverlayImageFromMain() {
+    const domImg = els.meissaDomOverlayImage;
+    const mainImg = els.meissaCloud2dImageLocal;
+    if (!domImg || !mainImg) return false;
+    bindMeissaDomOverlayImageFallback();
+    const domFmt = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "png").toLowerCase();
+    const mainSrcEarly = String(mainImg.getAttribute("src") || "").trim();
+    let src = "";
+    if (domFmt === "jpeg" || domFmt === "webp") {
+      const projectId =
+        (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
+      const sid =
+        (els.meissaSnapshotSelect?.value || "").trim() || (els.snapshotId?.value || "").trim();
+      if (projectId && sid && meissaAccess) {
+        const edge = Math.min(16384, Math.max(1024, Math.round(MEISSA_DOM_OVERLAY_SINGLE_HI_EDGE)));
+        src = buildOrthophotoPreviewImgUrl(sid, projectId, meissaAccess, edge, domFmt);
+      }
+    }
+    if (src && meissaDomOverlayUrlInCooldown(src)) {
+      src = "";
+    }
+    if (!src) {
+      if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
+        src = mainSrcEarly;
+      } else {
+        const hiUrl = meissaDomOverlayCurrentPreferredHiUrl();
+        src = hiUrl;
+        if (!src) {
+          src = mainSrcEarly;
+        }
+      }
+    }
+    if (!src) {
+      try {
+        domImg.removeAttribute("src");
+      } catch (_) {
+        /* ignore */
+      }
+      return false;
+    }
+    if (String(domImg.getAttribute("src") || "").trim() !== src) {
+      try {
+        domImg.removeAttribute("data-ortho-encoded-as");
+        domImg.removeAttribute("data-ortho-source");
+        domImg.removeAttribute("data-ortho-requested-fmt");
+        domImg.removeAttribute("data-ortho-convert-status");
+        domImg.src = src;
+      } catch (_) {
+        return false;
+      }
+    }
+    void meissaDomOverlayProbeFormatHeaders(src);
+    return true;
+  }
+
+  function meissaDomOverlayBackgroundEdge() {
+    const domImg = els.meissaDomOverlayImage;
+    if (!domImg) return 0;
+    const srcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+    const nowEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
+    if (nowEdge > 0) return nowEdge;
+    const nw = Math.round(Number(domImg.naturalWidth || 0));
+    const nh = Math.round(Number(domImg.naturalHeight || 0));
+    return Math.max(nw, nh, 0);
+  }
+
+  function meissaDomOverlayCurrentSourceEdgeHint() {
+    const domImg = els.meissaDomOverlayImage;
+    const srcNow = String(domImg?.currentSrc || domImg?.src || "").trim();
+    const edge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(srcNow)) || 0);
+    return edge > 0 ? edge : 0;
+  }
+
+  /**
+   * 대체 뷰: URL 이미지 + DOM 좌표 오버레이.
+   * 기존 캔버스 렌더와 독립적으로 좌표를 얹어, 이미지 로드가 되는 순간 빠르게 가시화한다.
+   */
+  function renderMeissaDomOverlay() {
+    const stage = els.meissaDomOverlayStage;
+    const domImg = els.meissaDomOverlayImage;
+    const pointsLayer = els.meissaDomOverlayPoints;
+    const status = els.meissaDomOverlayStatus;
+    const mainImg = els.meissaCloud2dImageLocal;
+    if (!stage || !domImg || !pointsLayer || !mainImg) return;
+    if (!MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE && !meissaDomOverlayUsesLossyApiPreview()) {
+      void ensureMeissaDomOverlayHiUrl();
+    }
+    const hasMain = hasRenderableOverlayImage(mainImg);
+    const synced = syncMeissaDomOverlayImageFromMain();
+    if (!hasMain || !synced) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 표시 가능한 URL 이미지가 아직 없습니다.";
+      return;
+    }
+    const domDecoded =
+      Number(domImg.naturalWidth || 0) > 1 &&
+      Number(domImg.naturalHeight || 0) > 1 &&
+      hasRenderableOverlayImage(domImg);
+    if (!domDecoded) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 배경 이미지 로드/폴백 대기 중...";
+      return;
+    }
+    if (!MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE && !meissaDomOverlayUsesLossyApiPreview()) {
+      const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
+      const domSrcNow = String(domImg.currentSrc || domImg.getAttribute("src") || "").trim();
+      if (hiResolved && domSrcNow !== hiResolved) {
+        try {
+          domImg.src = hiResolved;
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+    const domRect = getDisplayedImageRectInWrap(domImg, stage);
+    if (!(domRect.w > 2 && domRect.h > 2)) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 이미지 디코드 대기 중...";
+      return;
+    }
+    const mainRect = getMeissa2dOrthoLetterboxInPan(mainImg);
+    if (!(mainRect.w > 2 && mainRect.h > 2)) {
+      pointsLayer.replaceChildren();
+      if (status) status.textContent = "대체 뷰: 좌표 정합 대기 중...";
+      return;
+    }
+    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const showLabels = circles.length <= 180 && meissaDomOverlayScale <= 3.2;
+    const frag = document.createDocumentFragment();
+    let shown = 0;
+    const mapMainPxToDom = (mx, my) => {
+      const nx = (Number(mx) - mainRect.x) / Math.max(1e-9, mainRect.w);
+      const ny = (Number(my) - mainRect.y) / Math.max(1e-9, mainRect.h);
+      if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
+      if (nx < -0.2 || nx > 1.2 || ny < -0.2 || ny > 1.2) return null;
+      return { px: domRect.x + nx * domRect.w, py: domRect.y + ny * domRect.h };
+    };
+    for (const c of circles) {
+      if (!meissa2dCirclePassesRemainingFilter(c)) continue;
+      const m = meissa2dComputeFileToContentPx(c?.center_x, c?.center_y);
+      if (!m || !Number.isFinite(m.px) || !Number.isFinite(m.py)) continue;
+      const center = mapMainPxToDom(m.px, m.py);
+      if (!center) continue;
+      const marker = document.createElement("div");
+      marker.className = "meissa-dom-overlay-dot";
+      const inv = 1 / Math.max(0.35, meissaDomOverlayScale);
+      const sizePx = Math.max(1.8, Math.min(10, 5.2 * inv));
+      marker.style.setProperty("--dot-size", `${sizePx}px`);
+      marker.style.left = `${center.px}px`;
+      marker.style.top = `${center.py}px`;
+      marker.title = `ID ${String(c?.id ?? "")} · (${Number(c?.center_x || 0).toFixed(3)}, ${Number(c?.center_y || 0).toFixed(3)})`;
+      frag.appendChild(marker);
+      if (showLabels) {
+        const lb = document.createElement("div");
+        lb.className = "meissa-dom-overlay-label";
+        lb.style.left = `${center.px}px`;
+        lb.style.top = `${center.py}px`;
+        const inv = 1 / Math.max(1, meissaDomOverlayScale);
+        lb.style.transform = `translate(6px, -10px) scale(${inv.toFixed(3)})`;
+        lb.style.transformOrigin = "0 0";
+        lb.textContent = String(c?.id ?? "");
+        frag.appendChild(lb);
+      }
+      shown += 1;
+    }
+    pointsLayer.replaceChildren(frag);
+    if (status) {
+      const domSrc = String(domImg.currentSrc || domImg.src || "").trim();
+      void meissaDomOverlayProbeFormatHeaders(domSrc);
+      const edge = meissaDomOverlayCurrentSourceEdgeHint();
+      const hiHint = edge > 0 ? `URL 이미지(장변≈${edge}px)` : "URL 이미지";
+      let qualityTag = "";
+      if (meissaDomOverlayUsesLossyApiPreview()) {
+        const f = String(MEISSA_DOM_OVERLAY_PREVIEW_FMT || "jpeg").toUpperCase();
+        qualityTag = `API ${f} 응답(단일 고화질 요청)`;
+      } else if (MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE) {
+        qualityTag = "메인 뷰와 동일 소스(별도 고화질 선해결 없음)";
+      } else {
+        const hiResolved = String(meissaDomOverlayCurrentPreferredHiUrl() || "").trim();
+        qualityTag = hiResolved ? "고화질 URL 직접 표시" : "고화질 URL 준비 중";
+      }
+      const key = meissaDomOverlayCurrentSnapshotKey();
+      const hdr = key ? meissaDomOverlayHeaderLogBySnapshot.get(key) : null;
+      const requestedFmt = String(
+        domImg.getAttribute("data-ortho-requested-fmt") || hdr?.requestedFmt || "unknown"
+      ).trim();
+      const encodedAs = String(
+        domImg.getAttribute("data-ortho-encoded-as") || hdr?.encodedAs || "unknown"
+      ).trim();
+      const source = String(domImg.getAttribute("data-ortho-source") || hdr?.source || "unknown").trim();
+      const convertStatus = String(
+        domImg.getAttribute("data-ortho-convert-status") || hdr?.convertStatus || "unknown"
+      ).trim();
+      status.textContent =
+        `대체 뷰: ${hiHint} · ${qualityTag} · 좌표 ${shown}개 표시` +
+        `${showLabels ? " (번호 포함)" : " (번호는 생략 · 점만 표시)"}\n` +
+        `포맷로그: req=${requestedFmt || "unknown"} · encoded=${encodedAs || "unknown"} · convert=${convertStatus || "unknown"} · source=${source || "unknown"} · src=${domSrc ? "set" : "empty"}`;
+    }
+  }
+
+  function scheduleRenderMeissaDomOverlay() {
+    if (meissaDomOverlayRaf) cancelAnimationFrame(meissaDomOverlayRaf);
+    meissaDomOverlayRaf = requestAnimationFrame(() => {
+      meissaDomOverlayRaf = 0;
+      renderMeissaDomOverlay();
+    });
+  }
+
+  function applyMeissaDomOverlayTransform() {
+    const img = els.meissaDomOverlayImage;
+    const pts = els.meissaDomOverlayPoints;
+    const tf = `matrix(${meissaDomOverlayScale},0,0,${meissaDomOverlayScale},${meissaDomOverlayTx},${meissaDomOverlayTy})`;
+    if (img) {
+      img.style.transformOrigin = "0 0";
+      img.style.transform = tf;
+    }
+    if (pts) {
+      pts.style.transformOrigin = "0 0";
+      pts.style.transform = tf;
+    }
+  }
+
+  function resetMeissaDomOverlayTransform() {
+    meissaDomOverlayScale = 1;
+    meissaDomOverlayTx = 0;
+    meissaDomOverlayTy = 0;
+    meissaDomOverlayPinchLastDist = 0;
+    applyMeissaDomOverlayTransform();
+  }
+
+  function bindMeissaDomOverlayInteractions() {
+    const stage = els.meissaDomOverlayStage;
+    if (!stage || stage.dataset.meissaDomOverlayBound === "1") return;
+    stage.dataset.meissaDomOverlayBound = "1";
+    stage.style.touchAction = "none";
+    stage.style.cursor = "grab";
+
+    const pointerInStage = (clientX, clientY) => {
+      const r = stage.getBoundingClientRect();
+      return { x: clientX - r.left, y: clientY - r.top };
+    };
+    const zoomAt = (nextScale, sx, sy) => {
+      const prev = meissaDomOverlayScale;
+      const n = Math.max(0.35, Math.min(12, Number(nextScale) || 1));
+      if (Math.abs(n - prev) < 1e-8) return;
+      const k = n / prev;
+      meissaDomOverlayTx = sx - (sx - meissaDomOverlayTx) * k;
+      meissaDomOverlayTy = sy - (sy - meissaDomOverlayTy) * k;
+      meissaDomOverlayScale = n;
+      applyMeissaDomOverlayTransform();
+      scheduleRenderMeissaDomOverlay();
+    };
+
+    stage.addEventListener(
+      "wheel",
+      (evt) => {
+        evt.preventDefault();
+        const p = pointerInStage(evt.clientX, evt.clientY);
+        const next = meissaDomOverlayScale * Math.exp(-evt.deltaY * 0.0012);
+        zoomAt(next, p.x, p.y);
+      },
+      { passive: false }
+    );
+
+    stage.addEventListener("pointerdown", (evt) => {
+      meissaDomOverlayPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+      try {
+        stage.setPointerCapture(evt.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      if (meissaDomOverlayPointers.size === 1) {
+        stage.style.cursor = "grabbing";
+        stage.classList.add("is-panning");
+      } else if (meissaDomOverlayPointers.size >= 2) {
+        const pts = [...meissaDomOverlayPointers.values()];
+        meissaDomOverlayPinchLastDist = Math.max(
+          1,
+          Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+        );
+      }
+      evt.preventDefault();
+    });
+
+    stage.addEventListener("pointermove", (evt) => {
+      if (!meissaDomOverlayPointers.has(evt.pointerId)) return;
+      const prev = meissaDomOverlayPointers.get(evt.pointerId);
+      meissaDomOverlayPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+      if (meissaDomOverlayPointers.size >= 2) {
+        const pts = [...meissaDomOverlayPointers.values()];
+        const dist = Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y));
+        const ratio = dist / Math.max(1, meissaDomOverlayPinchLastDist || dist);
+        meissaDomOverlayPinchLastDist = dist;
+        const mid = pointerInStage((pts[0].x + pts[1].x) * 0.5, (pts[0].y + pts[1].y) * 0.5);
+        zoomAt(meissaDomOverlayScale * ratio, mid.x, mid.y);
+      } else if (meissaDomOverlayPointers.size === 1 && prev) {
+        meissaDomOverlayTx += evt.clientX - prev.x;
+        meissaDomOverlayTy += evt.clientY - prev.y;
+        applyMeissaDomOverlayTransform();
+        scheduleRenderMeissaDomOverlay();
+      }
+      evt.preventDefault();
+    });
+
+    const onPointerUp = (evt) => {
+      if (meissaDomOverlayPointers.has(evt.pointerId)) {
+        meissaDomOverlayPointers.delete(evt.pointerId);
+      }
+      try {
+        stage.releasePointerCapture(evt.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      if (meissaDomOverlayPointers.size < 2) meissaDomOverlayPinchLastDist = 0;
+      if (meissaDomOverlayPointers.size === 0) {
+        stage.style.cursor = "grab";
+        stage.classList.remove("is-panning");
+      }
+    };
+    stage.addEventListener("pointerup", onPointerUp);
+    stage.addEventListener("pointercancel", onPointerUp);
+    stage.addEventListener("pointerleave", onPointerUp);
+
+    stage.addEventListener("dblclick", () => {
+      resetMeissaDomOverlayTransform();
     });
   }
 
@@ -10164,19 +12004,26 @@
   }
 
   function renderMeissaOrthoOffsetPanel() {
+    meissa2dEnsureOrthoAnalysisImage();
     const wrap = document.getElementById("meissa-ortho-offset-wrap");
     const tbody = document.getElementById("meissa-ortho-offset-body");
     if (!wrap || !tbody) return;
     const mapHint = document.getElementById("meissa-ortho-offset-mapmode-hint");
     if (mapHint) mapHint.hidden = meissa2dColorModeValue() === "ortho_pdam";
-    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const circlesRaw = Array.isArray(state.circles) ? state.circles : [];
+    const circles =
+      meissa2dColorModeValue() === "ortho_pdam"
+        ? meissa2dDedupCirclesForOrthoPdam(circlesRaw)
+        : circlesRaw;
     const rows = [];
+    let pendingCount = 0;
     let anyInstalled = false;
     circles.forEach((c) => {
       const prow = state.pdamByCircleId?.get?.(String(c?.id ?? ""));
       if (!isPdamCircleMappingInstalled(prow)) return;
       anyInstalled = true;
-      const fit = meissa2dGetOrthoPdamRgbFit(c, { forceSync: true });
+      const fit = meissa2dGetOrthoPdamRgbFit(c, { forceSync: false });
+      if (fit?.reason === "pending") pendingCount++;
       const rec = state.meissaCompareByCircleId?.get?.(String(c?.id ?? ""));
       const label = String(c?.matched_text?.text ?? "").trim() || "—";
       const fx = Number(c?.center_x);
@@ -10265,14 +12112,35 @@
       tbody.appendChild(tr);
     });
     wrap.hidden = false;
+    if (pendingCount > 0 && !meissa2dDragging) {
+      scheduleMeissaOrthoOffsetPanelRefresh(120);
+    }
   }
 
-  function scheduleMeissaOrthoOffsetPanelRefresh() {
+  function scheduleMeissaOrthoOffsetPanelRefresh(delayMs) {
     if (meissaOrthoPanelTimer) return;
+    const wait = Math.max(90, Number(delayMs) || 320);
     meissaOrthoPanelTimer = window.setTimeout(() => {
       meissaOrthoPanelTimer = 0;
       renderMeissaOrthoOffsetPanel();
-    }, 140);
+    }, wait);
+  }
+
+  /** 휠/핀치 연속 입력 중에는 transform만 갱신하고, 멈춘 뒤 1회 정밀 렌더/패치 요청 */
+  function scheduleMeissa2dViewSettleRefresh(delayMs) {
+    const wait = Math.max(36, Number(delayMs) || 96);
+    if (meissa2dViewSettleTimer) {
+      try {
+        window.clearTimeout(meissa2dViewSettleTimer);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    meissa2dViewSettleTimer = window.setTimeout(() => {
+      meissa2dViewSettleTimer = 0;
+      if (meissa2dDragging) return;
+      applyMeissa2dViewTransform();
+    }, wait);
   }
 
   function bindMeissaOrthoOffsetPanel() {
@@ -10296,6 +12164,7 @@
 
   function onMeissa2dOverlayImgDecoded() {
     meissa2dOrthoInteractReady = true;
+    void meissa2dPrimeAnalysisImageFromDisplayedSrc("overlay-decoded");
     bumpMeissa2dOrthoRgbFitCache();
     if (MEISSA_2D_SIMPLE_ORTHO) {
       syncMeissa2dSquareMapFrameLayout();
@@ -10309,7 +12178,7 @@
   }
 
   function renderMeissa2dMosaic(snapshotId, options) {
-    if (MEISSA_2D_SIMPLE_ORTHO) return false;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) return false;
     const sid = String(snapshotId || "").trim();
     if (!sid) return false;
     const projectId =
@@ -10396,7 +12265,7 @@
 
   function setMeissa2dLayerVisibility(opts) {
     const o = { ...(opts || {}) };
-    if (MEISSA_2D_SIMPLE_ORTHO) o.showMosaic = false;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) o.showMosaic = false;
     const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
     const img = els.meissaCloud2dImageLocal;
     if (mosaic) mosaic.hidden = !o.showMosaic;
@@ -10413,20 +12282,20 @@
 
   function applyMeissa2dViewTransform(options) {
     let redrawOverlay = options?.redrawOverlay !== false;
-    if (redrawOverlay === false && meissa2dViewportSharpOverlayActive) {
-      redrawOverlay = true;
-    }
     // matrix(a,b,c,d,e,f): x' = a*x + c*y + e, y' = b*x + d*y + f
     const tf = `matrix(${meissa2dViewScale},0,0,${meissa2dViewScale},${meissa2dViewTx},${meissa2dViewTy})`;
     const pan = document.getElementById("meissa-2d-panzoom-root");
     if (pan) {
       pan.style.transform = tf;
+      pan.style.willChange = MEISSA_2D_SIMPLE_ORTHO ? "auto" : "transform";
       const img = els.meissaCloud2dImageLocal;
       if (img) img.style.transform = "";
       const mosaic = document.getElementById("meissa-cloud-2d-mosaic-local");
       if (mosaic) mosaic.style.transform = "";
       const points = document.getElementById("meissa-cloud-2d-points-overlay");
       if (points) points.style.transform = "";
+      const orthoHi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (orthoHi) orthoHi.style.transform = "";
     } else {
       const img = els.meissaCloud2dImageLocal;
       if (img) img.style.transform = tf;
@@ -10434,12 +12303,22 @@
       if (mosaic) mosaic.style.transform = tf;
       const points = document.getElementById("meissa-cloud-2d-points-overlay");
       if (points) points.style.transform = tf;
+      const orthoHi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
+      if (orthoHi) orthoHi.style.transform = tf;
     }
     if (redrawOverlay) scheduleRenderMeissa2dPointsOverlay();
     if (MEISSA_2D_SIMPLE_ORTHO) {
-      tryMeissa2dOrthoViewportHiPaintCachedSync();
-      syncMeissa2dOrthoViewportHiLayout();
-      scheduleMeissa2dOrthoViewportHiFetch();
+      if (redrawOverlay) {
+        tryMeissa2dOrthoViewportHiPaintCachedSync();
+        syncMeissa2dOrthoViewportHiLayout();
+        scheduleMeissa2dOrthoViewportHiFetch();
+      } else {
+        // 드래그 중에는 transform만 갱신하고 고해상 패치 재계산/요청은 멈춰 체감 버벅임을 줄인다.
+        syncMeissa2dOrthoViewportHiLayout();
+        if (isMeissa2dButtonUrlOnlySingleMode()) {
+          scheduleMeissa2dOrthoViewportHiFromMainImageLocal();
+        }
+      }
     }
   }
 
@@ -10482,7 +12361,7 @@
   }
 
   function resetMeissa2dViewTransform() {
-    if (MEISSA_2D_SIMPLE_ORTHO) {
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) {
       return;
     }
     meissa2dViewScale = 1;
@@ -10492,7 +12371,7 @@
   }
 
   function scheduleMeissa2dRecenterRefresh(allowPanShift, allowZoomStep) {
-    if (MEISSA_2D_SIMPLE_ORTHO) return;
+    if (MEISSA_2D_SIMPLE_ORTHO && !MEISSA_2D_SIMPLE_TILE_FIRST_MODE) return;
     if (meissa2dRecenterTimer) window.clearTimeout(meissa2dRecenterTimer);
     const delay = allowPanShift ? 40 : meissa2dViewScale >= 1.7 ? 120 : 180;
     meissa2dRecenterTimer = window.setTimeout(() => {
@@ -11081,6 +12960,7 @@
     let meissa2dGestureHadMultiPointer = false;
     const onWheel = (evt) => {
       evt.preventDefault();
+      meissa2dSuppressHoverFor(MEISSA_2D_HOVER_SUPPRESS_MS_AFTER_ZOOM);
       if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive() && isMeissa2dOrthoImageStillDecoding()) {
         return;
       }
@@ -11105,7 +12985,8 @@
         meissa2dViewTx = refSx - (refSx - meissa2dViewTx) * k;
         meissa2dViewTy = refSy - (refSy - meissa2dViewTy) * k;
         meissa2dViewScale = next;
-        applyMeissa2dViewTransform();
+        applyMeissa2dViewTransform({ redrawOverlay: false });
+        scheduleMeissa2dViewSettleRefresh(96);
         // 지연 recenter는 경계 CSS 줌과 섞이면 다시 어긋날 수 있어 여기서는 호출하지 않음
         return;
       }
@@ -11121,10 +13002,19 @@
       meissa2dViewTx = refSx - (refSx - meissa2dViewTx) * k;
       meissa2dViewTy = refSy - (refSy - meissa2dViewTy) * k;
       meissa2dViewScale = next;
-      applyMeissa2dViewTransform();
+      applyMeissa2dViewTransform({ redrawOverlay: false });
+      scheduleMeissa2dViewSettleRefresh(96);
     };
     const onPointerDown = (evt) => {
       if (evt.pointerType === "mouse" && evt.button !== 0) return;
+      if (meissa2dViewSettleTimer) {
+        try {
+          window.clearTimeout(meissa2dViewSettleTimer);
+        } catch (_) {
+          /* ignore */
+        }
+        meissa2dViewSettleTimer = 0;
+      }
       meissa2dActivePointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
       try {
         wrap.setPointerCapture(evt.pointerId);
@@ -11165,6 +13055,7 @@
       if (!meissa2dActivePointers.has(evt.pointerId)) return;
       meissa2dActivePointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
       if (meissa2dActivePointers.size >= 2) {
+        meissa2dSuppressHoverFor(MEISSA_2D_HOVER_SUPPRESS_MS_AFTER_ZOOM);
         if (MEISSA_2D_SIMPLE_ORTHO && !isMosaicActive() && isMeissa2dOrthoImageStillDecoding()) return;
         const pts = [...meissa2dActivePointers.values()];
         const dx = pts[0].x - pts[1].x;
@@ -11189,10 +13080,12 @@
         meissa2dViewScale = next;
         meissa2dLastZoomAnchorX = refSx;
         meissa2dLastZoomAnchorY = refSy;
-        applyMeissa2dViewTransform();
+        applyMeissa2dViewTransform({ redrawOverlay: false });
+        scheduleMeissa2dViewSettleRefresh(84);
         return;
       }
       if (!meissa2dDragging) return;
+      meissa2dSuppressHoverFor(90);
       const pdx = evt.clientX - meissa2dDragX;
       const pdy = evt.clientY - meissa2dDragY;
       meissa2dDragX = evt.clientX;
@@ -11241,6 +13134,10 @@
             else tryMeissaCoordHintFromOverlay(evt.clientX, evt.clientY);
           }
         }
+        if (wasDragging && MEISSA_2D_SIMPLE_ORTHO) {
+          // 드래그 중 생략했던 고해상 패치/오버레이 갱신을 손을 뗀 시점에 1회만 반영
+          applyMeissa2dViewTransform();
+        }
         if (isMosaicActive()) scheduleMeissa2dRecenterRefresh(true, false);
       }
     };
@@ -11263,6 +13160,10 @@
     wrap.addEventListener(
       "mousemove",
       (evt) => {
+        if (Date.now() < meissa2dHoverSuppressUntil) {
+          setMeissa2dOverlayTooltip("", 0, 0, false);
+          return;
+        }
         if (meissa2dDragging) {
           setMeissa2dOverlayTooltip("", 0, 0, false);
           setMeissa2dHoverPickFromBest(null);
@@ -11280,7 +13181,8 @@
           }
         }
         if (best) {
-          setMeissa2dOverlayTooltip(best.tooltip, evt.clientX, evt.clientY, true);
+          if (!best.tooltip) best.tooltip = meissa2dBuildPickTooltip(best.circle, best.fit);
+          setMeissa2dOverlayTooltip(best.tooltip || "", evt.clientX, evt.clientY, true);
           setMeissa2dHoverPickFromBest(best);
         } else {
           setMeissa2dOverlayTooltip("", 0, 0, false);
@@ -11303,6 +13205,7 @@
       meissa2dPointerDownClient = null;
       meissa2dDragging = false;
       wrap.classList.remove("meissa-2d-overlay-wrap--dragging");
+      scheduleMeissa2dViewSettleRefresh(64);
       if (isMosaicActive()) scheduleMeissa2dRecenterRefresh(true, false);
     });
     wrap.addEventListener("dblclick", onDbl);
@@ -11312,6 +13215,7 @@
         "load",
         () => {
           if (!MEISSA_2D_SIMPLE_ORTHO) return;
+          markMeissa2dOverlayWarmup();
           const nw = Number(orthoImg.naturalWidth || 0);
           const nh = Number(orthoImg.naturalHeight || 0);
           if (nw <= 1 || nh <= 1) return;
@@ -11319,7 +13223,9 @@
           /* 저해상→고해상 src 교체 시 reset/fit 을 호출하면 preserveView 직후 뷰가 통째로 틀어짐 */
           syncMeissa2dSquareMapFrameLayout();
           tryMeissa2dOrthoViewportHiPaintCachedSync();
-          scheduleMeissa2dOrthoViewportHiFetch();
+          window.setTimeout(() => {
+            if (!meissa2dDragging) scheduleMeissa2dOrthoViewportHiFetch();
+          }, 180);
           scheduleRenderMeissa2dPointsOverlay();
         },
         { passive: true }
@@ -11616,6 +13522,459 @@
     throw lastErr || new Error("fetch-failed");
   }
 
+  function collectMeissaHttpUrlsFromPayload(node, out, depth) {
+    if (!node || depth > 7) return;
+    if (Array.isArray(node)) {
+      for (const it of node) collectMeissaHttpUrlsFromPayload(it, out, depth + 1);
+      return;
+    }
+    if (typeof node === "string") {
+      const s = node.trim();
+      if (s.startsWith("http")) out.add(s);
+      return;
+    }
+    if (typeof node !== "object") return;
+    for (const v of Object.values(node)) {
+      if (typeof v === "string") {
+        const s = v.trim();
+        if (s.startsWith("http")) out.add(s);
+      } else if (v && typeof v === "object") {
+        collectMeissaHttpUrlsFromPayload(v, out, depth + 1);
+      }
+    }
+  }
+
+  function normalizeMeissaSignedUrl(rawUrl) {
+    const s0 = String(rawUrl || "").trim();
+    if (!s0) return "";
+    let s = s0;
+    if (s.includes("&amp;")) s = s.replace(/&amp;/gi, "&");
+    if (s.includes("&#38;")) s = s.replace(/&#38;/g, "&");
+    if (s.includes("&#x26;")) s = s.replace(/&#x26;/gi, "&");
+    return s;
+  }
+
+  function meissaSignedUrlExpiresInSec(url) {
+    const s = String(url || "").trim();
+    if (!s) return NaN;
+    try {
+      const u = new URL(s, window.location.origin);
+      const expRaw = (u.searchParams.get("Expires") || "").trim();
+      if (!/^\d+$/.test(expRaw)) return NaN;
+      const exp = Number(expRaw);
+      if (!Number.isFinite(exp) || exp <= 0) return NaN;
+      return exp - Math.floor(Date.now() / 1000);
+    } catch (_) {
+      return NaN;
+    }
+  }
+
+  function buildCartaOrthoDirectUrl(projectId, snapshotId, fileName) {
+    const pid = String(projectId || "").trim();
+    const sid = String(snapshotId || "").trim();
+    const fn = String(fileName || "").trim();
+    if (!pid || !sid || !fn) return "";
+    const tok = normalizeMeissaAccessToken(meissaAccess);
+    const base = `https://cs.carta.is/carta/workspace/${encodeURIComponent(pid)}/${encodeURIComponent(sid)}/export/orthophoto/${encodeURIComponent(fn)}`;
+    if (!tok) return base;
+    return `${base}?access_token=${encodeURIComponent(tok)}`;
+  }
+
+  function _scoreMeissaOrthoButtonUrl(url) {
+    const s = String(url || "").trim();
+    const lu = s.toLowerCase();
+    let score = 0;
+    if (lu.includes("/export/orthophoto/")) score += 50;
+    // 버튼 URL은 디코더 안정성이 높은 PNG만 우선한다.
+    if (!/\.png(?:\?|$)/i.test(lu)) return -1000;
+    // 품질 우선: 확대 선명도를 위해 장변이 큰 정사 PNG를 더 높게 점수화.
+    if (lu.includes("orthophoto_25000x.png")) score += 360;
+    else if (lu.includes("orthophoto_12000x.png")) score += 240;
+    else if (lu.includes("orthophoto_7000x.png")) score += 150;
+    else if (lu.includes("orthophoto_700x.png")) score += 80;
+    else if (lu.includes("orthophoto")) {
+      score += 10;
+    }
+    const nominalEdge = meissa2dOrthoNominalLongEdgeFromImgSrc(s);
+    if (Number.isFinite(nominalEdge) && nominalEdge > 0) {
+      // 파일명·쿼리에 장변 정보가 있으면 최종 선택에서 해상도 우선이 되도록 보너스 부여.
+      score += Math.min(520, Math.round(nominalEdge / 60));
+    }
+    if (lu.includes("signature=") && lu.includes("expires=")) score += 30;
+    const remain = meissaSignedUrlExpiresInSec(s);
+    if (Number.isFinite(remain)) {
+      if (remain < 20) score -= 400;
+      else if (remain < 90) score -= 120;
+    }
+    return score;
+  }
+
+  function pickMeissaOrthoButtonUrls(resources) {
+    const rows = Array.isArray(resources) ? resources : [];
+    const urlSet = new Set();
+    for (const r of rows.slice(0, 48)) {
+      collectMeissaHttpUrlsFromPayload(r, urlSet, 0);
+      if (r && typeof r === "object" && r.raw && typeof r.raw === "object") {
+        collectMeissaHttpUrlsFromPayload(r.raw, urlSet, 0);
+      }
+    }
+    const urls = Array.from(urlSet);
+    if (!urls.length) return [];
+    const scored = urls
+      .map((u) => {
+        const s = normalizeMeissaSignedUrl(u);
+        const score = _scoreMeissaOrthoButtonUrl(s);
+        return { s, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    return scored.map((x) => x.s);
+  }
+
+  function pickBestMeissaOrthoButtonUrlForSharpness(urls) {
+    const list = Array.isArray(urls) ? urls : [];
+    let best = "";
+    let bestEdge = -1;
+    let bestScore = -Infinity;
+    for (const raw of list) {
+      const s = normalizeMeissaSignedUrl(raw);
+      if (!s) continue;
+      const edge = Number(meissa2dOrthoNominalLongEdgeFromImgSrc(s)) || 0;
+      const score = Number(_scoreMeissaOrthoButtonUrl(s)) || 0;
+      if (
+        edge > bestEdge + 1e-6 ||
+        (Math.abs(edge - bestEdge) <= 1e-6 && score > bestScore)
+      ) {
+        best = s;
+        bestEdge = edge;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  async function resolveMeissaOrthoButtonUrls(snapshotId, projectId) {
+    const sid = String(snapshotId || "").trim();
+    const pid = String(projectId || "").trim();
+    if (!sid || !meissaAccess) return [];
+    let resources = [];
+    try {
+      if (
+        state.meissaActiveSnapshotId === sid &&
+        Array.isArray(state.meissaSnapshotResources) &&
+        state.meissaSnapshotResources.length
+      ) {
+        resources = state.meissaSnapshotResources;
+      } else {
+        const data = await meissaJson(`/api/meissa/snapshots/${encodeURIComponent(sid)}/resources`, {
+          headers: { Authorization: `JWT ${meissaAccess}` },
+        });
+        resources = Array.isArray(data?.resources) ? data.resources : [];
+      }
+    } catch (_) {
+      resources = [];
+    }
+    const fromResources = pickMeissaOrthoButtonUrls(resources);
+    const guessed = [
+      buildCartaOrthoDirectUrl(pid, sid, "orthophoto_7000x.png"),
+      buildCartaOrthoDirectUrl(pid, sid, "orthophoto_12000x.png"),
+      buildCartaOrthoDirectUrl(pid, sid, "orthophoto_25000x.png"),
+    ].filter(Boolean);
+    const all = [];
+    const seen = new Set();
+    for (const u of [...fromResources, ...guessed]) {
+      const s = normalizeMeissaSignedUrl(u);
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      all.push(s);
+    }
+    all.sort((a, b) => _scoreMeissaOrthoButtonUrl(b) - _scoreMeissaOrthoButtonUrl(a));
+    return all;
+  }
+
+  async function loadMeissa2dSingleHighFromButtonUrl(imgEl, signedUrl, loadSeq, sid, options) {
+    if (!imgEl) return { ok: false };
+    if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+    const src = normalizeMeissaSignedUrl(signedUrl);
+    if (!src) return { ok: false };
+    const timeoutMs = Math.max(
+      20000,
+      Number(options?.timeoutMs) || MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS
+    );
+    meissa2dOrthoApplyWrapLoadingPhase("loading");
+    meissa2dOrthoInteractReady = false;
+    const startedAt = Date.now();
+    const ticker = window.setInterval(() => {
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return;
+      const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      pushMeissa2dLoadLine(`정사: 버튼 URL 다운로드 진행중… ${sec}s 경과`);
+    }, 5000);
+    try {
+      const remainSec = meissaSignedUrlExpiresInSec(src);
+      if (Number.isFinite(remainSec)) {
+        pushMeissa2dLoadLine(
+          `정사: 버튼 URL 만료까지 약 ${Math.max(0, Math.round(remainSec))}s`
+        );
+      }
+      pushMeissa2dLoadLine("정사: 버튼 URL 응답 대기 중(브라우저 직접 다운로드)");
+      const reqSetAt = Date.now();
+      const timeoutMs = Math.max(25000, Number(MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS) || 95000);
+      const decoded = await new Promise((resolve) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.clearTimeout(tm);
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.removeEventListener("load", onLoad);
+            imgEl.removeEventListener("error", onErr);
+          } catch (_) {
+            /* ignore */
+          }
+          resolve(Boolean(ok));
+        };
+        const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
+        const onErr = () => finish(false);
+        const tm = window.setTimeout(() => {
+          try {
+            pushMeissa2dLoadLine(
+              `정사: 버튼 URL 다운로드 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — 현재 요청 중단 후 실패 처리`
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.src = "";
+          } catch (_) {
+            /* ignore */
+          }
+          finish(false);
+        }, timeoutMs);
+        imgEl.addEventListener("load", onLoad);
+        imgEl.addEventListener("error", onErr);
+        try {
+          setMeissa2dRawUrlForSnapshot(String(sid).trim(), src);
+          imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+          imgEl.setAttribute("data-meissa-2d-source", "orthophoto-button-url");
+          imgEl.src = src;
+        } catch (_) {
+          finish(false);
+        }
+      });
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+      if (!decoded) {
+        pushMeissa2dLoadLine(
+          `정사: 버튼 URL 로드는 시도했지만 화면 디코드에 실패했습니다.${src.includes("&amp;") ? " (URL 인코딩 문자열 확인 필요: &amp;)" : ""}`
+        );
+        meissa2dOrthoApplyWrapLoadingPhase("idle");
+        return { ok: false };
+      }
+      pushMeissa2dLoadLine(
+        `정사: 버튼 URL 응답+디코드 완료 ${Math.max(1, Math.round((Date.now() - reqSetAt) / 1000))}s`
+      );
+      meissa2dOrthoInteractReady = true;
+      meissa2dOrthoApplyWrapLoadingPhase("idle");
+      const srcKind = getMeissa2dImageDataSource(imgEl) || "unknown";
+      const georefMode = useFullGeorefForOverlayImage(imgEl) ? "full" : "tile";
+      pushMeissa2dLoadLine(
+        `정사: 버튼 URL 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
+      );
+      pushMeissa2dLoadLine(`정사: 소스 판별 ${srcKind} · georef ${georefMode}`);
+      void meissa2dPrimeAnalysisImageFromDisplayedSrc("button-url");
+      return { ok: true };
+    } finally {
+      try {
+        window.clearInterval(ticker);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
+  async function loadMeissa2dSingleHighFromUnifiedApi(imgEl, apiUrl, loadSeq, sid, options) {
+    if (!imgEl) return { ok: false };
+    if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+    const src = String(apiUrl || "").trim();
+    if (!src) return { ok: false };
+    const timeoutMs = Math.max(30000, Number(options?.timeoutMs) || 180000);
+    meissa2dOrthoApplyWrapLoadingPhase("loading");
+    meissa2dOrthoInteractReady = false;
+    const startedAt = Date.now();
+    const ticker = window.setInterval(() => {
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return;
+      const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      pushMeissa2dLoadLine(`정사: 단일 WEBP 다운로드 진행중… ${sec}s 경과`);
+    }, 5000);
+    try {
+      pushMeissa2dLoadLine("정사: 단일 WEBP 응답 대기 중(브라우저 직접 다운로드)");
+      const reqSetAt = Date.now();
+      const decoded = await new Promise((resolve) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.clearTimeout(tm);
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.removeEventListener("load", onLoad);
+            imgEl.removeEventListener("error", onErr);
+          } catch (_) {
+            /* ignore */
+          }
+          resolve(Boolean(ok));
+        };
+        const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
+        const onErr = () => finish(false);
+        const tm = window.setTimeout(() => {
+          try {
+            pushMeissa2dLoadLine(
+              `정사: 단일 WEBP 제한시간(${Math.round(timeoutMs / 1000)}s) 초과 — 현재 요청 중단`
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          finish(false);
+        }, timeoutMs);
+        imgEl.addEventListener("load", onLoad);
+        imgEl.addEventListener("error", onErr);
+        try {
+          setMeissa2dRawUrlForSnapshot(String(sid || "").trim(), src);
+          imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+          imgEl.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+          imgEl.src = src;
+        } catch (_) {
+          finish(false);
+        }
+      });
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+      if (!decoded) {
+        pushMeissa2dLoadLine("정사: 단일 WEBP 로드는 시도했지만 화면 디코드에 실패했습니다.");
+        meissa2dOrthoApplyWrapLoadingPhase("idle");
+        return { ok: false };
+      }
+      pushMeissa2dLoadLine(
+        `정사: 단일 WEBP 응답+디코드 완료 ${Math.max(1, Math.round((Date.now() - reqSetAt) / 1000))}s`
+      );
+      meissa2dOrthoInteractReady = true;
+      meissa2dOrthoApplyWrapLoadingPhase("idle");
+      pushMeissa2dLoadLine(
+        `정사: 단일 WEBP 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
+      );
+      return { ok: true };
+    } finally {
+      try {
+        window.clearInterval(ticker);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
+  async function loadMeissa2dSingleHighWithProgress(imgEl, urlHigh, loadSeq, sid) {
+    if (!imgEl) return { ok: false };
+    if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+    meissa2dOrthoApplyWrapLoadingPhase("loading");
+    meissa2dOrthoInteractReady = false;
+    const highUrl = String(urlHigh || "").trim();
+    if (!highUrl) return { ok: false };
+    const startedAt = Date.now();
+    let tick = 0;
+    const ticker = window.setInterval(() => {
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return;
+      tick += 1;
+      const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      pushMeissa2dLoadLine(`정사: 고화질 다운로드 진행중… ${sec}s 경과`);
+      if (tick >= 120) {
+        try {
+          window.clearInterval(ticker);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }, 5000);
+    try {
+      const blob = await fetchOrthoMainHighBlobWithProgress(
+        highUrl,
+        MEISSA_ORTHOPHOTO_HIGH_FETCH_MS,
+        () => {}
+      );
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+      if (!blob || blob.size < 32) return { ok: false };
+      pushMeissa2dLoadLine(
+        `정사: 다운로드 완료 ${(blob.size / (1024 * 1024)).toFixed(1)}MB · 화면 반영 중…`
+      );
+      const objUrl = URL.createObjectURL(blob);
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) {
+        try {
+          URL.revokeObjectURL(objUrl);
+        } catch (_) {
+          /* ignore */
+        }
+        return { ok: false, stale: true };
+      }
+      setMeissa2dRawUrlForSnapshot(String(sid).trim(), objUrl);
+      imgEl.setAttribute("data-meissa-2d-ortho-blob-tier", "1");
+      imgEl.setAttribute("data-meissa-2d-ortho-tier", "full");
+      const decoded = await new Promise((resolve) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.clearTimeout(tm);
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            imgEl.removeEventListener("load", onLoad);
+            imgEl.removeEventListener("error", onErr);
+          } catch (_) {
+            /* ignore */
+          }
+          resolve(Boolean(ok));
+        };
+        const onLoad = () => finish(Number(imgEl.naturalWidth || 0) > 0);
+        const onErr = () => finish(false);
+        const tm = window.setTimeout(() => finish(false), 180000);
+        imgEl.addEventListener("load", onLoad);
+        imgEl.addEventListener("error", onErr);
+        try {
+          imgEl.src = objUrl;
+        } catch (_) {
+          finish(false);
+        }
+      });
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return { ok: false, stale: true };
+      if (!decoded) {
+        pushMeissa2dLoadLine("정사: 다운로드는 완료됐지만 화면 디코드에 실패했습니다.");
+        meissa2dOrthoApplyWrapLoadingPhase("idle");
+        return { ok: false };
+      }
+      meissa2dOrthoInteractReady = true;
+      meissa2dOrthoApplyWrapLoadingPhase("idle");
+      pushMeissa2dLoadLine(
+        `정사: 화면 반영 완료 ${Math.round(Number(imgEl.naturalWidth || 0))}×${Math.round(Number(imgEl.naturalHeight || 0))}`
+      );
+      return { ok: true };
+    } catch (_) {
+      meissa2dOrthoApplyWrapLoadingPhase("idle");
+      return { ok: false };
+    } finally {
+      try {
+        window.clearInterval(ticker);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
   async function firstReachableTile(candidates, options) {
     const timeoutMs = Math.max(400, Number(options?.timeoutMs) || 900);
     const batchSize = Math.max(1, Number(options?.batchSize) || 6);
@@ -11761,12 +14120,70 @@
     return rows.join("\n");
   }
 
+  async function warmMeissaDomOverlayTilePath(snapshotId) {
+    const sid = String(snapshotId || "").trim();
+    if (!sid) return false;
+    const projectId =
+      (els.meissaProjectSelect?.value || "").trim() ||
+      (els.projectId?.value || "").trim();
+    if (!projectId || !meissaAccess) return false;
+    try {
+      const centers = candidateTileCenters(projectId, { strictAbsolute: true });
+      const [cx, cy] = centers[0] || [];
+      if (!Number.isFinite(Number(cx)) || !Number.isFinite(Number(cy))) return false;
+      const z = 20;
+      const candidates = [
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx)), Math.round(Number(cy))) },
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx) + 1), Math.round(Number(cy))) },
+        { url: buildMeissaCartaTileUrl(projectId, sid, z, Math.round(Number(cx)), Math.round(Number(cy) + 1)) },
+      ].filter((c) => String(c.url || "").trim());
+      const winner = await firstReachableTile(candidates, {
+        timeoutMs: 900,
+        batchSize: 3,
+        maxChecks: 3,
+      });
+      return Boolean(winner?.url);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function loadMeissa2dOverlayImage(snapshotId) {
     const img = els.meissaCloud2dImageLocal;
     if (!img) return false;
     clearMeissa2dLoadLog();
     pushMeissa2dLoadLine("2D 배경 로드 시작");
+    pushMeissa2dLoadLine(
+      `로더모드 direct=${MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM ? "on" : "off"} · singleHigh=${MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY ? "on" : "off"} · unifiedWebp=${MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP ? "on" : "off"} · buttonOnly=${MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY ? "on" : "off"} · highRes=${MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES ? "off" : "on"} · viewportHi=${MEISSA_ORTHOPHOTO_DISABLE_VIEWPORT_HI ? "off" : "on"}`
+    );
+    const perfStartedAt = Date.now();
+    let perfLastAt = perfStartedAt;
+    let perfDoneOnce = false;
+    const perfSteps = [];
+    const perfMark = (label) => {
+      const now = Date.now();
+      const delta = now - perfLastAt;
+      const total = now - perfStartedAt;
+      perfLastAt = now;
+      perfSteps.push({ label: String(label || ""), delta, total });
+      pushMeissa2dLoadLine(
+        `[성능] ${String(label || "step")} +${(delta / 1000).toFixed(1)}s (누적 ${(total / 1000).toFixed(1)}s)`
+      );
+    };
+    const perfDone = (status) => {
+      if (perfDoneOnce) return;
+      perfDoneOnce = true;
+      const totalMs = Date.now() - perfStartedAt;
+      const top = [...perfSteps].sort((a, b) => b.delta - a.delta).slice(0, 3);
+      const topText = top.length
+        ? top.map((x) => `${x.label}:${(x.delta / 1000).toFixed(1)}s`).join(" | ")
+        : "표시 단계 없음";
+      pushMeissa2dLoadLine(
+        `[성능] ${String(status || "종료")} · 총 ${(totalMs / 1000).toFixed(1)}s · 병목 ${topText}`
+      );
+    };
     const sid = String(snapshotId || "").trim();
+    void warmMeissaDomOverlayTilePath(sid);
     pushMeissa2dLoadLine(sid ? `스냅샷 ${sid}` : "스냅샷 미선택");
     if (String(meissa2dPointTileCacheSid) !== sid) {
       meissa2dPointTileCache.clear();
@@ -11792,6 +14209,17 @@
     const projectId =
       (els.meissaProjectSelect?.value || "").trim() ||
       (els.projectId?.value || "").trim();
+    // 대체뷰: 예전 모드에서만 별도 고화질 버튼 URL을 선해결(JPEG/WebP 대체뷰는 API fmt 로 처리).
+    if (
+      MEISSA_2D_SIMPLE_ORTHO &&
+      projectId &&
+      sid &&
+      meissaAccess &&
+      !MEISSA_DOM_OVERLAY_MIRROR_MAIN_IMAGE &&
+      !meissaDomOverlayUsesLossyApiPreview()
+    ) {
+      void ensureMeissaDomOverlayHiUrl();
+    }
     const snapKey = `${projectId}:${sid}`;
     const hasUsableGeoref = () => {
       const gg = meissa2dGeorefBySnapshot[snapKey];
@@ -11810,7 +14238,8 @@
     const applyPreferred2dVisibility = () => {
       const hasImg = hasRenderableOverlayImage(img);
       if (MEISSA_2D_SIMPLE_ORTHO) {
-        setMeissa2dLayerVisibility({ showMosaic: false, showImage: hasImg });
+        // 심플 모드도 타일 피라미드를 기본 표시로 사용한다.
+        setMeissa2dLayerVisibility({ showMosaic: true, showImage: hasImg });
         return;
       }
       if (preferGeorefImage()) {
@@ -11819,8 +14248,32 @@
         setMeissa2dLayerVisibility({ showMosaic: true, showImage: false });
       }
     };
+    /** 옛날 흐름처럼: 심플 모드에서는 orthophoto 요청을 지오 조회 전에 선시작(병렬) */
+    let orthoPrecachePromise = null;
+    if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess) {
+      try {
+        if (!isMeissa2dButtonUrlOnlySingleMode() && !MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+          const orthoUrlParallel = MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
+            ? buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE)
+            : buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_FULL_MAX_EDGE);
+          orthoPrecachePromise = fetchWithTimeout(
+            orthoUrlParallel,
+            { headers: { Authorization: `JWT ${meissaAccess}` } },
+            MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS
+          );
+          pushMeissa2dLoadLine("정사 서버 요청 선시작(지오 조회와 병렬)");
+        } else if (MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+          pushMeissa2dLoadLine("정사 단일 경로: 버튼 PNG→서버 WEBP 캐시 API만 사용");
+        } else {
+          pushMeissa2dLoadLine("버튼 URL 단일 모드: orthophoto-preview 선요청 생략");
+        }
+      } catch (_) {
+        orthoPrecachePromise = null;
+      }
+    }
     if (!sid || !meissaAccess) {
       pushMeissa2dLoadLine("중단: 스냅샷 또는 JWT 없음");
+      perfDone("중단(스냅샷/JWT 없음)");
       clearMeissa2dOrthoViewportHi();
       meissa2dOrthoInteractReady = false;
       img.removeAttribute("src");
@@ -11830,6 +14283,15 @@
     state.meissa2dLoadFailHint = "";
     // 이미 큰 원본을 받은 스냅샷이라도 좌표 정합/디테일 갱신은 타일 모자이크를 기준으로 유지한다.
     let cachedRaw = meissa2dRawUrlBySnapshot.get(sid);
+    if (cachedRaw && meissa2dOrthophotoUrlIsButtonExport(cachedRaw)) {
+      pushMeissa2dLoadLine("세션 캐시(raw) 버튼 URL은 줌 블러 가능성이 있어 재요청합니다.");
+      try {
+        meissa2dRawUrlBySnapshot.delete(sid);
+      } catch (_) {
+        /* ignore */
+      }
+      cachedRaw = null;
+    }
     if (cachedRaw && meissa2dOrthophotoUrlIsSubFullTier(cachedRaw)) {
       pushMeissa2dLoadLine(
         `세션 캐시가 저해상(max_edge<${MEISSA_ORTHOPHOTO_FULL_MAX_EDGE}) URL이라 무시하고 고해상으로 다시 받습니다.`
@@ -11841,13 +14303,82 @@
       }
       cachedRaw = null;
     }
+    if (cachedRaw && meissa2dImageLikelyDownsampledByBrowser(cachedRaw, img)) {
+      pushMeissa2dLoadLine(
+        "세션 캐시(raw) 이미지가 URL 기대 해상도 대비 낮게 디코드되어 재요청합니다(줌 블러 완화)."
+      );
+      try {
+        meissa2dRawUrlBySnapshot.delete(sid);
+      } catch (_) {
+        /* ignore */
+      }
+      cachedRaw = null;
+    }
+    if (cachedRaw && meissa2dSignedUrlIsExpired(cachedRaw)) {
+      pushMeissa2dLoadLine("세션 캐시(raw) URL 만료(Expires)로 재요청합니다.");
+      try {
+        meissa2dRawUrlBySnapshot.delete(sid);
+      } catch (_) {
+        /* ignore */
+      }
+      cachedRaw = null;
+    }
     if (cachedRaw) {
       pushMeissa2dLoadLine("이번 세션 캐시(raw) URL 재사용");
+      perfMark("세션 캐시 URL 재사용");
       if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
-      img.src = cachedRaw;
       img.onload = onMeissa2dOverlayImgDecoded;
-      img.setAttribute("data-meissa-2d-ok", "1");
-      img.setAttribute("data-meissa-2d-source", "raw-cache");
+      const cachedDecoded = await new Promise((resolve) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.clearTimeout(tm);
+          } catch (_) {
+            /* ignore */
+          }
+          try {
+            img.removeEventListener("load", onLoad);
+            img.removeEventListener("error", onErr);
+          } catch (_) {
+            /* ignore */
+          }
+          resolve(Boolean(ok));
+        };
+        const onLoad = () => finish(Number(img.naturalWidth || 0) > 0);
+        const onErr = () => finish(false);
+        const tm = window.setTimeout(() => finish(false), 15000);
+        img.addEventListener("load", onLoad);
+        img.addEventListener("error", onErr);
+        try {
+          img.src = cachedRaw;
+        } catch (_) {
+          finish(false);
+        }
+      });
+      if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+      if (!cachedDecoded) {
+        pushMeissa2dLoadLine("세션 캐시(raw) 로드 실패(만료/깨짐 가능) → 캐시 폐기 후 재요청");
+        try {
+          meissa2dRawUrlBySnapshot.delete(sid);
+        } catch (_) {
+          /* ignore */
+        }
+        try {
+          img.removeAttribute("src");
+          img.setAttribute("data-meissa-2d-ok", "0");
+        } catch (_) {
+          /* ignore */
+        }
+        cachedRaw = null;
+      } else {
+        img.setAttribute("data-meissa-2d-ok", "1");
+        img.setAttribute("data-meissa-2d-source", "raw-cache");
+      }
+    }
+    if (cachedRaw) {
+      meissa2dEnsureOrthoAnalysisImage();
       if (!projectId) return false;
       const snapKey = `${projectId}:${sid}`;
       const snapHint = meissa2dSnapshotTileHints[snapKey];
@@ -11869,11 +14400,13 @@
       } else {
         scheduleMeissa2dOrthoViewportHiFetch();
       }
+      perfDone("완료(세션 캐시)");
       return true;
     }
 
     let orthoImgLoadPromise = null;
-    if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess) {
+    let buttonOnlyAllowFallbackViews = false;
+    if (MEISSA_2D_SIMPLE_ORTHO && projectId && sid && meissaAccess && MEISSA_ORTHOPHOTO_DIRECT_IMG_STREAM) {
       try {
         img.removeAttribute("data-meissa-2d-ortho-tier");
       } catch (_) {
@@ -11902,6 +14435,12 @@
         meissaAccess,
         MEISSA_ORTHOPHOTO_FULL_MAX_EDGE
       );
+      const urlSplashTier = buildOrthophotoPreviewImgUrl(
+        sid,
+        projectId,
+        meissaAccess,
+        MEISSA_ORTHOPHOTO_SPLASH_EDGE
+      );
       if (MEISSA_ORTHOPHOTO_DISABLE_HIGH_RES) {
         orthoImgLoadPromise = waitMeissa2dOrthoImage(
           img,
@@ -11914,6 +14453,108 @@
         pushMeissa2dLoadLine(
           `정사: 단일 요청 max_edge=${MEISSA_ORTHOPHOTO_PREVIEW_EDGE} (고해상 비활성)`
         );
+      } else if (MEISSA_ORTHOPHOTO_SINGLE_HIGH_ONLY) {
+        if (MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+          const unifiedWebpUrl = buildOrthophotoPreviewImgUrl(
+            sid,
+            projectId,
+            meissaAccess,
+            MEISSA_ORTHOPHOTO_UNIFIED_EDGE,
+            MEISSA_ORTHOPHOTO_UNIFIED_FMT
+          );
+          orthoImgLoadPromise = loadMeissa2dSingleHighFromUnifiedApi(
+            img,
+            unifiedWebpUrl,
+            loadSeq,
+            sid,
+            { timeoutMs: MEISSA_ORTHOPHOTO_HIGH_FETCH_MS }
+          );
+          pushMeissa2dLoadLine(
+            `정사: 단일 요청(버튼 PNG→서버 ${String(MEISSA_ORTHOPHOTO_UNIFIED_FMT || "webp").toUpperCase()} 캐시 · max_edge=${MEISSA_ORTHOPHOTO_UNIFIED_EDGE})`
+          );
+        } else {
+          perfMark("버튼 URL 조회 시작");
+          const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
+          perfMark("버튼 URL 조회 완료");
+          const orderedCandidates = Array.isArray(signedOrthoUrls)
+            ? signedOrthoUrls.map((u) => String(u || "").trim()).filter(Boolean)
+            : [];
+          const highCandidates = orderedCandidates.filter((u) => {
+            const edge = Number(meissa2dOrthoNominalLongEdgeFromImgSrc(u)) || 0;
+            return edge >= MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE;
+          });
+          if (!highCandidates.length) {
+            orthoImgLoadPromise = Promise.resolve({ ok: false, message: "button-url-high-not-found" });
+            pushMeissa2dLoadLine(
+              `정사: 고화질 버튼 URL(장변>=${MEISSA_ORTHOPHOTO_BUTTON_URL_MIN_EDGE}px) 후보가 없어 중단`
+            );
+          }
+          let tryUrls = [];
+          if (highCandidates.length) {
+            try {
+              const probePool = highCandidates
+                .slice(0, Math.min(6, highCandidates.length))
+                .map((url) => ({ url }));
+              const winner = await firstReachableTile(probePool, {
+                timeoutMs: MEISSA_ORTHOPHOTO_BUTTON_URL_PROBE_MS,
+                batchSize: Math.min(3, probePool.length || 1),
+                maxChecks: probePool.length || 1,
+              });
+              const wu = String(winner?.url || "").trim();
+              if (wu) {
+                tryUrls.push(wu);
+                pushMeissa2dLoadLine("정사: 버튼 URL 선확인 성공(빠른 응답 URL 우선 사용)");
+              }
+            } catch (_) {
+              // ignore probe failures; keep ordered fallback list
+            }
+            for (const u of highCandidates) {
+              if (!u || tryUrls.includes(u)) continue;
+              tryUrls.push(u);
+              if (tryUrls.length >= Math.max(1, MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_MAX_TRIES)) break;
+            }
+          }
+          if (tryUrls.length) {
+            orthoImgLoadPromise = (async () => {
+              for (let i = 0; i < tryUrls.length; i++) {
+                const u = String(tryUrls[i] || "").trim();
+                if (!u) continue;
+                const fn = (() => {
+                  try {
+                    const p = new URL(u, window.location.origin).pathname || "";
+                    const idx = p.lastIndexOf("/");
+                    return idx >= 0 ? p.slice(idx + 1) : p;
+                  } catch (_) {
+                    return "orthophoto";
+                  }
+                })();
+                const expectedEdge = Math.round(Number(meissa2dOrthoNominalLongEdgeFromImgSrc(u)) || 0);
+                pushMeissa2dLoadLine(
+                  `정사: 버튼 URL 시도 ${i + 1}/${tryUrls.length} (${fn || "orthophoto"}${expectedEdge > 0 ? ` · 기대 장변≈${expectedEdge}px` : ""})`
+                );
+                const r = await loadMeissa2dSingleHighFromButtonUrl(img, u, loadSeq, sid, {
+                  timeoutMs:
+                    i === 0
+                      ? MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS
+                      : Math.max(26000, Math.round(MEISSA_ORTHOPHOTO_BUTTON_URL_SINGLE_LOAD_TIMEOUT_MS * 0.55)),
+                });
+                if (r && r.ok) return r;
+              }
+              return { ok: false, message: "button-url-all-candidates-failed" };
+            })();
+            pushMeissa2dLoadLine(
+              `정사: 단일 요청(버튼 URL 후보 ${tryUrls.length}개 내 순차 재시도 · orthophoto-preview 미사용)`
+            );
+          } else if (MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
+            orthoImgLoadPromise = Promise.resolve({ ok: false, message: "button-url-not-found" });
+            pushMeissa2dLoadLine("정사: 버튼 URL(orthophoto_25000x.png)을 찾지 못해 중단");
+          } else {
+            orthoImgLoadPromise = loadMeissa2dSingleHighWithProgress(img, urlHiOnly, loadSeq, sid);
+            pushMeissa2dLoadLine(
+              `정사: 단일 요청 max_edge=${MEISSA_ORTHOPHOTO_FULL_MAX_EDGE} (고화질 단일 모드)`
+            );
+          }
+        }
       } else {
         orthoImgLoadPromise = waitMeissa2dOrthoImage(
           img,
@@ -11921,23 +14562,39 @@
           loadSeq,
           sid,
           urlHiOnly,
-          ""
+          urlSplashTier
         );
         pushMeissa2dLoadLine(
-          `정사: 선표시 max_edge=${MEISSA_ORTHOPHOTO_PREVIEW_EDGE} → 이어서 고해상 max_edge=${MEISSA_ORTHOPHOTO_FULL_MAX_EDGE}`
+          `정사: 선표시 max_edge=${MEISSA_ORTHOPHOTO_SPLASH_EDGE} → 본 max_edge=${MEISSA_ORTHOPHOTO_PREVIEW_EDGE} → 이어서 고해상 max_edge=${MEISSA_ORTHOPHOTO_FULL_MAX_EDGE}`
         );
       }
     }
     let orthoParallelResult = { ok: false, skip: true };
     if (projectId && sid) {
       try {
-        const oP = orthoImgLoadPromise || Promise.resolve({ ok: false, skip: true });
-        const parts = await Promise.all([
-          loadMeissa2dGeoref(sid, projectId).catch(() => {}),
-          detectGeoConfigForSnapshot(projectId, sid).catch(() => {}),
-          oP,
-        ]);
-        orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
+        const buttonOnlyMode = isMeissa2dButtonUrlOnlySingleMode();
+        if (buttonOnlyMode && orthoImgLoadPromise) {
+          const parts = await Promise.all([
+            loadMeissa2dGeoref(sid, projectId).catch(() => {}),
+            detectGeoConfigForSnapshot(projectId, sid).catch(() => {}),
+            orthoImgLoadPromise,
+          ]);
+          orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
+          perfMark("georef·지오설정·버튼URL 병렬 완료");
+          if (!orthoParallelResult?.ok) {
+            buttonOnlyAllowFallbackViews = false;
+            pushMeissa2dLoadLine("정사: 버튼 URL 단일 경로 실패 — 추가 폴백 없이 중단합니다.");
+          }
+        } else {
+          const oP = orthoImgLoadPromise || Promise.resolve({ ok: false, skip: true });
+          const parts = await Promise.all([
+            loadMeissa2dGeoref(sid, projectId).catch(() => {}),
+            detectGeoConfigForSnapshot(projectId, sid).catch(() => {}),
+            oP,
+          ]);
+          orthoParallelResult = parts[2] && typeof parts[2] === "object" ? parts[2] : { ok: false };
+          perfMark("georef·지오설정·정사 병렬 완료");
+        }
       } catch (_) {
         // ignore
       }
@@ -11951,7 +14608,9 @@
       scheduleMeissa2dOrthoViewportHiFetch();
     }
     let quickMosaic = false;
-    if (!MEISSA_2D_SIMPLE_ORTHO) {
+    const enableTileMosaicNow =
+      !MEISSA_2D_SIMPLE_ORTHO || (MEISSA_2D_SIMPLE_ORTHO && MEISSA_2D_SIMPLE_TILE_FIRST_MODE);
+    if (enableTileMosaicNow) {
       const snapHint = meissa2dSnapshotTileHints[snapKey];
       const focusCenter = focusToTileCenter(projectId, 20);
       const focusNow = getFocusCenterFromFileCoords();
@@ -11969,7 +14628,7 @@
       } else if (snapHint && Number.isFinite(Number(snapHint.x)) && Number.isFinite(Number(snapHint.y))) {
         meissa2dFallbackTileCenter = { x: Number(snapHint.x), y: Number(snapHint.y) };
       }
-      const baseRadius = computeMosaicRadiusForScale(1);
+      const baseRadius = computeMosaicRadiusForScale(Math.max(1, Number(meissa2dViewScale) || 1));
       quickMosaic = Boolean(renderMeissa2dMosaic(sid, { z: 20, radius: baseRadius }));
       if (quickMosaic) {
         pushMeissa2dLoadLine("타일 모자이크(저해상) 선표시");
@@ -12028,7 +14687,8 @@
             orthophotoOk = true;
             orthophotoHttpStatus = 200;
             img.setAttribute("data-meissa-2d-ok", "1");
-            img.setAttribute("data-meissa-2d-source", "orthophoto-tif");
+            img.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+            meissa2dEnsureOrthoAnalysisImage();
             scheduleRenderMeissa2dPointsOverlay();
             {
               const tier = String(img.getAttribute("data-meissa-2d-ortho-tier") || "");
@@ -12058,14 +14718,19 @@
               orthophotoOk = true;
               orthophotoHttpStatus = 200;
               img.setAttribute("data-meissa-2d-ok", "1");
-              img.setAttribute("data-meissa-2d-source", "orthophoto-tif");
+              img.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+              meissa2dEnsureOrthoAnalysisImage();
               scheduleRenderMeissa2dPointsOverlay();
               pushMeissa2dLoadLine(
                 `정사: 심플 표시 복구 ${nwRec}×${nhRec} (직접 로드·저해상 유지 가능)`
               );
             } else {
               orthophotoErrSnip = "img load error or empty";
-              pushMeissa2dLoadLine("정사 <img> 로드 실패 · 폴백 시도");
+              if (MEISSA_ORTHOPHOTO_UNIFIED_SERVER_WEBP) {
+                pushMeissa2dLoadLine("정사: 단일 WEBP 로드 실패");
+              } else {
+                pushMeissa2dLoadLine("정사 <img> 로드 실패 · 폴백 시도");
+              }
             }
           }
         } catch (e) {
@@ -12089,17 +14754,16 @@
           );
         }, 35000);
         try {
-          const orthoUrl = `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(
-            sid
-          )}/orthophoto-preview?${new URLSearchParams({
-            project_id: projectId,
-            max_edge: String(MEISSA_ORTHOPHOTO_FULL_MAX_EDGE),
-          })}`;
-          const orthoRes = await fetchWithTimeout(
-            orthoUrl,
-            { headers: { Authorization: `JWT ${meissaAccess}` } },
-            600000
-          );
+          const orthoUrl = MEISSA_ORTHOPHOTO_USE_LEGACY_API_URL
+            ? buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_LEGACY_LOW_EDGE)
+            : buildOrthophotoPreviewApiUrl(sid, projectId, MEISSA_ORTHOPHOTO_FULL_MAX_EDGE);
+          const orthoRes = orthoPrecachePromise
+            ? await orthoPrecachePromise
+            : await fetchWithTimeout(
+                orthoUrl,
+                { headers: { Authorization: `JWT ${meissaAccess}` } },
+                MEISSA_ORTHOPHOTO_PREVIEW_FETCH_MS
+              );
           if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
           orthophotoHttpStatus = orthoRes.status;
           if (orthoRes.ok) {
@@ -12115,7 +14779,8 @@
               img.src = objUrl;
               img.onload = onMeissa2dOverlayImgDecoded;
               img.setAttribute("data-meissa-2d-ok", "1");
-              img.setAttribute("data-meissa-2d-source", "orthophoto-tif");
+              img.setAttribute("data-meissa-2d-source", "orthophoto-preview");
+              meissa2dEnsureOrthoAnalysisImage();
               orthophotoOk = true;
               pushMeissa2dLoadLine(
                 `정사 PNG 수신 ${(blob.size / (1024 * 1024)).toFixed(1)}MB · 이미지 적용`
@@ -12154,7 +14819,57 @@
       );
     }
     if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+    if (!orthophotoOk && isMeissa2dButtonUrlOnlySingleMode()) {
+      pushMeissa2dLoadLine("중단: 단일 버튼 URL 경로 실패(orthophoto-preview/RAW/JSON/Carta 폴백 미사용)");
+      perfDone("실패(단일 버튼 URL 경로)");
+      return false;
+    }
+    if (
+      !orthophotoOk &&
+      MEISSA_2D_SIMPLE_ORTHO &&
+      projectId &&
+      sid &&
+      !isMeissa2dButtonUrlOnlySingleMode() &&
+      !MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY
+    ) {
+      pushMeissa2dLoadLine("정사: orthophoto-preview 실패 → 버튼 URL 고화질 폴백 시도");
+      try {
+        const signedOrthoUrls = await resolveMeissaOrthoButtonUrls(sid, projectId);
+        const tries = Array.isArray(signedOrthoUrls) ? signedOrthoUrls.slice(0, 8) : [];
+        for (let i = 0; i < tries.length; i++) {
+          if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
+          const u = String(tries[i] || "").trim();
+          if (!u) continue;
+          const fn = (() => {
+            try {
+              const p = new URL(u, window.location.origin).pathname || "";
+              const idx = p.lastIndexOf("/");
+              return idx >= 0 ? p.slice(idx + 1) : p;
+            } catch (_) {
+              return "orthophoto";
+            }
+          })();
+          pushMeissa2dLoadLine(`정사: 버튼 URL 폴백 ${i + 1}/${tries.length} (${fn || "orthophoto"})`);
+          const r = await loadMeissa2dSingleHighFromButtonUrl(img, u, loadSeq, sid);
+          if (r && r.ok && isMeissa2dLoadCurrent(loadSeq, sid)) {
+            orthophotoOk = true;
+            orthophotoHttpStatus = 200;
+            img.setAttribute("data-meissa-2d-ok", "1");
+            img.setAttribute("data-meissa-2d-source", "orthophoto-button-url");
+            meissa2dEnsureOrthoAnalysisImage();
+            scheduleRenderMeissa2dPointsOverlay();
+            pushMeissa2dLoadLine(
+              `정사: 버튼 URL 폴백 성공 · ${Math.round(Number(img.naturalWidth || 0))}×${Math.round(Number(img.naturalHeight || 0))}`
+            );
+            break;
+          }
+        }
+      } catch (e) {
+        pushMeissa2dLoadLine(`정사: 버튼 URL 폴백 예외 ${String(e?.message || e).slice(0, 90)}`);
+      }
+    }
     if (orthophotoOk) {
+      perfMark("정사 렌더 준비 완료");
       syncMeissa2dSquareMapFrameLayout();
       applyPreferred2dVisibility();
       {
@@ -12167,7 +14882,14 @@
           pushMeissa2dLoadLine("완료: 정사 PNG 배경");
         }
       }
+      perfDone("완료(정사)");
       return true;
+    }
+    if (isMeissa2dButtonUrlOnlySingleMode() || MEISSA_ORTHOPHOTO_BUTTON_URL_ONLY) {
+      pushMeissa2dLoadLine("중단: 버튼 URL 고화질 단일 경로 실패(다른 경로 미사용)");
+      setMeissa2dLayerVisibility({ showMosaic: false, showImage: false });
+      perfDone("실패(버튼 URL 단일 경로)");
+      return false;
     }
     if (MEISSA_2D_SIMPLE_ORTHO) {
       pushMeissa2dLoadLine("심플: overlay-2d-image/raw 시도");
@@ -12176,12 +14898,19 @@
       let rawErrSnip = "";
       let overlayOk = false;
       let overlayMsg = "";
+      pushMeissa2dLoadLine("심플: overlay-2d-image(JSON·dataUrl) 조회");
+      const rawPromise = fetchWithTimeout(
+        `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image/raw`,
+        { headers: { Authorization: `JWT ${meissaAccess}` } },
+        MEISSA_OVERLAY_2D_RAW_FETCH_MS
+      );
+      const jsonPromise = fetchWithTimeout(
+        `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image`,
+        { headers: { Authorization: `JWT ${meissaAccess}` } },
+        MEISSA_OVERLAY_2D_JSON_FETCH_MS
+      );
       try {
-        const res = await fetchWithTimeout(
-          `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image/raw`,
-          { headers: { Authorization: `JWT ${meissaAccess}` } },
-          MEISSA_OVERLAY_2D_RAW_FETCH_MS
-        );
+        const res = await rawPromise;
         if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
         rawHttpStatus = res.status;
         if (res.ok) {
@@ -12220,10 +14949,8 @@
         pushMeissa2dLoadLine(`심플 RAW 예외(JSON·dataUrl 폴백 계속): ${String(rawErrSnip).slice(0, 90)}`);
       }
       try {
-        pushMeissa2dLoadLine("심플: overlay-2d-image(JSON·dataUrl) 조회");
-        const data = await meissaJson(`/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image`, {
-          headers: { Authorization: `JWT ${meissaAccess}` },
-        });
+        const jsonRes = await jsonPromise;
+        const data = await pilexyParseFetchJson(jsonRes);
         if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
         overlayOk = Boolean(data?.ok);
         overlayMsg = String(data?.message || "").slice(0, 240);
@@ -12371,9 +15098,12 @@
         // ignore parse failure
       }
       pushMeissa2dLoadLine("RAW 실패 · overlay-2d-image(JSON) 시도");
-      const data = await meissaJson(`/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image`, {
-        headers: { Authorization: `JWT ${meissaAccess}` },
-      });
+      const jsonRes = await fetchWithTimeout(
+        `${API_BASE_URL}/api/meissa/snapshots/${encodeURIComponent(sid)}/overlay-2d-image`,
+        { headers: { Authorization: `JWT ${meissaAccess}` } },
+        MEISSA_OVERLAY_2D_JSON_FETCH_MS
+      );
+      const data = await pilexyParseFetchJson(jsonRes);
       if (!isMeissa2dLoadCurrent(loadSeq, sid)) return false;
       const u = data?.ok && typeof data?.dataUrl === "string" ? data.dataUrl : "";
       if (u) {
@@ -12724,6 +15454,8 @@
       syncMeissa3dEmbed();
     }
     bindMeissa2dOverlayInteractions();
+    bindMeissaDomOverlayInteractions();
+    bindMeissaDomOverlayImageFallback();
     meissaDatasetBindToolbar();
     bindMeissaCloudInboundMessages();
     if (!state.circles?.length) requestCirclesFromMainOrOpener(true);
@@ -12780,6 +15512,13 @@
       bumpMeissa2dOrthoRgbFitCache();
       scheduleRenderMeissa2dPointsOverlay();
       scheduleMeissaOrthoOffsetPanelRefresh();
+    });
+    [els.offsetX, els.offsetY].forEach((el) => {
+      el?.addEventListener("input", () => {
+        bumpMeissa2dOrthoRgbFitCache();
+        scheduleRenderMeissa2dPointsOverlay();
+        scheduleMeissaOrthoOffsetPanelRefresh();
+      });
     });
     els.meissa3dDebugBtn?.addEventListener("click", async () => {
       if (MEISSA_3D_EXCLUDED) {

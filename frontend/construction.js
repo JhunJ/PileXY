@@ -311,6 +311,7 @@
             <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-drill" /> 천공(m)</label>
             <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-top" /> 기초상단(m)</label>
             <label><input type="radio" name="construction-foundation-hatch-mode" id="construction-foundation-hatch-pit" /> 피트오프셋(m)만</label>
+            <button type="button" id="construction-foundation-hatch-visibility" class="ghost construction-foundation-overlay-all-btn" title="면적 해치 표시를 끄거나 다시 켭니다">가시성 끄기</button>
           </div>
           <div class="construction-foundation-building-levels">
             <div class="construction-foundation-area-filter-title">다른 저장 버전에서 불러오기</div>
@@ -475,6 +476,7 @@
   const constructionFoundationHatchDrill = q("#construction-foundation-hatch-drill");
   const constructionFoundationHatchTop = q("#construction-foundation-hatch-top");
   const constructionFoundationHatchPit = q("#construction-foundation-hatch-pit");
+  const constructionFoundationHatchVisibility = q("#construction-foundation-hatch-visibility");
   const constructionFoundationPfList = q("#construction-foundation-pf-list");
   const constructionFoundationPfHeightHint = q("#construction-foundation-pf-height-hint");
   const constructionFoundationPfProximityReview = q("#construction-foundation-pf-proximity-review");
@@ -588,6 +590,7 @@
     foundationHatchShowDrill: false,
     foundationHatchShowFoundationTop: false,
     foundationHatchShowPit: false,
+    foundationAreaHatchVisible: true,
     foundationExcludeWithThickness: false,
     foundationSelectedPfKeys: new Set(),
     foundationHistoryPast: [],
@@ -663,6 +666,7 @@
   constructionState.foundationHatchShowDrill = Boolean(constructionState.foundationHatchShowDrill);
   constructionState.foundationHatchShowFoundationTop = Boolean(constructionState.foundationHatchShowFoundationTop);
   constructionState.foundationHatchShowPit = Boolean(constructionState.foundationHatchShowPit);
+  constructionState.foundationAreaHatchVisible = constructionState.foundationAreaHatchVisible !== false;
   function normalizeFoundationHatchExclusiveState(preferredKey = "") {
     const keys = ["thickness", "drill", "top", "pit"];
     const stateByKey = {
@@ -3653,6 +3657,7 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function isFoundationHatchLayerEnabled() {
+    if (constructionState.foundationAreaHatchVisible === false) return false;
     return Boolean(
       constructionState.foundationHatchShowThickness
       || constructionState.foundationHatchShowDrill
@@ -4173,6 +4178,18 @@ function inferOpenRectangleVertices(vertices) {
     if (constructionFoundationHatchPit) {
       constructionFoundationHatchPit.checked = Boolean(constructionState.foundationHatchShowPit);
     }
+    if (constructionFoundationHatchVisibility) {
+      const hatchOn = constructionState.foundationAreaHatchVisible !== false;
+      constructionFoundationHatchVisibility.textContent = hatchOn ? "가시성 끄기" : "가시성 켜기";
+      constructionFoundationHatchVisibility.title = hatchOn
+        ? "캔버스 면적 해치를 숨깁니다 (지표 선택은 유지됩니다)."
+        : "면적 해치를 다시 표시합니다.";
+      constructionFoundationHatchVisibility.setAttribute("aria-pressed", hatchOn ? "false" : "true");
+    }
+    const toolbarFoundationAreaHatch = document.getElementById("toggle-foundation-area-hatch-viz");
+    if (toolbarFoundationAreaHatch) {
+      toolbarFoundationAreaHatch.checked = constructionState.foundationAreaHatchVisible !== false;
+    }
     if (constructionFoundationExcludeWithThickness) constructionFoundationExcludeWithThickness.checked = Boolean(constructionState.foundationExcludeWithThickness);
     qa('input[name="construction-pf-height-band"]').forEach((radio) => {
       radio.checked = radio.value === (constructionState.pfHeightBandMode || "small");
@@ -4576,6 +4593,8 @@ function inferOpenRectangleVertices(vertices) {
   /**
    * 절대 글자 높이(TEXT height)로 giant 텍스트 판정.
    * (분포 기반 상대 비교는 사용하지 않는다.)
+   * 작은 글자와 닫힌 폴리라인 면적의 “비율”로 직접 걸러지지는 않음 — 다만 높이가 임계 이상이면 후보에서 제외하고,
+   * 서버가 foundation_pf_only 로 준 항목은 아래에서 예외 유지(현장에서 큰 P/F 기입도 있음).
    */
   function computePfGiantTextIdSet(cands) {
     const out = new Set();
@@ -4681,9 +4700,44 @@ function inferOpenRectangleVertices(vertices) {
     return out;
   }
 
+  /** dxf_parser._ascii_fold_pf_compact 와 동일 목적 — PHC/PART 잡음 판별용 */
+  function asciiFoldForPfNoise(compact) {
+    let out = "";
+    const S = String(compact);
+    for (let i = 0; i < S.length; i += 1) {
+      const ch = S[i];
+      const o = ch.charCodeAt(0);
+      if (o >= 0xff21 && o <= 0xff3a) out += String.fromCharCode(o - 0xff21 + 65);
+      else if (o >= 0xff41 && o <= 0xff5a) out += String.fromCharCode(o - 0xff41 + 97);
+      else if (o >= 0xff10 && o <= 0xff19) out += String.fromCharCode(o - 0xff10 + 48);
+      else out += ch;
+    }
+    return out.toUpperCase();
+  }
+
+  /** 공백 제거 후 첫 글자가 P/F(전각 포함)이면 후보 — 백엔드 _leading_pf_collectible 과 맞춤 */
+  function isPfLeadingPfLocationTextString(raw) {
+    const s = String(raw ?? "").trim();
+    if (!s || s.length > 220) return false;
+    const compact = s.replace(/\s+/g, "");
+    if (!compact) return false;
+    const ch0 = compact[0];
+    const o = ch0.codePointAt(0);
+    let mapped;
+    if (o >= 0xff21 && o <= 0xff3a) mapped = String.fromCodePoint(o - 0xff21 + 65);
+    else if (o >= 0xff41 && o <= 0xff5a) mapped = String.fromCodePoint(o - 0xff41 + 97);
+    else mapped = ch0;
+    const lead = mapped.toUpperCase();
+    if (lead !== "P" && lead !== "F") return false;
+    const nu = asciiFoldForPfNoise(compact);
+    if (nu === "PHC" || nu === "PART") return false;
+    return true;
+  }
+
   function isPfLocationLabelText(text) {
     const s = String(text ?? "").trim();
     if (!s || s.length > 220) return false;
+    if (isPfLeadingPfLocationTextString(s)) return true;
     return /[PFpf]/.test(s);
   }
 
@@ -4700,7 +4754,7 @@ function inferOpenRectangleVertices(vertices) {
     if (
       constructionState.foundationPfLabelCandidatesRef === texts
       && Array.isArray(constructionState.foundationPfLabelCandidates)
-      && constructionState.foundationPfLabelXYMode === 1
+      && constructionState.foundationPfLabelXYMode === 2
     ) {
       return constructionState.foundationPfLabelCandidates;
     }
@@ -4721,7 +4775,7 @@ function inferOpenRectangleVertices(vertices) {
     }
     constructionState.foundationPfLabelCandidatesRef = texts;
     constructionState.foundationPfLabelCandidates = out;
-    constructionState.foundationPfLabelXYMode = 1;
+    constructionState.foundationPfLabelXYMode = 2;
     return out;
   }
 
@@ -5296,7 +5350,11 @@ function inferOpenRectangleVertices(vertices) {
     const band = constructionState.pfHeightBandMode === "large" ? "large" : "small";
     const rawPfCandidates = getPfTextCandidatesCached();
     const giantTextIdSet = computePfGiantTextIdSet(rawPfCandidates);
-    const pfCandidates = rawPfCandidates.filter((c) => !giantTextIdSet.has(String(c.id)));
+    const pfCandidates = rawPfCandidates.filter((c) => {
+      const id = String(c.id);
+      if (!giantTextIdSet.has(id)) return true;
+      return c.pfOnly === true;
+    });
     const { smallIds, largeIds } = getPfRankHeightBandIdSets(pfCandidates);
     const bandIdSet = band === "large" ? largeIds : smallIds;
     const giantTextSig = Array.from(giantTextIdSet).sort().join(",");
@@ -7867,6 +7925,8 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
     constructionState.foundationHatchShowPit = Boolean(constructionFoundationHatchPit?.checked);
     normalizeFoundationHatchExclusiveState();
+    constructionState.foundationAreaHatchVisible = true;
+    syncFoundationControlValues();
   }
   if (constructionFoundationOverlayThickness) {
     constructionFoundationOverlayThickness.addEventListener("change", () => {
@@ -7916,6 +7976,14 @@ function inferOpenRectangleVertices(vertices) {
   if (constructionFoundationHatchPit) {
     constructionFoundationHatchPit.addEventListener("change", () => {
       syncFoundationHatchCheckboxesFromState();
+      requestRedraw();
+    });
+  }
+  if (constructionFoundationHatchVisibility) {
+    constructionFoundationHatchVisibility.addEventListener("click", () => {
+      const wasOn = constructionState.foundationAreaHatchVisible !== false;
+      constructionState.foundationAreaHatchVisible = !wasOn;
+      syncFoundationControlValues();
       requestRedraw();
     });
   }

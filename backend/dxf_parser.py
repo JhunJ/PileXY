@@ -67,9 +67,28 @@ def _ascii_fold_pf_compact(compact: str) -> str:
 
 
 def _is_pf_digit_mark_compact(compact: str) -> bool:
-    """PF1, PF2, PF-3, pf12, ＰＦ１ 등 P+F+번호(현장 기초 구역)."""
+    """PF1, PF2, PF2A, PF-3, PF2A-D800, pf12, ＰＦ１ 등 P+F+번호 계열."""
     s = _ascii_fold_pf_compact(compact).upper()
-    return bool(re.match(r"^PF-?\d+$", s))
+    return bool(re.match(r"^PF-?\d+[A-Z]?(?:-[A-Z0-9]+)?$", s))
+
+
+def _pf_core_label(compact: str) -> Optional[str]:
+    """
+    PF 코드에 접미 식별자(-D800 등)가 붙은 경우 앞의 핵심 코드만 사용.
+    예) PF2A-D800 -> PF2A
+    """
+    m = re.match(r"^(PF-?\d+[A-Za-z]?)(?:-[A-Za-z0-9]+)+$", compact)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _normalize_tower_crane_pile_label(compact: str) -> Optional[str]:
+    """타워크레인 파일번호(T/TC) 표기를 정규화한다. 예) tc4-1 -> TC4-1"""
+    m = re.match(r"^(T|TC)(\d+)-(\d+)$", compact, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return f"{m.group(1).upper()}{m.group(2)}-{m.group(3)}"
 
 
 def _is_foundation_pf_style_compact(compact: str) -> bool:
@@ -92,6 +111,21 @@ def _is_foundation_pf_style_compact(compact: str) -> bool:
     return True
 
 
+def _leading_pf_collectible(compact: str) -> bool:
+    """
+    공백 제거 본문이 P/F(전각 포함)로 시작하면 기초 후보로 본다.
+    PHC·PART 등 말뚝/기초 라벨이 아닌 흔한 잡문자열은 기존과 같이 제외.
+    """
+    if not compact:
+        return False
+    if _leading_pf_ascii(compact) is None:
+        return False
+    u = _ascii_fold_pf_compact(compact).upper()
+    if u in ("PHC", "PART"):
+        return False
+    return True
+
+
 def foundation_pf_only_flag(raw: str) -> bool:
     """말뚝 번호가 아닌 기초 P/F 표기 — 뷰어·기초 탭용으로만 수집, 자동 매칭 후보에서는 제외."""
     s = _normalize_label_hyphens((raw or "").strip())
@@ -100,8 +134,10 @@ def foundation_pf_only_flag(raw: str) -> bool:
         return False
     if NUMERIC_TEXT_PATTERN.fullmatch(compact):
         return False
-    if re.match(r"^([Tt])(\d+)-(\d+)$", compact):
+    if _normalize_tower_crane_pile_label(compact):
         return False
+    if _leading_pf_collectible(compact):
+        return True
     return _is_foundation_pf_style_compact(compact)
 
 
@@ -109,9 +145,9 @@ def pile_label_for_collection(raw: str) -> Optional[str]:
     """
     DXF에서 말뚝 매칭 후보로 넣을 TEXT 본문.
     - 숫자·소수점·마이너스·하이픈만 (기존)
-    - 또는 T(호기)-파일 번호 (예: T4-1). 앞에 T가 없는 4-1은 동-번호로 숫자 패턴만으로 수집.
+    - 또는 T/TC(호기)-파일 번호 (예: T4-1, TC4-1). 앞에 T/TC가 없는 4-1은 동-번호로 숫자 패턴만으로 수집.
     - 또는 기초골조용 P/F로 시작하는 표기(공백 제거 후 첫 글자) — 캔버스 표시·기초 탭 P/F 짝지음용.
-    공백은 T형식에서만 제거해 T4-1과 동일하게 취급.
+    공백은 T/TC 형식에서만 제거해 T4-1, TC4-1과 동일하게 취급.
     """
     s = _normalize_label_hyphens((raw or "").strip())
     if not s:
@@ -119,10 +155,18 @@ def pile_label_for_collection(raw: str) -> Optional[str]:
     if NUMERIC_TEXT_PATTERN.fullmatch(s):
         return s
     compact = re.sub(r"\s+", "", s)
-    m = re.match(r"^([Tt])(\d+)-(\d+)$", compact)
-    if m:
-        return f"T{m.group(2)}-{m.group(3)}"
+    tower_label = _normalize_tower_crane_pile_label(compact)
+    if tower_label:
+        return tower_label
     if _is_foundation_pf_style_compact(compact):
+        pf_core = _pf_core_label(compact)
+        if pf_core:
+            return pf_core
+        return s if len(s) <= 120 else f"{s[:117]}..."
+    if _leading_pf_collectible(compact):
+        pf_core = _pf_core_label(compact)
+        if pf_core:
+            return pf_core
         return s if len(s) <= 120 else f"{s[:117]}..."
     return None
 # 원형 폴리라인 인식: 절대 오차(단위), 상대 오차(반지름 대비), 최소 꼭짓점 수

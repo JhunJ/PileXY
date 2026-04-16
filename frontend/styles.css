@@ -4611,9 +4611,46 @@ td {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.project-list-header > span {
+  flex: 1 1 220px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.project-list-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 360px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.project-list-header-actions label {
+  white-space: nowrap;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.project-list-header-actions select {
+  min-width: 170px;
+}
+
+@media (max-width: 640px) {
+  .project-list-header > span {
+    white-space: normal;
+  }
+
+  .project-list-header-actions {
+    justify-content: flex-start;
+  }
 }
 
 .project-list {
@@ -4649,11 +4686,15 @@ td {
   flex-direction: column;
   gap: 0.3rem;
   flex: 1;
+  min-width: 0;
 }
 
 .project-item-info strong {
+  display: block;
   font-size: 0.95rem;
   color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .project-meta {
@@ -4665,6 +4706,7 @@ td {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .project-item-name-input {
@@ -5252,6 +5294,61 @@ td {
   z-index: 1;
   background: #f8fafc;
   color: #334155;
+}
+
+.version-compare-excel-issue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+
+.version-compare-excel-issue-filter {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.version-compare-excel-issue-filter span {
+  background: #e2e8f0;
+  border-radius: 999px;
+  padding: 0.03rem 0.36rem;
+  color: #1e293b;
+  font-weight: 700;
+}
+
+.version-compare-excel-issue-filter:hover {
+  border-color: #94a3b8;
+}
+
+.version-compare-excel-issue-filter.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.version-compare-excel-table tbody tr.is-missing td {
+  background: #fef9c3;
+}
+
+.version-compare-excel-table tbody tr.is-mismatch td {
+  background: #fee2e2;
+}
+
+.version-compare-excel-table tbody tr.is-severe-mismatch td {
+  background: #fecaca;
+}
+
+.version-compare-excel-issues-empty {
+  text-align: center;
+  color: #64748b;
 }
 
 .version-compare-excel-table .row-index {
@@ -6367,6 +6464,90 @@ tr.meissa-result-data-row {
   max-height: 9.5em;
   overflow-y: auto;
   color: #64748b;
+}
+
+.meissa-dom-overlay-wrap {
+  margin-top: 0.45rem;
+}
+
+.meissa-dom-overlay-wrap > summary {
+  cursor: pointer;
+}
+
+.meissa-dom-overlay-stage {
+  position: relative;
+  width: 100%;
+  min-height: 280px;
+  max-height: 58vh;
+  height: min(42vh, 560px);
+  margin-top: 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0f172a;
+  touch-action: none;
+}
+
+.meissa-dom-overlay-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  display: block;
+  background: #0f172a;
+  touch-action: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.meissa-dom-overlay-points {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.meissa-dom-overlay-stage--dragging {
+  cursor: grabbing;
+}
+
+.meissa-dom-overlay-dot {
+  position: absolute;
+  width: var(--dot-size, 6px);
+  height: var(--dot-size, 6px);
+  margin-left: calc(var(--dot-size, 6px) * -0.5);
+  margin-top: calc(var(--dot-size, 6px) * -0.5);
+  border-radius: 999px;
+  background: #22d3ee;
+  box-shadow:
+    0 0 0 1px rgba(8, 47, 73, 0.88),
+    0 0 8px rgba(34, 211, 238, 0.72);
+}
+
+.meissa-dom-overlay-circle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--circle-size, 6px);
+  height: var(--circle-size, 6px);
+  border-radius: 999px;
+  border: 0;
+  background: rgba(34, 211, 238, 0.38);
+  box-shadow: none;
+}
+
+.meissa-dom-overlay-label {
+  position: absolute;
+  transform: translate(6px, -10px);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  white-space: nowrap;
 }
 
 .meissa-cloud-2d-mosaic-local {

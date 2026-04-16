@@ -287,10 +287,10 @@
         </div>
       </div>
       <form id="upload-form" class="upload-form">
-        <div class="selected-file" id="selected-file-name">선택된 DXF 파일 없음</div>
+        <div class="selected-file" id="selected-file-name">선택된 DXF/DWG 파일 없음</div>
         <label class="file-input">
-          <span>DXF 파일 선택</span>
-          <input type="file" id="dxf-file" name="file" accept=".dxf" required />
+          <span>DXF/DWG 파일 선택</span>
+          <input type="file" id="dxf-file" name="file" accept=".dxf,.dwg" required />
         </label>
         <button type="submit" id="upload-button" disabled>업로드 &amp; 분석</button>
         <span class="soft-liability-note soft-liability-note--inverse" aria-label="책임은 사용자에게 있습니다.">
@@ -341,6 +341,10 @@
             <label title="P/F 삽입점에서 짝지은 닫힌 윤곽(중심) 및 그 안 파일(원)까지 연결선 표시">
               <input type="checkbox" id="toggle-pf-poly-link-viz" checked />
               P/F·윤곽 연결선
+            </label>
+            <label title="기초골조 탭의 캔버스 면적으로 보기(해치) — 끄면 면적 색 채움만 숨기고 지표 선택은 유지됩니다">
+              <input type="checkbox" id="toggle-foundation-area-hatch-viz" checked />
+              면적 해치
             </label>
           </div>
           <div class="viewer-toolbar-group viewer-toolbar-group--secondary">
@@ -1289,6 +1293,21 @@
           <div class="meissa-2d-overlay-wrap">
             <img id="meissa-cloud-2d-image-local" class="meissa-cloud-2d-image-local" alt="Meissa 2D 배경" />
           </div>
+          <details class="meissa-dom-overlay-wrap">
+            <summary>대체 뷰(빠른 DOM 오버레이 · URL 이미지 기반)</summary>
+            <div class="meissa-dom-overlay-stage" id="meissa-dom-overlay-stage">
+              <img
+                id="meissa-dom-overlay-image"
+                class="meissa-dom-overlay-image"
+                alt="Meissa URL 정사 대체 뷰"
+              />
+              <div id="meissa-dom-overlay-points" class="meissa-dom-overlay-points" aria-hidden="true"></div>
+            </div>
+            <p class="meissa-note meissa-dom-overlay-note">
+              URL 이미지 위에 파일좌표를 DOM으로 얹는 대체 렌더입니다(캔버스와 독립).
+            </p>
+            <p id="meissa-dom-overlay-status" class="meissa-note meissa-dom-overlay-status"></p>
+          </details>
           <details id="meissa-3d-debug-panel" class="meissa-debug-details">
             <summary>점군 디버그 로그</summary>
             <pre id="meissa-3d-debug-text" class="meissa-debug-pre">아직 디버그 실행 전입니다.</pre>
@@ -1504,11 +1523,11 @@
     </aside>
 
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/app.js?v=2026041401"></script>
+    <script src="/frontend/app.js?v=202604161"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="/frontend/construction.js?v=202604132"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
-    <script src="/frontend/meissa-compare.js?v=202603698"></script>
+    <script src="/frontend/meissa-compare.js?v=2026041616"></script>
   </body>
 </html>

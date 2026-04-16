@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -86,10 +87,56 @@ def _normalize_building(value: Any) -> str:
     return text or DEFAULT_BUILDING_NAME
 
 
+def _normalize_excel_building_key(value: Any) -> str:
+    """시트명·동 컬럼과 도면 building_name을 동일 키로 맞춤 (예: t4, T 4 → T4)."""
+    text = _normalize_building(value)
+    if not text or text == DEFAULT_BUILDING_NAME:
+        return text
+    compact = re.sub(r"\s+", "", text)
+    m = re.match(r"(?i)^T(\d+)$", compact)
+    if m:
+        return f"T{int(m.group(1))}"
+    return text
+
+
+def _is_parking_building_name(value: Any) -> bool:
+    text = _normalize_building(value).replace(" ", "").lower()
+    if not text:
+        return False
+    if "주차장" in text:
+        return True
+    if text.startswith("b") and len(text) >= 2 and text[1:].isdigit():
+        return True
+    return False
+
+
+def _single_parking_building_name(
+    lookup: Dict[Tuple[str, str], List[Dict[str, Any]]],
+) -> Optional[str]:
+    names = {
+        building_name
+        for (building_name, _number) in lookup.keys()
+        if _is_parking_building_name(building_name)
+    }
+    if len(names) != 1:
+        return None
+    return next(iter(names))
+
+
 def _normalize_number(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
+    raw = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw)
+    raw = re.sub(r"\s+", "", raw)
+    # 타워크레인 T4-1 / TC4-1: 호기는 시트/윤곽(T4)과 맞추고, 번호는 하이픈 뒤(파일 번호)만 사용 — 엑셀 "1"과 동일 키
+    tower_m = re.fullmatch(r"(?i)(T|TC)(\d+)-(\d+)", raw)
+    if tower_m:
+        return str(int(tower_m.group(3)))
+    hyphen_match = re.fullmatch(r"(\d+)-(\d+)", raw)
+    if hyphen_match:
+        # 동-번호 표기는 뒤 번호를 실제 파일 번호로 본다. (예: 1-1 -> 1)
+        return str(int(hyphen_match.group(2)))
     if raw.endswith(".0"):
         try:
             return str(int(float(raw)))
@@ -102,13 +149,9 @@ def _number_aliases(value: Any) -> List[str]:
     normalized = _normalize_number(value)
     if not normalized:
         return []
-    aliases = [normalized]
-    if "-" not in normalized:
-        return aliases
-    suffix = _normalize_number(normalized.rsplit("-", 1)[-1])
-    if suffix and suffix != normalized:
-        aliases.insert(0, suffix)
-    return aliases
+    # 엑셀/도면 모두 _normalize_number로 동일 정규화 후 비교하므로
+    # 별도 별칭 확장은 하지 않고 "좌표번호" 1개 키로만 매칭한다.
+    return [normalized]
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -158,7 +201,7 @@ def _build_circle_lookup(circles: Iterable[Dict[str, Any]]) -> Dict[Tuple[str, s
     for circle in circles or []:
         if not isinstance(circle, dict):
             continue
-        building_name = _normalize_building(circle.get("building_name"))
+        building_name = _normalize_excel_building_key(circle.get("building_name"))
         for alias in _number_aliases(_match_number(circle)):
             lookup[(building_name, alias)].append(circle)
     return lookup
@@ -177,10 +220,20 @@ def _pick_best_circle(
     number: str,
     x: float,
     y: float,
+    *,
+    single_parking_building: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
+    normalized_building = _normalize_excel_building_key(building_name)
     for alias in _number_aliases(number):
-        candidates.extend(lookup.get((_normalize_building(building_name), alias), []))
+        candidates.extend(lookup.get((normalized_building, alias), []))
+    if (
+        not candidates
+        and single_parking_building
+        and _is_parking_building_name(normalized_building)
+    ):
+        for alias in _number_aliases(number):
+            candidates.extend(lookup.get((single_parking_building, alias), []))
     if not candidates:
         return None
     return min(candidates, key=lambda circle: _excel_cad_axis_distance(circle, x, y))
@@ -212,6 +265,81 @@ def _resolve_building_source_mode(
     return BUILDING_SOURCE_SHEET if use_sheet_name_as_building else BUILDING_SOURCE_COLUMN
 
 
+MAX_HEADER_SCAN_ROWS = 120
+
+
+def _excel_column_letter_to_index(letters: str) -> int:
+    """A→0, B→1, …, Z→25, AA→26. 잘못된 문자면 -1."""
+    token = str(letters or "").strip().upper()
+    if not token:
+        return -1
+    n = 0
+    for ch in token:
+        if ch < "A" or ch > "Z":
+            return -1
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+def _norm_header_cell_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
+def _header_markers_complete(markers: Optional[Dict[str, Any]]) -> bool:
+    if not markers or not isinstance(markers, dict):
+        return False
+    for k in ("number", "x", "y"):
+        if not str(markers.get(k) or "").strip():
+            return False
+    return True
+
+
+def _cell_matches_header_marker(cell: Any, marker: str) -> bool:
+    mc = _norm_header_cell_text(marker)
+    if not mc:
+        return False
+    cv = _norm_header_cell_text(cell)
+    if not cv:
+        return False
+    if mc == cv:
+        return True
+    if mc in cv or cv in mc:
+        return True
+    if cv.startswith(mc) or mc.startswith(cv):
+        return True
+    return False
+
+
+def _find_header_row_0based_by_markers(
+    df_raw: pd.DataFrame,
+    num_idx: int,
+    x_idx: int,
+    y_idx: int,
+    markers: Dict[str, Any],
+    max_scan: int,
+) -> Optional[int]:
+    """번호/X/Y 열에 지정한 헤더 글자가 같은 행을 찾는다 (0-based)."""
+    n_rows = min(max_scan, len(df_raw))
+    mk_n = str(markers.get("number") or "").strip()
+    mk_x = str(markers.get("x") or "").strip()
+    mk_y = str(markers.get("y") or "").strip()
+    for r in range(n_rows):
+        row = df_raw.iloc[r]
+        width = int(row.shape[0])
+        def cell_at(i: int) -> Any:
+            if i < 0 or i >= width:
+                return ""
+            return row.iloc[i]
+
+        if (
+            _cell_matches_header_marker(cell_at(num_idx), mk_n)
+            and _cell_matches_header_marker(cell_at(x_idx), mk_x)
+            and _cell_matches_header_marker(cell_at(y_idx), mk_y)
+        ):
+            return r
+    return None
+
+
 def _read_sheet_dataframe(
     excel_file: pd.ExcelFile,
     *,
@@ -231,6 +359,62 @@ def _read_sheet_dataframe(
         for index, column in enumerate(df.columns)
     ]
     return df
+
+
+def _read_sheet_dataframe_with_header_markers(
+    excel_file: pd.ExcelFile,
+    *,
+    sheet_name: str,
+    number_column: str,
+    x_column: str,
+    y_column: str,
+    header_row_fallback: int,
+    header_markers: Dict[str, Any],
+) -> Tuple[pd.DataFrame, int]:
+    """
+    열 문자(A,B,…)는 동일하고, 시트마다 헤더 행만 다를 때
+    번호/X/Y 열에 적힌 헤더 글자로 헤더 행을 찾는다.
+    실패 시 header_row_fallback(1-based) 사용.
+    """
+    hb = max(1, int(header_row_fallback))
+    num_i = _excel_column_letter_to_index(number_column)
+    x_i = _excel_column_letter_to_index(x_column)
+    y_i = _excel_column_letter_to_index(y_column)
+    if min(num_i, x_i, y_i) < 0:
+        return _read_sheet_dataframe(excel_file, sheet_name=sheet_name, header_row=hb), hb
+    try:
+        df_raw = pd.read_excel(
+            excel_file,
+            sheet_name=sheet_name,
+            header=None,
+            dtype=object,
+            nrows=MAX_HEADER_SCAN_ROWS,
+        )
+    except Exception:
+        return _read_sheet_dataframe(excel_file, sheet_name=sheet_name, header_row=hb), hb
+    if df_raw is None or len(df_raw) == 0:
+        return _read_sheet_dataframe(excel_file, sheet_name=sheet_name, header_row=hb), hb
+    r0 = _find_header_row_0based_by_markers(
+        df_raw,
+        num_i,
+        x_i,
+        y_i,
+        header_markers,
+        len(df_raw),
+    )
+    if r0 is None:
+        return _read_sheet_dataframe(excel_file, sheet_name=sheet_name, header_row=hb), hb
+    df = pd.read_excel(
+        excel_file,
+        sheet_name=sheet_name,
+        header=r0,
+        dtype=object,
+    )
+    df.columns = [
+        str(column).strip() if str(column).strip() else f"COL_{index + 1}"
+        for index, column in enumerate(df.columns)
+    ]
+    return df, r0 + 1
 
 
 def _compare_single_sheet(
@@ -259,6 +443,8 @@ def _compare_single_sheet(
 
     summary = _empty_summary()
     issues: List[Dict[str, Any]] = []
+    single_parking_building_a = _single_parking_building_name(lookup_a)
+    single_parking_building_b = _single_parking_building_name(lookup_b)
 
     for data_index, row in df.iterrows():
         number = _normalize_number(row.get(resolved_number_column))
@@ -269,14 +455,28 @@ def _compare_single_sheet(
             continue
 
         if building_source_mode == BUILDING_SOURCE_COLUMN:
-            building_name = _normalize_building(row.get(resolved_building_column))
+            building_name = _normalize_excel_building_key(row.get(resolved_building_column))
         else:
-            building_name = _normalize_building(sheet_name)
+            building_name = _normalize_excel_building_key(sheet_name)
 
         summary["totalRows"] += 1
 
-        circle_a = _pick_best_circle(lookup_a, building_name, number, x, y)
-        circle_b = _pick_best_circle(lookup_b, building_name, number, x, y)
+        circle_a = _pick_best_circle(
+            lookup_a,
+            building_name,
+            number,
+            x,
+            y,
+            single_parking_building=single_parking_building_a,
+        )
+        circle_b = _pick_best_circle(
+            lookup_b,
+            building_name,
+            number,
+            x,
+            y,
+            single_parking_building=single_parking_building_b,
+        )
         match_a = circle_a is not None and _excel_cad_axis_distance(circle_a, x, y) <= coord_tolerance
         match_b = circle_b is not None and _excel_cad_axis_distance(circle_b, x, y) <= coord_tolerance
 
@@ -312,15 +512,19 @@ def _compare_single_sheet(
                 "excelX": x,
                 "excelY": y,
                 "oldCircle": {
-                    "x": float(circle_a.get("center_x")),
-                    "y": float(circle_a.get("center_y")),
+                    # 표 표시 좌표는 엑셀과 동일한 X,Y 순서로 노출한다.
+                    # (CAD center_x/center_y를 그대로 내보내면 축이 반대로 보인다)
+                    "x": float(circle_a.get("center_y")),
+                    "y": float(circle_a.get("center_x")),
+                    "number": _match_number(circle_a),
                     "distance": _excel_cad_axis_distance(circle_a, x, y),
                 }
                 if circle_a
                 else None,
                 "newCircle": {
-                    "x": float(circle_b.get("center_x")),
-                    "y": float(circle_b.get("center_y")),
+                    "x": float(circle_b.get("center_y")),
+                    "y": float(circle_b.get("center_x")),
+                    "number": _match_number(circle_b),
                     "distance": _excel_cad_axis_distance(circle_b, x, y),
                 }
                 if circle_b
@@ -349,6 +553,8 @@ def compare_excel_workbook(
     sheet_name: Optional[str] = None,
     sheet_names: Optional[Sequence[str]] = None,
     header_row: int,
+    header_rows: Optional[Dict[str, int]] = None,
+    header_markers: Optional[Dict[str, Any]] = None,
     building_column: Optional[str],
     number_column: str,
     x_column: str,
@@ -382,15 +588,39 @@ def compare_excel_workbook(
     sheet_summaries: List[Dict[str, Any]] = []
 
     for current_sheet_name in selected_sheet_names:
-        df = _read_sheet_dataframe(
-            excel_file,
-            sheet_name=current_sheet_name,
-            header_row=header_row,
-        )
+        effective_header = int(header_row)
+        if header_rows and isinstance(header_rows, dict):
+            raw_h = header_rows.get(current_sheet_name)
+            if raw_h is None:
+                raw_h = header_rows.get(str(current_sheet_name))
+            if raw_h is not None:
+                try:
+                    parsed_h = int(raw_h)
+                    if parsed_h >= 1:
+                        effective_header = parsed_h
+                except (TypeError, ValueError):
+                    pass
+        if _header_markers_complete(header_markers):
+            df, detected_header = _read_sheet_dataframe_with_header_markers(
+                excel_file,
+                sheet_name=current_sheet_name,
+                number_column=number_column,
+                x_column=x_column,
+                y_column=y_column,
+                header_row_fallback=effective_header,
+                header_markers=header_markers or {},
+            )
+            effective_header = detected_header
+        else:
+            df = _read_sheet_dataframe(
+                excel_file,
+                sheet_name=current_sheet_name,
+                header_row=effective_header,
+            )
         result = _compare_single_sheet(
             df,
             sheet_name=current_sheet_name,
-            header_row=header_row,
+            header_row=effective_header,
             number_column=number_column,
             x_column=x_column,
             y_column=y_column,
