@@ -7260,7 +7260,7 @@ function drawTooltip() {
   tooltip.innerHTML = `
     <strong>${numberLabel}</strong> · ${areaInfo.label}<br />
     Φ ${formatNumber(circle.diameter)} / R ${formatNumber(circle.radius)}${areaStr ? ` / 면적 ${areaStr}` : ""}<br />
-    (${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)})
+    좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}
   `;
   tooltip.classList.remove("hidden");
 }
