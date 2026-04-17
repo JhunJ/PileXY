@@ -176,11 +176,11 @@
             <span>월별 기성 기준</span>
             <small class="soft-liability-note soft-liability-note--compact"><span aria-hidden="true">※</span>책임은 사용자에게 있습니다.</small>
           </div>
-          <small>기본은 전달 25일 ~ 선택월 20일입니다. 필요하면 월과 일자를 직접 바꿀 수 있습니다.</small>
+          <small>기본은 전달 20일 ~ 선택월 20일입니다. 필요하면 월과 일자를 직접 바꿀 수 있습니다.</small>
         </div>
         <div class="construction-filter-grid construction-filter-grid--settlement">
           <label>기준 월<select id="construction-settlement-month" class="save-work-select"></select></label>
-          <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="25" /></label>
+          <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
           <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
           <div class="construction-range-note" id="construction-settlement-period-note">기성 범위를 계산하는 중입니다.</div>
         </div>
@@ -7584,7 +7584,7 @@ function inferOpenRectangleVertices(vertices) {
       locations: [...constructionState.selectedLocations],
       remainingThreshold: constructionRemainingThreshold.value ? Number(constructionRemainingThreshold.value) : null,
       settlementMonth: constructionSettlementMonth.value || null,
-      settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 25,
+      settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20,
       settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
     };
   }
@@ -7751,7 +7751,7 @@ function inferOpenRectangleVertices(vertices) {
     constructionOverlayMode.value = "status";
     constructionRemainingThreshold.value = "0";
     if (constructionState.dashboard?.filters?.applied?.settlementMonth) constructionSettlementMonth.value = constructionState.dashboard.filters.applied.settlementMonth;
-    constructionSettlementStartDay.value = "25";
+    constructionSettlementStartDay.value = "20";
     constructionSettlementEndDay.value = "20";
     updateSettlementPreviewButton();
     rebuildLegend();
