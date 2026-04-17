@@ -1692,11 +1692,10 @@ def _build_settlement_period(
         }
 
     year, month = (int(part) for part in resolved_month.split("-", 1))
-    start_year, start_month = (year, month)
-    # 월 경계 포함: 시작일과 종료일이 같아도 "전달 startDay ~ 해당월 endDay"로 본다.
-    # 예) 20~20 => 전달 20일 ~ 해당월 20일
-    if end_day <= start_day:
-        start_year, start_month = _shift_month(year, month, -1)
+    # 기성 기간 시작은 항상 전달 기준으로 계산한다.
+    # 예) 시작 7 / 종료 20 => 전달 7일 ~ 해당월 20일
+    # 예) 시작 25 / 종료 20 => 전달 25일 ~ 해당월 20일
+    start_year, start_month = _shift_month(year, month, -1)
 
     start_day = min(start_day, _last_day_of_month(start_year, start_month))
     end_day = min(end_day, _last_day_of_month(year, month))
