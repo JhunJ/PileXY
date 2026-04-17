@@ -590,7 +590,7 @@
     foundationHatchShowDrill: false,
     foundationHatchShowFoundationTop: false,
     foundationHatchShowPit: false,
-    foundationAreaHatchVisible: true,
+    foundationAreaHatchVisible: false,
     foundationExcludeWithThickness: false,
     foundationSelectedPfKeys: new Set(),
     foundationHistoryPast: [],
@@ -666,7 +666,7 @@
   constructionState.foundationHatchShowDrill = Boolean(constructionState.foundationHatchShowDrill);
   constructionState.foundationHatchShowFoundationTop = Boolean(constructionState.foundationHatchShowFoundationTop);
   constructionState.foundationHatchShowPit = Boolean(constructionState.foundationHatchShowPit);
-  constructionState.foundationAreaHatchVisible = constructionState.foundationAreaHatchVisible !== false;
+  constructionState.foundationAreaHatchVisible = Boolean(constructionState.foundationAreaHatchVisible);
   function normalizeFoundationHatchExclusiveState(preferredKey = "") {
     const keys = ["thickness", "drill", "top", "pit"];
     const stateByKey = {
@@ -6344,6 +6344,120 @@ function inferOpenRectangleVertices(vertices) {
     return parts.join(" · ");
   }
 
+  function parsePfScopeKey(rawKey) {
+    const raw = String(rawKey || "");
+    if (!raw.startsWith("pfgrp:")) return null;
+    try {
+      return decodeURIComponent(raw.slice("pfgrp:".length));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getPfScopeCircleIds(pfKey, scope, thicknessMm = null) {
+    const clusterLabel = parsePfScopeKey(pfKey);
+    if (!clusterLabel) return [];
+    const agg = getPfAggregatesByClusterLabel().find((row) => row.clusterLabel === clusterLabel);
+    if (!agg) return [];
+    const scopeName = String(scope || "");
+    return (agg.circleIds || []).filter((circleId) => {
+      const circle = state.circleMap?.get(circleId);
+      if (!circle || !isNumberMatchedCircle(circle)) return false;
+      if (constructionState.foundationExcludeWithThickness && Number.isFinite(getFoundationThicknessMm(circleId))) {
+        return false;
+      }
+      const mm = getFoundationThicknessMm(circleId);
+      if (scopeName === "specified") return Number.isFinite(mm);
+      if (scopeName === "unspecified") return !Number.isFinite(mm);
+      if (scopeName === "thickness") return Number.isFinite(mm) && Math.round(mm) === Number(thicknessMm);
+      return true;
+    });
+  }
+
+  function summarizePfCircleIdsThicknessStats(pfKey, circleIds) {
+    const selectionSet = constructionState.foundationSelectedCircleIds || new Set();
+    const byMm = new Map();
+    let specifiedCount = 0;
+    let unspecifiedCount = 0;
+    (circleIds || []).forEach((cid) => {
+      const mm = getFoundationThicknessMm(cid);
+      if (!Number.isFinite(mm)) {
+        unspecifiedCount += 1;
+        return;
+      }
+      specifiedCount += 1;
+      const rounded = Math.round(mm);
+      byMm.set(rounded, (byMm.get(rounded) || 0) + 1);
+    });
+    const specifiedIds = getPfScopeCircleIds(pfKey, "specified");
+    const unspecifiedIds = getPfScopeCircleIds(pfKey, "unspecified");
+    const thicknessButtons = Array.from(byMm.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([mm, count]) => {
+        const ids = getPfScopeCircleIds(pfKey, "thickness", mm);
+        const active = ids.length > 0 && ids.every((id) => selectionSet.has(id));
+        return { mm, count, active };
+      });
+    return {
+      specifiedCount,
+      unspecifiedCount,
+      specifiedActive: specifiedIds.length > 0 && specifiedIds.every((id) => selectionSet.has(id)),
+      unspecifiedActive: unspecifiedIds.length > 0 && unspecifiedIds.every((id) => selectionSet.has(id)),
+      thicknessButtons,
+    };
+  }
+
+  function togglePfScopeSelection(pfKey, scope, thicknessMm = null) {
+    const ids = getPfScopeCircleIds(pfKey, scope, thicknessMm);
+    if (!ids.length) return;
+    beforeFoundationMutation();
+    constructionState.foundationSelectedSubgroupKeys.clear();
+    const selected = constructionState.foundationSelectedCircleIds || new Set();
+    const allSelected = ids.every((id) => selected.has(id));
+    const aggregates = getPfAggregatesByClusterLabel();
+    const agg = aggregates.find((row) => row.pfKey === pfKey);
+    const pfPolylineIds = (agg?.polylineIds || []).map((id) => String(id));
+    const allPfIds = getPfScopeCircleIds(pfKey, "__all__");
+
+    let nextSelected;
+    if (!constructionState.foundationMultiSelect) {
+      nextSelected = allSelected ? new Set() : new Set(ids);
+    } else {
+      nextSelected = new Set(selected);
+      if (allSelected) {
+        ids.forEach((id) => nextSelected.delete(id));
+      } else {
+        ids.forEach((id) => nextSelected.add(id));
+      }
+    }
+    constructionState.foundationSelectedCircleIds = nextSelected;
+
+    const hasAnyPfSelected = allPfIds.some((id) => nextSelected.has(id));
+    if (!constructionState.foundationMultiSelect) {
+      constructionState.foundationSelectedPfKeys = hasAnyPfSelected ? new Set([pfKey]) : new Set();
+      constructionState.foundationSelectedPolylineIds = hasAnyPfSelected
+        ? new Set(pfPolylineIds)
+        : new Set();
+    } else {
+      const nextPfKeys = new Set(constructionState.foundationSelectedPfKeys || []);
+      if (hasAnyPfSelected) nextPfKeys.add(pfKey);
+      else nextPfKeys.delete(pfKey);
+      constructionState.foundationSelectedPfKeys = nextPfKeys;
+
+      const nextPolylines = new Set(constructionState.foundationSelectedPolylineIds || []);
+      if (hasAnyPfSelected) {
+        pfPolylineIds.forEach((id) => nextPolylines.add(id));
+      } else {
+        pfPolylineIds.forEach((id) => nextPolylines.delete(id));
+      }
+      constructionState.foundationSelectedPolylineIds = nextPolylines;
+    }
+    constructionState.foundationSuppressedCircleIds.clear();
+    constructionState.foundationSuppressedPolylineIds.clear();
+    refreshFoundationPanel();
+    requestRedraw();
+  }
+
   function renderFoundationPfList() {
     if (!constructionFoundationPfList) return;
     const aggregates = getPfAggregatesByClusterLabel();
@@ -6358,10 +6472,24 @@ function inferOpenRectangleVertices(vertices) {
       const title = agg.clusterLabel === "P/F" ? "P/F (표기 없음)" : escape(agg.clusterLabel);
       const thickSummary = summarizePfCircleIdsThicknessCounts(agg.circleIds);
       const thickHtml = thickSummary ? ` · 두께 ${escape(thickSummary)}` : "";
+      const stats = summarizePfCircleIdsThicknessStats(agg.pfKey, agg.circleIds);
+      const statsHtml = `<div class="construction-foundation-subgroup-row construction-foundation-subgroup-row--pf">
+        <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--specified${stats.specifiedActive ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="specified" title="두께 지정 말뚝만 선택">
+          <span>두께 지정 ${stats.specifiedCount}</span>
+        </button>
+        <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--unspecified${stats.unspecifiedActive ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="unspecified" title="기초의 두께 미지정 말뚝만 선택">
+          <span>기초의 두께 미지정 ${stats.unspecifiedCount}</span>
+        </button>
+        ${stats.thicknessButtons.map((button) => (
+          `<button type="button" class="ghost foundation-scope-btn foundation-scope-btn--thickness${button.active ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="thickness" data-foundation-pf-thickness-mm="${button.mm}" title="${button.mm}mm 두께 말뚝만 선택">
+            <span>두께별 ${button.mm}mm ${button.count}</span>
+          </button>`
+        )).join("")}
+      </div>`;
       return `<button type="button" class="ghost foundation-pf-item foundation-pf-item--aggregate${active ? " is-active" : ""}" data-foundation-pf-key="${escape(agg.pfKey)}">
         <span class="foundation-pf-label">${title}</span>
         <span class="foundation-pf-meta">윤곽 ${agg.outlineCount}개 · 파일 ${agg.circleIds.length} · 근접 ${dist}${thickHtml}</span>
-      </button>`;
+      </button>${statsHtml}`;
     }).join("")}</div>`;
   }
 
@@ -7925,7 +8053,9 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
     constructionState.foundationHatchShowPit = Boolean(constructionFoundationHatchPit?.checked);
     normalizeFoundationHatchExclusiveState();
-    constructionState.foundationAreaHatchVisible = true;
+    if (constructionState.foundationAreaHatchVisible == null) {
+      constructionState.foundationAreaHatchVisible = false;
+    }
     syncFoundationControlValues();
   }
   if (constructionFoundationOverlayThickness) {
@@ -8101,6 +8231,16 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationPfList) {
     constructionFoundationPfList.addEventListener("click", (event) => {
+      const scopeButton = event.target?.closest?.("[data-foundation-pf-scope-key]");
+      if (scopeButton) {
+        const pfKey = scopeButton.dataset.foundationPfScopeKey || "";
+        const scope = scopeButton.dataset.foundationPfScope || "";
+        const mm = scopeButton.dataset.foundationPfThicknessMm;
+        if (pfKey && scope) {
+          togglePfScopeSelection(pfKey, scope, mm);
+        }
+        return;
+      }
       const button = event.target?.closest?.("[data-foundation-pf-key]");
       if (!button) return;
       const key = button.dataset.foundationPfKey || "";

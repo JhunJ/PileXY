@@ -458,12 +458,15 @@ const state = {
   showTextLabels: true,
   showMatchLines: true,
   /** 캔버스: 말뚝 주변 기초 수치 글자·두께 링 등 (번호–파일 연결선과 별도) */
-  showFoundationLabelViz: true,
+  showFoundationLabelViz: false,
   /** P/F 삽입점 ↔ 닫힌 윤곽(중심)·윤곽 내 파일 연결선 */
-  showPfPolyLinkViz: true,
-  showBuildingHatch: true,
-  showParkingHatch: true,
-  showTowerCraneHatch: true,
+  showPfPolyLinkViz: false,
+  showBuildingHatch: false,
+  showParkingHatch: false,
+  showTowerCraneHatch: false,
+  construction: {
+    foundationAreaHatchVisible: false,
+  },
   manualSelection: { circleId: "", textId: "" },
   manualPickMode: null,
   buildingEditMode: false,
@@ -1913,18 +1916,21 @@ function bindEvents() {
     });
   }
   if (toggleBuildingHatchInput) {
+    toggleBuildingHatchInput.checked = state.showBuildingHatch !== false;
     toggleBuildingHatchInput.addEventListener("change", (event) => {
       state.showBuildingHatch = event.target.checked;
       requestRedraw();
     });
   }
   if (toggleParkingHatchInput) {
+    toggleParkingHatchInput.checked = state.showParkingHatch !== false;
     toggleParkingHatchInput.addEventListener("change", (event) => {
       state.showParkingHatch = event.target.checked;
       requestRedraw();
     });
   }
   if (toggleTowerCraneHatchInput) {
+    toggleTowerCraneHatchInput.checked = state.showTowerCraneHatch !== false;
     toggleTowerCraneHatchInput.addEventListener("change", (event) => {
       state.showTowerCraneHatch = event.target.checked;
       requestRedraw();
@@ -7250,13 +7256,49 @@ function drawTooltip() {
   }
   tooltip.style.left = `${tooltipMouseClientX + 4}px`;
   tooltip.style.top = `${tooltipMouseClientY + 4}px`;
+  const displayNumber = getCircleDisplayNumber(circle);
+  const areaInfo = getCircleAreaClassification(circle);
+  const numberLabel = displayNumber ? `번호 ${displayNumber}` : "번호 미확인";
   const areaStr = circle.area != null ? formatNumber(circle.area) : (circle.radius != null ? formatNumber(Math.PI * circle.radius * circle.radius) : "");
   tooltip.innerHTML = `
-    <strong>${circle.id}</strong><br />
+    <strong>${numberLabel}</strong> · ${areaInfo.label}<br />
     Φ ${formatNumber(circle.diameter)} / R ${formatNumber(circle.radius)}${areaStr ? ` / 면적 ${areaStr}` : ""}<br />
     (${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)})
   `;
   tooltip.classList.remove("hidden");
+}
+
+function getCircleAreaClassification(circle) {
+  const normalized = normalizeAreaNameForSearch(circle?.building_name);
+  const tower = normalized.match(/^T(\d+)$/);
+  if (tower) {
+    return { kind: AREA_KIND_TOWER_CRANE, label: `타워크레인 ${parseInt(tower[1], 10)}호기` };
+  }
+  const basement = normalized.match(/^B(\d+)$/);
+  if (basement) {
+    return { kind: AREA_KIND_PARKING, label: `지하주차장 지하 ${parseInt(basement[1], 10)}층` };
+  }
+  const building = normalized.match(/^(\d+)동$/);
+  if (building) {
+    return { kind: AREA_KIND_BUILDING, label: `${parseInt(building[1], 10)}동` };
+  }
+  if (normalized === "미지정") {
+    return { kind: "unspecified", label: "미지정" };
+  }
+  return { kind: AREA_KIND_BUILDING, label: circle?.building_name || normalized || "미지정" };
+}
+
+function getCircleDisplayNumber(circle) {
+  const raw = String(circle?.matched_text?.text || "").trim();
+  if (!raw) return null;
+  const tower = parseTowerCranePileText(raw);
+  if (tower.isTower) return String(tower.seqNum);
+  const hyphen = parseHyphenPileText(raw);
+  if (hyphen.hasHyphen && Number.isInteger(hyphen.seqNum) && hyphen.seqNum >= 1) {
+    return String(hyphen.seqNum);
+  }
+  const number = getMatchedTextNumber(raw);
+  return Number.isInteger(number) && number >= 1 ? String(number) : raw;
 }
 
 function updateTooltipPosition() {

@@ -3251,11 +3251,14 @@ button:active {
   pointer-events: none;
   background: rgba(15, 23, 42, 0.9);
   color: #fff;
-  padding: 0.4rem 0.6rem;
+  padding: 0.55rem 0.8rem;
   border-radius: 4px;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  line-height: 1.45;
   transform: translate(0, -100%);
-  white-space: nowrap;
+  white-space: normal;
+  min-width: 240px;
+  max-width: 360px;
 }
 
 .canvas-tooltip.hidden {
