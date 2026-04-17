@@ -1250,6 +1250,19 @@ def test_settlement_location_progress_keeps_basement_locations_separate(monkeypa
     ]
 
 
+def test_settlement_period_uses_previous_month_when_start_equals_end():
+    period = construction_reports._build_settlement_period(
+        months=["2025-08", "2025-09"],
+        settlement_month="2025-09",
+        settlement_start_day=20,
+        settlement_end_day=20,
+    )
+
+    assert period["month"] == "2025-09"
+    assert period["startDate"] == "2025-08-20"
+    assert period["endDate"] == "2025-09-20"
+
+
 def test_build_dashboard_normalizes_method_aliases(monkeypatch):
     records = [
         {
