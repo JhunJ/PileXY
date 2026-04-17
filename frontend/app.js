@@ -7285,8 +7285,34 @@ function getCircleAreaClassification(circle) {
   return { kind: AREA_KIND_BUILDING, label: circle?.building_name || normalized || "미지정" };
 }
 
+function getRawMatchedTextFromCircle(circle) {
+  const direct = String(circle?.matched_text?.text || "").trim();
+  if (direct) return direct;
+  const tid = circle?.matched_text_id;
+  if (tid != null && tid !== "" && state.textMap?.has(String(tid))) {
+    const text = state.textMap.get(String(tid));
+    const viaMap = String(text?.text || "").trim();
+    if (viaMap) return viaMap;
+  }
+  return "";
+}
+
+function resolveCircleMatchedTextWithDuplicateFallback(circle) {
+  const direct = getRawMatchedTextFromCircle(circle);
+  if (direct) return direct;
+  const circles = state.circles || [];
+  for (let i = 0; i < circles.length; i += 1) {
+    const candidate = circles[i];
+    if (!candidate || candidate.id === circle?.id) continue;
+    if (!geometryMatchesCoLocatedDupPolicy(circle, candidate)) continue;
+    const raw = getRawMatchedTextFromCircle(candidate);
+    if (raw) return raw;
+  }
+  return "";
+}
+
 function getCircleDisplayNumber(circle) {
-  const raw = String(circle?.matched_text?.text || "").trim();
+  const raw = resolveCircleMatchedTextWithDuplicateFallback(circle);
   if (!raw) return null;
   const tower = parseTowerCranePileText(raw);
   if (tower.isTower) return String(tower.seqNum);
