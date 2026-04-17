@@ -464,9 +464,6 @@ const state = {
   showBuildingHatch: false,
   showParkingHatch: false,
   showTowerCraneHatch: false,
-  construction: {
-    foundationAreaHatchVisible: false,
-  },
   manualSelection: { circleId: "", textId: "" },
   manualPickMode: null,
   buildingEditMode: false,
@@ -1899,13 +1896,13 @@ function bindEvents() {
     });
   }
   if (toggleFoundationAreaHatchVizInput) {
-    toggleFoundationAreaHatchVizInput.checked = state.construction?.foundationAreaHatchVisible !== false;
+    toggleFoundationAreaHatchVizInput.checked = Boolean(state.construction?.foundationAreaHatchVisible);
     toggleFoundationAreaHatchVizInput.addEventListener("change", (event) => {
       if (!state.construction) state.construction = {};
       state.construction.foundationAreaHatchVisible = event.target.checked;
       const panelHatchBtn = document.getElementById("construction-foundation-hatch-visibility");
       if (panelHatchBtn) {
-        const hatchOn = state.construction.foundationAreaHatchVisible !== false;
+        const hatchOn = Boolean(state.construction.foundationAreaHatchVisible);
         panelHatchBtn.textContent = hatchOn ? "가시성 끄기" : "가시성 켜기";
         panelHatchBtn.title = hatchOn
           ? "캔버스 면적 해치를 숨깁니다 (지표 선택은 유지됩니다)."
