@@ -180,10 +180,14 @@
         </div>
         <div class="construction-filter-grid construction-filter-grid--settlement">
           <label>기준 월<select id="construction-settlement-month" class="save-work-select"></select></label>
-          <label>시작월<select id="construction-settlement-start-month" class="save-work-select"></select></label>
-          <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
-          <label>종료월<select id="construction-settlement-end-month" class="save-work-select"></select></label>
-          <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          <div class="construction-settlement-monthday-group">
+            <label>시작월<select id="construction-settlement-start-month" class="save-work-select"></select></label>
+            <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          </div>
+          <div class="construction-settlement-monthday-group">
+            <label>종료월<select id="construction-settlement-end-month" class="save-work-select"></select></label>
+            <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          </div>
           <div class="construction-range-note" id="construction-settlement-period-note">기성 범위를 계산하는 중입니다.</div>
         </div>
         <div class="construction-filter-actions">
@@ -7702,6 +7706,40 @@ function inferOpenRectangleVertices(vertices) {
     }
     const prev = month === 1 ? 12 : month - 1;
     return { startMonth: String(prev), endMonth: String(month) };
+  }
+
+  function buildSettlementMonthOptions(baseSettlementMonthValue = "") {
+    const base = String(baseSettlementMonthValue || "").trim();
+    const match = base.match(/^(\d{4})-(\d{2})$/);
+    const year = match ? Number(match[1]) : null;
+    const labels = [];
+    for (let m = 1; m <= 12; m += 1) {
+      const mm = String(m).padStart(2, "0");
+      const monthLabel = year ? `${year}-${mm} (${m}월)` : `${m}월`;
+      labels.push({ value: String(m), label: monthLabel });
+    }
+    return labels;
+  }
+
+  function applySettlementMonthDefaultPair(baseSettlementMonthValue = "", { force = false } = {}) {
+    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
+    const value = String(baseSettlementMonthValue || "").trim();
+    const match = value.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return;
+    const month = Number(match[2]);
+    if (!Number.isFinite(month) || month < 1 || month > 12) return;
+    const prev = month === 1 ? 12 : month - 1;
+    const startValue = String(prev);
+    const endValue = String(month);
+    const hasStart = [...constructionSettlementStartMonth.options].some((option) => option.value === startValue);
+    const hasEnd = [...constructionSettlementEndMonth.options].some((option) => option.value === endValue);
+    if (!hasStart || !hasEnd) return;
+    if (force || !String(constructionSettlementStartMonth.value || "").trim()) {
+      constructionSettlementStartMonth.value = startValue;
+    }
+    if (force || !String(constructionSettlementEndMonth.value || "").trim()) {
+      constructionSettlementEndMonth.value = endValue;
+    }
   }
 
   function collectDashboardPayload() {

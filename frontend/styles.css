@@ -5587,7 +5587,21 @@ td {
 }
 
 .construction-filter-grid--settlement {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: end;
+}
+
+.construction-settlement-month-day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.construction-settlement-month-day-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 0.45rem;
+  align-items: center;
 }
 
 .construction-range-note {
