@@ -1265,6 +1265,16 @@
     return Number.isInteger(year) ? year : null;
   }
 
+  function buildIsoDateFromParts(year, month, day) {
+    const yy = Number(year);
+    const mm = Number(month);
+    const dd = Number(day);
+    if (!Number.isInteger(yy) || !Number.isInteger(mm) || !Number.isInteger(dd)) return null;
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+    const safeDay = Math.min(dd, new Date(yy, mm, 0).getDate());
+    return `${String(yy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+  }
+
   function toSettlementIsoDate(yearRaw, monthRaw, dayRaw) {
     const year = parseSettlementYearInput(yearRaw);
     const month = Number(normalizeSettlementMonthInput(monthRaw));
