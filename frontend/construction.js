@@ -7528,6 +7528,16 @@ function inferOpenRectangleVertices(vertices) {
       : "프로젝트 또는 작업을 불러오고 파일 좌표가 있어야 활성화됩니다.";
   }
 
+  function resolveDashboardDateBounds(dashboard) {
+    const dateOptions = Array.isArray(dashboard?.filters?.options?.dates)
+      ? dashboard.filters.options.dates.filter(Boolean)
+      : [];
+    const bounds = dashboard?.filters?.options?.dateBounds || {};
+    const minDate = dateOptions[0] || bounds.min || "";
+    const maxDate = dateOptions[dateOptions.length - 1] || bounds.max || minDate;
+    return { minDate, maxDate, dateOptions };
+  }
+
   function clearDashboardView(message = "데이터셋을 선택하면 시공 데이터가 표시됩니다.") {
     clearPlaybackState({ redraw: false });
     constructionState.dashboard = null;
@@ -7618,6 +7628,17 @@ function inferOpenRectangleVertices(vertices) {
 
     fillSelect(constructionDateFrom, dashboard?.filters?.options?.dates || [], dashboard?.filters?.applied?.dateFrom, null);
     fillSelect(constructionDateTo, dashboard?.filters?.options?.dates || [], dashboard?.filters?.applied?.dateTo, null);
+    const { minDate: dashboardMinDate, maxDate: dashboardMaxDate, dateOptions } = resolveDashboardDateBounds(dashboard);
+    const hasFrom = Boolean(constructionDateFrom?.value);
+    const hasTo = Boolean(constructionDateTo?.value);
+    const fromInOptions = hasFrom && dateOptions.includes(constructionDateFrom.value);
+    const toInOptions = hasTo && dateOptions.includes(constructionDateTo.value);
+    if (constructionDateFrom && dashboardMinDate && (!hasFrom || !fromInOptions)) {
+      constructionDateFrom.value = dashboardMinDate;
+    }
+    if (constructionDateTo && dashboardMaxDate && (!hasTo || !toInOptions || constructionDateTo.value < constructionDateFrom.value)) {
+      constructionDateTo.value = dashboardMaxDate;
+    }
     fillSelect(constructionMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.month, "전체 기간");
     refreshWeekSelect(dashboard?.filters?.applied?.dateFrom, dashboard?.filters?.applied?.dateTo);
     fillSelect(constructionSettlementMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.settlementMonth, null);
@@ -8063,8 +8084,9 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.selectedWeek = "";
     constructionState.legendFilterKey = "";
     constructionState.settlementPreviewOnly = false;
-    if (constructionState.dashboard?.filters?.options?.dateBounds?.min) constructionDateFrom.value = constructionState.dashboard.filters.options.dateBounds.min;
-    if (constructionState.dashboard?.filters?.options?.dateBounds?.max) constructionDateTo.value = constructionState.dashboard.filters.options.dateBounds.max;
+    const { minDate, maxDate } = resolveDashboardDateBounds(constructionState.dashboard);
+    if (minDate) constructionDateFrom.value = minDate;
+    if (maxDate) constructionDateTo.value = maxDate;
     constructionMonth.value = "";
     refreshWeekSelect();
     constructionOverlayMode.value = "status";
