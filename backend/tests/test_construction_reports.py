@@ -1126,6 +1126,10 @@ def test_build_dashboard_supports_multi_filters_and_settlement(monkeypatch):
     assert dashboard["charts"]["byDate"][0]["weekday"] is not None
     assert dashboard["settlement"]["period"]["startDate"] == "2025-08-25"
     assert dashboard["settlement"]["period"]["endDate"] == "2025-09-20"
+    assert dashboard["filters"]["applied"]["settlementStartYear"] == 2025
+    assert dashboard["filters"]["applied"]["settlementStartMonth"] == 8
+    assert dashboard["filters"]["applied"]["settlementEndYear"] == 2025
+    assert dashboard["filters"]["applied"]["settlementEndMonth"] == 9
     assert dashboard["settlement"]["summary"]["uniquePileCount"] == 3
     assert dashboard["settlement"]["summary"]["totalPenetrationDepth"] == 18.5
     assert dashboard["settlement"]["locationProgress"][0]["progressPercent"] == 100.0
@@ -1248,6 +1252,154 @@ def test_settlement_location_progress_keeps_basement_locations_separate(monkeypa
             "progressPercent": 100.0,
         }
     ]
+
+
+def test_settlement_period_uses_previous_month_when_start_equals_end():
+    period = construction_reports._build_settlement_period(
+        months=["2025-08", "2025-09"],
+        settlement_month="2025-09",
+        settlement_start_year=None,
+        settlement_start_month=None,
+        settlement_start_day=20,
+        settlement_start_date=None,
+        settlement_end_year=None,
+        settlement_end_month=None,
+        settlement_end_day=20,
+        settlement_end_date=None,
+    )
+
+    assert period["month"] == "2025-09"
+    assert period["startDate"] == "2025-08-20"
+    assert period["endDate"] == "2025-09-20"
+
+
+def test_settlement_period_always_uses_previous_month_for_start_day():
+    period = construction_reports._build_settlement_period(
+        months=["2025-08", "2025-09"],
+        settlement_month="2025-09",
+        settlement_start_year=None,
+        settlement_start_month=None,
+        settlement_start_day=5,
+        settlement_start_date=None,
+        settlement_end_year=None,
+        settlement_end_month=None,
+        settlement_end_day=28,
+        settlement_end_date=None,
+    )
+
+    assert period["month"] == "2025-09"
+    assert period["startDate"] == "2025-08-05"
+    assert period["endDate"] == "2025-09-28"
+
+
+def test_settlement_period_uses_selected_year_month_as_is():
+    period = construction_reports._build_settlement_period(
+        months=["2025-12", "2026-01"],
+        settlement_month="2026-01",
+        settlement_start_year=2025,
+        settlement_start_month=12,
+        settlement_start_day=20,
+        settlement_start_date=None,
+        settlement_end_year=2026,
+        settlement_end_month=1,
+        settlement_end_day=20,
+        settlement_end_date=None,
+    )
+
+    assert period["month"] == "2026-01"
+    assert period["startYear"] == 2025
+    assert period["startMonth"] == 12
+    assert period["endYear"] == 2026
+    assert period["endMonth"] == 1
+    assert period["startDate"] == "2025-12-20"
+    assert period["endDate"] == "2026-01-20"
+
+
+def test_settlement_period_prefers_explicit_iso_dates_over_parts():
+    period = construction_reports._build_settlement_period(
+        months=["2026-03", "2026-04"],
+        settlement_month="2026-04",
+        settlement_start_year=2026,
+        settlement_start_month=4,
+        settlement_start_day=20,
+        settlement_start_date="2026-03-20",
+        settlement_end_year=2026,
+        settlement_end_month=4,
+        settlement_end_day=20,
+        settlement_end_date="2026-04-20",
+    )
+
+    assert period["startYear"] == 2026
+    assert period["startMonth"] == 3
+    assert period["startDay"] == 20
+    assert period["endYear"] == 2026
+    assert period["endMonth"] == 4
+    assert period["endDay"] == 20
+    assert period["startDate"] == "2026-03-20"
+    assert period["endDate"] == "2026-04-20"
+
+
+def test_build_dashboard_applies_explicit_settlement_year_month(monkeypatch):
+    records = [
+        {
+            "sheet_name": "기록지",
+            "row_number": 1,
+            "sequence_no": "1",
+            "construction_date": "2026-03-19",
+            "construction_month": "2026-03",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "개량T4",
+            "location": "101동",
+            "pile_number": "1",
+            "pile_number_sort": 1,
+            "pile_remaining": 0.2,
+            "penetration_depth": 6.0,
+            "boring_depth": 6.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+        {
+            "sheet_name": "기록지",
+            "row_number": 2,
+            "sequence_no": "2",
+            "construction_date": "2026-04-20",
+            "construction_month": "2026-04",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "개량T4",
+            "location": "101동",
+            "pile_number": "2",
+            "pile_number_sort": 2,
+            "pile_remaining": 0.3,
+            "penetration_depth": 7.0,
+            "boring_depth": 7.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+
+    monkeypatch.setattr(
+        construction_reports,
+        "_get_dataset",
+        lambda dataset_id: {"id": dataset_id, "name": "sample"},
+    )
+    monkeypatch.setattr(construction_reports, "_list_records", lambda dataset_id: list(records))
+
+    dashboard = construction_reports.build_dashboard(
+        "sample-dataset",
+        settlement_month="2026-04",
+        settlement_start_year=2026,
+        settlement_start_month=3,
+        settlement_start_day=20,
+        settlement_end_year=2026,
+        settlement_end_month=4,
+        settlement_end_day=20,
+    )
+
+    assert dashboard["settlement"]["period"]["startDate"] == "2026-03-20"
+    assert dashboard["settlement"]["period"]["endDate"] == "2026-04-20"
+    assert dashboard["settlement"]["summary"]["recordCount"] == 1
 
 
 def test_build_dashboard_normalizes_method_aliases(monkeypatch):

@@ -3249,13 +3249,21 @@ button:active {
 .canvas-tooltip {
   position: fixed;
   pointer-events: none;
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(2, 6, 23, 0.94);
   color: #fff;
-  padding: 0.4rem 0.6rem;
+  padding: 0.58rem 0.84rem;
   border-radius: 4px;
-  font-size: 0.8rem;
+  font-size: 1.16rem;
+  line-height: 1.56;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.36);
   transform: translate(0, -100%);
-  white-space: nowrap;
+  white-space: normal;
+  min-width: 240px;
+  max-width: 360px;
 }
 
 .canvas-tooltip.hidden {
@@ -5579,7 +5587,19 @@ td {
 }
 
 .construction-filter-grid--settlement {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: end;
+}
+
+.construction-settlement-monthday-group {
+  display: grid;
+  grid-template-columns: minmax(110px, 140px) minmax(0, 1fr) minmax(88px, 110px);
+  gap: 0.45rem;
+  align-items: end;
+}
+
+.construction-settlement-monthday-group label {
+  min-width: 0;
 }
 
 .construction-range-note {
@@ -5732,6 +5752,10 @@ td {
 
   .construction-chart-card--wide {
     grid-column: span 1;
+  }
+
+  .construction-settlement-monthday-group {
+    grid-template-columns: minmax(98px, 120px) minmax(0, 1fr) minmax(82px, 96px);
   }
 }
 

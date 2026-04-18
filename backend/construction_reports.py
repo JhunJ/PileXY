@@ -1647,6 +1647,13 @@ def _parse_iso_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
+def _coerce_iso_date_parts(value: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    parsed = _parse_iso_date(value)
+    if not parsed:
+        return None
+    return parsed.year, parsed.month, parsed.day
+
+
 def _coerce_int(value: Optional[int], default: int, minimum: int, maximum: int) -> int:
     try:
         number = int(value if value is not None else default)
@@ -1674,12 +1681,18 @@ def _last_day_of_month(year: int, month: int) -> int:
 def _build_settlement_period(
     months: Sequence[str],
     settlement_month: Optional[str],
+    settlement_start_year: Optional[int],
+    settlement_start_month: Optional[int],
     settlement_start_day: Optional[int],
+    settlement_start_date: Optional[str],
+    settlement_end_year: Optional[int],
+    settlement_end_month: Optional[int],
     settlement_end_day: Optional[int],
+    settlement_end_date: Optional[str],
 ) -> Dict[str, Any]:
     available_months = sorted(month for month in months if month)
     resolved_month = settlement_month if settlement_month in available_months else (available_months[-1] if available_months else None)
-    start_day = _coerce_int(settlement_start_day, 25, 1, 31)
+    start_day = _coerce_int(settlement_start_day, 20, 1, 31)
     end_day = _coerce_int(settlement_end_day, 20, 1, 31)
     if not resolved_month:
         return {
@@ -1692,17 +1705,37 @@ def _build_settlement_period(
         }
 
     year, month = (int(part) for part in resolved_month.split("-", 1))
-    start_year, start_month = (year, month)
-    if end_day < start_day:
-        start_year, start_month = _shift_month(year, month, -1)
+    default_start_year, default_start_month = _shift_month(year, month, -1)
+    start_month = _coerce_int(settlement_start_month, default_start_month, 1, 12)
+    end_month = _coerce_int(settlement_end_month, month, 1, 12)
+    start_year = _coerce_int(settlement_start_year, default_start_year, 1900, 2100)
+    end_year = _coerce_int(settlement_end_year, year, 1900, 2100)
 
-    start_day = min(start_day, _last_day_of_month(start_year, start_month))
-    end_day = min(end_day, _last_day_of_month(year, month))
-    start_date = date(start_year, start_month, start_day)
-    end_date = date(year, month, end_day)
+    explicit_start_date = _parse_iso_date(settlement_start_date)
+    explicit_end_date = _parse_iso_date(settlement_end_date)
+    if explicit_start_date is not None:
+        start_year = explicit_start_date.year
+        start_month = explicit_start_date.month
+        start_day = explicit_start_date.day
+        start_date = explicit_start_date
+    else:
+        start_day = min(start_day, _last_day_of_month(start_year, start_month))
+        start_date = date(start_year, start_month, start_day)
+    if explicit_end_date is not None:
+        end_year = explicit_end_date.year
+        end_month = explicit_end_date.month
+        end_day = explicit_end_date.day
+        end_date = explicit_end_date
+    else:
+        end_day = min(end_day, _last_day_of_month(end_year, end_month))
+        end_date = date(end_year, end_month, end_day)
     return {
         "month": resolved_month,
+        "startYear": start_year,
+        "startMonth": start_month,
         "startDay": start_day,
+        "endYear": end_year,
+        "endMonth": end_month,
         "endDay": end_day,
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
@@ -3025,13 +3058,30 @@ def _build_settlement_summary(
     circles: Sequence[Dict[str, Any]],
     *,
     settlement_month: Optional[str],
+    settlement_start_year: Optional[int],
+    settlement_start_month: Optional[int],
     settlement_start_day: Optional[int],
+    settlement_start_date: Optional[str],
+    settlement_end_year: Optional[int],
+    settlement_end_month: Optional[int],
     settlement_end_day: Optional[int],
+    settlement_end_date: Optional[str],
     remaining_threshold: Optional[float],
     parking_unified_location: Optional[str] = None,
 ) -> Dict[str, Any]:
     months = sorted({record.get("construction_month") for record in records if record.get("construction_month")})
-    period = _build_settlement_period(months, settlement_month, settlement_start_day, settlement_end_day)
+    period = _build_settlement_period(
+        months,
+        settlement_month,
+        settlement_start_year,
+        settlement_start_month,
+        settlement_start_day,
+        settlement_start_date,
+        settlement_end_year,
+        settlement_end_month,
+        settlement_end_day,
+        settlement_end_date,
+    )
     start_date = period.get("startDate")
     end_date = period.get("endDate")
 
@@ -3125,8 +3175,14 @@ def build_dashboard(
     locations: Optional[Sequence[str]] = None,
     remaining_threshold: Optional[float] = None,
     settlement_month: Optional[str] = None,
-    settlement_start_day: Optional[int] = 25,
+    settlement_start_year: Optional[int] = None,
+    settlement_start_month: Optional[int] = None,
+    settlement_start_day: Optional[int] = 20,
+    settlement_start_date: Optional[str] = None,
+    settlement_end_year: Optional[int] = None,
+    settlement_end_month: Optional[int] = None,
     settlement_end_day: Optional[int] = 20,
+    settlement_end_date: Optional[str] = None,
     exclude_identical_geometry_duplicates: bool = False,
 ) -> Dict[str, Any]:
     dataset = _get_dataset(dataset_id)
@@ -3226,8 +3282,14 @@ def build_dashboard(
         category_filtered_records,
         circles,
         settlement_month=settlement_month,
+        settlement_start_year=settlement_start_year,
+        settlement_start_month=settlement_start_month,
         settlement_start_day=settlement_start_day,
+        settlement_start_date=settlement_start_date,
+        settlement_end_year=settlement_end_year,
+        settlement_end_month=settlement_end_month,
         settlement_end_day=settlement_end_day,
+        settlement_end_date=settlement_end_date,
         remaining_threshold=remaining_threshold,
         parking_unified_location=parking_unified_location,
     )
@@ -3247,7 +3309,11 @@ def build_dashboard(
                 "locations": _merge_filter_values(location, locations, normalizer=_normalize_location),
                 "remainingThreshold": remaining_threshold,
                 "settlementMonth": settlement["period"]["month"],
+                "settlementStartYear": settlement["period"].get("startYear"),
+                "settlementStartMonth": settlement["period"].get("startMonth"),
                 "settlementStartDay": settlement["period"]["startDay"],
+                "settlementEndYear": settlement["period"].get("endYear"),
+                "settlementEndMonth": settlement["period"].get("endMonth"),
                 "settlementEndDay": settlement["period"]["endDay"],
                 "excludeIdenticalGeometryDuplicates": exclude_identical_geometry_duplicates,
             },

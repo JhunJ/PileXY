@@ -176,12 +176,20 @@
             <span>월별 기성 기준</span>
             <small class="soft-liability-note soft-liability-note--compact"><span aria-hidden="true">※</span>책임은 사용자에게 있습니다.</small>
           </div>
-          <small>기본은 전달 25일 ~ 선택월 20일입니다. 필요하면 월과 일자를 직접 바꿀 수 있습니다.</small>
+          <small>기본은 시작월=전달, 종료월=선택월이며 일자는 20일입니다. 필요하면 시작/종료 월·일자를 직접 바꿀 수 있습니다.</small>
         </div>
         <div class="construction-filter-grid construction-filter-grid--settlement">
           <label>기준 월<select id="construction-settlement-month" class="save-work-select"></select></label>
-          <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="25" /></label>
-          <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          <div class="construction-settlement-monthday-group">
+            <label>시작년<select id="construction-settlement-start-year" class="save-work-select"></select></label>
+            <label>시작월<select id="construction-settlement-start-month" class="save-work-select"></select></label>
+            <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          </div>
+          <div class="construction-settlement-monthday-group">
+            <label>종료년<select id="construction-settlement-end-year" class="save-work-select"></select></label>
+            <label>종료월<select id="construction-settlement-end-month" class="save-work-select"></select></label>
+            <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          </div>
           <div class="construction-range-note" id="construction-settlement-period-note">기성 범위를 계산하는 중입니다.</div>
         </div>
         <div class="construction-filter-actions">
@@ -440,6 +448,10 @@
   const constructionAutoMatchedTable = q("#construction-auto-matched-table");
   const constructionDiagnosticIssues = q("#construction-diagnostic-issues");
   const constructionSettlementMonth = q("#construction-settlement-month");
+  const constructionSettlementStartYear = q("#construction-settlement-start-year");
+  const constructionSettlementStartMonth = q("#construction-settlement-start-month");
+  const constructionSettlementEndYear = q("#construction-settlement-end-year");
+  const constructionSettlementEndMonth = q("#construction-settlement-end-month");
   const constructionSettlementStartDay = q("#construction-settlement-start-day");
   const constructionSettlementEndDay = q("#construction-settlement-end-day");
   const constructionSettlementApplyBtn = q("#construction-settlement-apply-btn");
@@ -590,7 +602,7 @@
     foundationHatchShowDrill: false,
     foundationHatchShowFoundationTop: false,
     foundationHatchShowPit: false,
-    foundationAreaHatchVisible: true,
+    foundationAreaHatchVisible: false,
     foundationExcludeWithThickness: false,
     foundationSelectedPfKeys: new Set(),
     foundationHistoryPast: [],
@@ -666,7 +678,7 @@
   constructionState.foundationHatchShowDrill = Boolean(constructionState.foundationHatchShowDrill);
   constructionState.foundationHatchShowFoundationTop = Boolean(constructionState.foundationHatchShowFoundationTop);
   constructionState.foundationHatchShowPit = Boolean(constructionState.foundationHatchShowPit);
-  constructionState.foundationAreaHatchVisible = constructionState.foundationAreaHatchVisible !== false;
+  constructionState.foundationAreaHatchVisible = Boolean(constructionState.foundationAreaHatchVisible);
   function normalizeFoundationHatchExclusiveState(preferredKey = "") {
     const keys = ["thickness", "drill", "top", "pit"];
     const stateByKey = {
@@ -876,23 +888,32 @@
       const parsed = parseIsoDate(dateValue);
       if (!parsed) return;
       const rawStart = startOfWeek(parsed);
-      const rawEnd = endOfWeek(parsed);
       const key = toIsoDate(rawStart);
-      if (grouped.has(key)) return;
-
       const rangeStart = rawStart < monthStart ? monthStart : rawStart;
-      const rangeEnd = rawEnd > monthEnd ? monthEnd : rawEnd;
-      const index = grouped.size + 1;
-      grouped.set(key, {
-        key,
-        value: `${toIsoDate(rangeStart)}|${toIsoDate(rangeEnd)}`,
-        startDate: toIsoDate(rangeStart),
-        endDate: toIsoDate(rangeEnd),
-        label: `${index}주차 · ${formatCompactDate(toIsoDate(rangeStart))} ~ ${formatCompactDate(toIsoDate(rangeEnd))}`,
-      });
+      const rangeEnd = endOfWeek(parsed) > monthEnd ? monthEnd : endOfWeek(parsed);
+      const iso = toIsoDate(parsed);
+      const bucket = grouped.get(key);
+      if (!bucket) {
+        grouped.set(key, {
+          key,
+          rangeStartIso: toIsoDate(rangeStart),
+          rangeEndIso: toIsoDate(rangeEnd),
+          firstIso: iso,
+          lastIso: iso,
+        });
+      } else {
+        if (iso < bucket.firstIso) bucket.firstIso = iso;
+        if (iso > bucket.lastIso) bucket.lastIso = iso;
+      }
     });
 
-    return Array.from(grouped.values());
+    return Array.from(grouped.values()).map((bucket, index) => ({
+      key: bucket.key,
+      value: `${bucket.firstIso}|${bucket.lastIso}`,
+      startDate: bucket.firstIso,
+      endDate: bucket.lastIso,
+      label: `${index + 1}주차 · ${formatCompactDate(bucket.firstIso)} ~ ${formatCompactDate(bucket.lastIso)}`,
+    }));
   }
 
   function refreshWeekSelect(appliedDateFrom = null, appliedDateTo = null) {
@@ -1222,6 +1243,56 @@
         : "-"
     );
     constructionSettlementPeriod.innerHTML = `<span class="construction-period-month">${monthLabel}</span><span class="construction-period-range">${rangeLabel}</span>`;
+  }
+
+  function parseYearMonthTokenStrict(value) {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function buildSettlementYearOptions(baseSettlementMonthValue = "") {
+    const base = parseYearMonthTokenStrict(baseSettlementMonthValue);
+    const currentYear = new Date().getFullYear();
+    const years = new Set([currentYear - 1, currentYear, currentYear + 1]);
+    if (base) {
+      years.add(base.year - 1);
+      years.add(base.year);
+      years.add(base.year + 1);
+    }
+    return [...years]
+      .sort((a, b) => a - b)
+      .map((year) => ({ value: String(year), label: `${year}년` }));
+  }
+
+  function parseSettlementYearInput(value) {
+    const year = Number(String(value ?? "").trim());
+    return Number.isInteger(year) ? year : null;
+  }
+
+  function buildIsoDateFromParts(year, month, day) {
+    const yy = Number(year);
+    const mm = Number(month);
+    const dd = Number(day);
+    if (!Number.isInteger(yy) || !Number.isInteger(mm) || !Number.isInteger(dd)) return null;
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+    const safeDay = Math.min(dd, new Date(yy, mm, 0).getDate());
+    return `${String(yy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+  }
+
+  function toSettlementIsoDate(yearRaw, monthRaw, dayRaw) {
+    const year = parseSettlementYearInput(yearRaw);
+    const month = Number(normalizeSettlementMonthInput(monthRaw));
+    const day = Number(dayRaw);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    const lastDay = new Date(year, month, 0).getDate();
+    const safeDay = Math.min(day, lastDay);
+    return `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
   }
 
   function overlayStatusLabel(status) {
@@ -2802,6 +2873,52 @@
     } else if (!value && placeholder === null && select.options.length) {
       select.value = select.options[0].value;
     }
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function parseYearMonthToken(value) {
+    const raw = String(value || "").trim();
+    const m = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function buildYearMonthToken(year, month) {
+    return `${year}-${pad2(month)}`;
+  }
+
+  function monthOptionLabel(monthNumber) {
+    const month = Number(monthNumber);
+    return Number.isInteger(month) && month >= 1 && month <= 12 ? `${month}월` : "";
+  }
+
+  function shiftYearMonth(year, month, delta) {
+    let y = Number(year);
+    let m = Number(month);
+    let d = Number(delta) || 0;
+    while (d > 0) {
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      d -= 1;
+    }
+    while (d < 0) {
+      m -= 1;
+      if (m < 1) {
+        m = 12;
+        y -= 1;
+      }
+      d += 1;
+    }
+    return { year: y, month: m };
   }
 
   function renderChipGroup(container, items, selectedValues, category) {
@@ -6344,6 +6461,120 @@ function inferOpenRectangleVertices(vertices) {
     return parts.join(" · ");
   }
 
+  function parsePfScopeKey(rawKey) {
+    const raw = String(rawKey || "");
+    if (!raw.startsWith("pfgrp:")) return null;
+    try {
+      return decodeURIComponent(raw.slice("pfgrp:".length));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getPfScopeCircleIds(pfKey, scope, thicknessMm = null) {
+    const clusterLabel = parsePfScopeKey(pfKey);
+    if (!clusterLabel) return [];
+    const agg = getPfAggregatesByClusterLabel().find((row) => row.clusterLabel === clusterLabel);
+    if (!agg) return [];
+    const scopeName = String(scope || "");
+    return (agg.circleIds || []).filter((circleId) => {
+      const circle = state.circleMap?.get(circleId);
+      if (!circle || !isNumberMatchedCircle(circle)) return false;
+      if (constructionState.foundationExcludeWithThickness && Number.isFinite(getFoundationThicknessMm(circleId))) {
+        return false;
+      }
+      const mm = getFoundationThicknessMm(circleId);
+      if (scopeName === "specified") return Number.isFinite(mm);
+      if (scopeName === "unspecified") return !Number.isFinite(mm);
+      if (scopeName === "thickness") return Number.isFinite(mm) && Math.round(mm) === Number(thicknessMm);
+      return true;
+    });
+  }
+
+  function summarizePfCircleIdsThicknessStats(pfKey, circleIds) {
+    const selectionSet = constructionState.foundationSelectedCircleIds || new Set();
+    const byMm = new Map();
+    let specifiedCount = 0;
+    let unspecifiedCount = 0;
+    (circleIds || []).forEach((cid) => {
+      const mm = getFoundationThicknessMm(cid);
+      if (!Number.isFinite(mm)) {
+        unspecifiedCount += 1;
+        return;
+      }
+      specifiedCount += 1;
+      const rounded = Math.round(mm);
+      byMm.set(rounded, (byMm.get(rounded) || 0) + 1);
+    });
+    const specifiedIds = getPfScopeCircleIds(pfKey, "specified");
+    const unspecifiedIds = getPfScopeCircleIds(pfKey, "unspecified");
+    const thicknessButtons = Array.from(byMm.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([mm, count]) => {
+        const ids = getPfScopeCircleIds(pfKey, "thickness", mm);
+        const active = ids.length > 0 && ids.every((id) => selectionSet.has(id));
+        return { mm, count, active };
+      });
+    return {
+      specifiedCount,
+      unspecifiedCount,
+      specifiedActive: specifiedIds.length > 0 && specifiedIds.every((id) => selectionSet.has(id)),
+      unspecifiedActive: unspecifiedIds.length > 0 && unspecifiedIds.every((id) => selectionSet.has(id)),
+      thicknessButtons,
+    };
+  }
+
+  function togglePfScopeSelection(pfKey, scope, thicknessMm = null) {
+    const ids = getPfScopeCircleIds(pfKey, scope, thicknessMm);
+    if (!ids.length) return;
+    beforeFoundationMutation();
+    constructionState.foundationSelectedSubgroupKeys.clear();
+    const selected = constructionState.foundationSelectedCircleIds || new Set();
+    const allSelected = ids.every((id) => selected.has(id));
+    const aggregates = getPfAggregatesByClusterLabel();
+    const agg = aggregates.find((row) => row.pfKey === pfKey);
+    const pfPolylineIds = (agg?.polylineIds || []).map((id) => String(id));
+    const allPfIds = getPfScopeCircleIds(pfKey, "__all__");
+
+    let nextSelected;
+    if (!constructionState.foundationMultiSelect) {
+      nextSelected = allSelected ? new Set() : new Set(ids);
+    } else {
+      nextSelected = new Set(selected);
+      if (allSelected) {
+        ids.forEach((id) => nextSelected.delete(id));
+      } else {
+        ids.forEach((id) => nextSelected.add(id));
+      }
+    }
+    constructionState.foundationSelectedCircleIds = nextSelected;
+
+    const hasAnyPfSelected = allPfIds.some((id) => nextSelected.has(id));
+    if (!constructionState.foundationMultiSelect) {
+      constructionState.foundationSelectedPfKeys = hasAnyPfSelected ? new Set([pfKey]) : new Set();
+      constructionState.foundationSelectedPolylineIds = hasAnyPfSelected
+        ? new Set(pfPolylineIds)
+        : new Set();
+    } else {
+      const nextPfKeys = new Set(constructionState.foundationSelectedPfKeys || []);
+      if (hasAnyPfSelected) nextPfKeys.add(pfKey);
+      else nextPfKeys.delete(pfKey);
+      constructionState.foundationSelectedPfKeys = nextPfKeys;
+
+      const nextPolylines = new Set(constructionState.foundationSelectedPolylineIds || []);
+      if (hasAnyPfSelected) {
+        pfPolylineIds.forEach((id) => nextPolylines.add(id));
+      } else {
+        pfPolylineIds.forEach((id) => nextPolylines.delete(id));
+      }
+      constructionState.foundationSelectedPolylineIds = nextPolylines;
+    }
+    constructionState.foundationSuppressedCircleIds.clear();
+    constructionState.foundationSuppressedPolylineIds.clear();
+    refreshFoundationPanel();
+    requestRedraw();
+  }
+
   function renderFoundationPfList() {
     if (!constructionFoundationPfList) return;
     const aggregates = getPfAggregatesByClusterLabel();
@@ -6358,10 +6589,24 @@ function inferOpenRectangleVertices(vertices) {
       const title = agg.clusterLabel === "P/F" ? "P/F (표기 없음)" : escape(agg.clusterLabel);
       const thickSummary = summarizePfCircleIdsThicknessCounts(agg.circleIds);
       const thickHtml = thickSummary ? ` · 두께 ${escape(thickSummary)}` : "";
+      const stats = summarizePfCircleIdsThicknessStats(agg.pfKey, agg.circleIds);
+      const statsHtml = `<div class="construction-foundation-subgroup-row construction-foundation-subgroup-row--pf">
+        <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--specified${stats.specifiedActive ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="specified" title="두께 지정 말뚝만 선택">
+          <span>두께 지정 ${stats.specifiedCount}</span>
+        </button>
+        <button type="button" class="ghost foundation-scope-btn foundation-scope-btn--unspecified${stats.unspecifiedActive ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="unspecified" title="기초의 두께 미지정 말뚝만 선택">
+          <span>기초의 두께 미지정 ${stats.unspecifiedCount}</span>
+        </button>
+        ${stats.thicknessButtons.map((button) => (
+          `<button type="button" class="ghost foundation-scope-btn foundation-scope-btn--thickness${button.active ? " is-active" : ""}" data-foundation-pf-scope-key="${escape(agg.pfKey)}" data-foundation-pf-scope="thickness" data-foundation-pf-thickness-mm="${button.mm}" title="${button.mm}mm 두께 말뚝만 선택">
+            <span>두께별 ${button.mm}mm ${button.count}</span>
+          </button>`
+        )).join("")}
+      </div>`;
       return `<button type="button" class="ghost foundation-pf-item foundation-pf-item--aggregate${active ? " is-active" : ""}" data-foundation-pf-key="${escape(agg.pfKey)}">
         <span class="foundation-pf-label">${title}</span>
         <span class="foundation-pf-meta">윤곽 ${agg.outlineCount}개 · 파일 ${agg.circleIds.length} · 근접 ${dist}${thickHtml}</span>
-      </button>`;
+      </button>${statsHtml}`;
     }).join("")}</div>`;
   }
 
@@ -7292,6 +7537,16 @@ function inferOpenRectangleVertices(vertices) {
       : "프로젝트 또는 작업을 불러오고 파일 좌표가 있어야 활성화됩니다.";
   }
 
+  function resolveDashboardDateBounds(dashboard) {
+    const dateOptions = Array.isArray(dashboard?.filters?.options?.dates)
+      ? dashboard.filters.options.dates.filter(Boolean)
+      : [];
+    const bounds = dashboard?.filters?.options?.dateBounds || {};
+    const minDate = dateOptions[0] || bounds.min || "";
+    const maxDate = dateOptions[dateOptions.length - 1] || bounds.max || minDate;
+    return { minDate, maxDate, dateOptions };
+  }
+
   function clearDashboardView(message = "데이터셋을 선택하면 시공 데이터가 표시됩니다.") {
     clearPlaybackState({ redraw: false });
     constructionState.dashboard = null;
@@ -7309,6 +7564,9 @@ function inferOpenRectangleVertices(vertices) {
     fillSelect(constructionMonth, [], null, "전체 기간");
     fillSelect(constructionWeek, [], null, "월 먼저 선택");
     fillSelect(constructionSettlementMonth, [], null, null);
+    const now = new Date();
+    const fallbackBaseSettlementMonth = buildYearMonthToken(now.getFullYear(), now.getMonth() + 1);
+    fillSettlementMonthSelectors(fallbackBaseSettlementMonth, null, null, null, null, { forceDefaultPair: true });
     constructionWeek.disabled = true;
 
     renderChipGroup(constructionEquipmentChips, [], [], "equipments");
@@ -7379,9 +7637,34 @@ function inferOpenRectangleVertices(vertices) {
 
     fillSelect(constructionDateFrom, dashboard?.filters?.options?.dates || [], dashboard?.filters?.applied?.dateFrom, null);
     fillSelect(constructionDateTo, dashboard?.filters?.options?.dates || [], dashboard?.filters?.applied?.dateTo, null);
+    const { minDate: dashboardMinDate, maxDate: dashboardMaxDate, dateOptions } = resolveDashboardDateBounds(dashboard);
+    const hasFrom = Boolean(constructionDateFrom?.value);
+    const hasTo = Boolean(constructionDateTo?.value);
+    const fromInOptions = hasFrom && dateOptions.includes(constructionDateFrom.value);
+    const toInOptions = hasTo && dateOptions.includes(constructionDateTo.value);
+    if (constructionDateFrom && dashboardMinDate && (!hasFrom || !fromInOptions)) {
+      constructionDateFrom.value = dashboardMinDate;
+    }
+    if (constructionDateTo && dashboardMaxDate && (!hasTo || !toInOptions || constructionDateTo.value < constructionDateFrom.value)) {
+      constructionDateTo.value = dashboardMaxDate;
+    }
     fillSelect(constructionMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.month, "전체 기간");
     refreshWeekSelect(dashboard?.filters?.applied?.dateFrom, dashboard?.filters?.applied?.dateTo);
     fillSelect(constructionSettlementMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.settlementMonth, null);
+    fillSettlementMonthSelectors(
+      dashboard?.filters?.applied?.settlementMonth || constructionSettlementMonth?.value || "",
+      dashboard?.filters?.applied?.settlementStartYear,
+      dashboard?.filters?.applied?.settlementStartMonth,
+      dashboard?.filters?.applied?.settlementEndYear,
+      dashboard?.filters?.applied?.settlementEndMonth,
+      {
+        forceDefaultPair:
+          dashboard?.filters?.applied?.settlementStartYear == null
+          || dashboard?.filters?.applied?.settlementStartMonth == null
+          || dashboard?.filters?.applied?.settlementEndYear == null
+          || dashboard?.filters?.applied?.settlementEndMonth == null,
+      },
+    );
 
     constructionRemainingThreshold.value = dashboard?.filters?.applied?.remainingThreshold ?? constructionRemainingThreshold.value;
     constructionSettlementStartDay.value = dashboard?.filters?.applied?.settlementStartDay ?? constructionSettlementStartDay.value;
@@ -7440,8 +7723,196 @@ function inferOpenRectangleVertices(vertices) {
     return typeof getActiveProjectName === "function" ? getActiveProjectName() : "기본";
   }
 
+  function parseSettlementYearMonth(value) {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function normalizeSettlementYearInput(value) {
+    const year = Number(String(value ?? "").trim());
+    if (!Number.isInteger(year) || year < 1900 || year > 2100) return "";
+    return String(year);
+  }
+
+  function normalizeSettlementMonthInput(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const monthOnly = Number(raw);
+    if (Number.isInteger(monthOnly) && monthOnly >= 1 && monthOnly <= 12) {
+      return String(monthOnly);
+    }
+    const yearMonthMatch = raw.match(/^(\d{4})-(\d{1,2})$/);
+    if (yearMonthMatch) {
+      const month = Number(yearMonthMatch[2]);
+      if (Number.isInteger(month) && month >= 1 && month <= 12) {
+        return String(month);
+      }
+    }
+    return "";
+  }
+
+  function getSettlementMonthYears(baseSettlementMonthValue = "") {
+    const base = parseSettlementYearMonth(baseSettlementMonthValue || constructionSettlementMonth?.value || "");
+    if (base) return [base.year - 1, base.year, base.year + 1];
+    const now = new Date();
+    const year = now.getFullYear();
+    return [year - 1, year, year + 1];
+  }
+
+  function buildSettlementMonthOptions() {
+    return Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      return { value: String(month), label: `${month}월` };
+    });
+  }
+
+  function fillSettlementYearMonthSelectors(baseSettlementMonthValue = "") {
+    const years = getSettlementMonthYears(baseSettlementMonthValue);
+    const yearOptions = years.map((year) => ({ value: String(year), label: `${year}년` }));
+    const monthOptions = buildSettlementMonthOptions();
+    fillSelect(
+      constructionSettlementStartYear,
+      yearOptions,
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value),
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementEndYear,
+      yearOptions,
+      normalizeSettlementYearInput(constructionSettlementEndYear?.value),
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementStartMonth,
+      monthOptions,
+      normalizeSettlementMonthInput(constructionSettlementStartMonth?.value),
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementEndMonth,
+      monthOptions,
+      normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
+      null,
+      (item) => item,
+    );
+  }
+
+  function applySettlementMonthDefaultPair(baseSettlementMonthValue = "", { force = false } = {}) {
+    const base = parseSettlementYearMonth(baseSettlementMonthValue);
+    if (!base) return;
+    const prev = shiftYearMonth(base.year, base.month, -1);
+    const startYear = String(prev.year);
+    const startMonth = String(prev.month);
+    const endYear = String(base.year);
+    const endMonth = String(base.month);
+    const hasStartYear = [...(constructionSettlementStartYear?.options || [])].some((option) => option.value === startYear);
+    const hasStartMonth = [...(constructionSettlementStartMonth?.options || [])].some((option) => option.value === startMonth);
+    const hasEndYear = [...(constructionSettlementEndYear?.options || [])].some((option) => option.value === endYear);
+    const hasEndMonth = [...(constructionSettlementEndMonth?.options || [])].some((option) => option.value === endMonth);
+    if (!hasStartYear || !hasStartMonth || !hasEndYear || !hasEndMonth) return;
+    if (force || !normalizeSettlementYearInput(constructionSettlementStartYear?.value)) {
+      constructionSettlementStartYear.value = startYear;
+    }
+    if (force || !normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)) {
+      constructionSettlementStartMonth.value = startMonth;
+    }
+    if (force || !normalizeSettlementYearInput(constructionSettlementEndYear?.value)) {
+      constructionSettlementEndYear.value = endYear;
+    }
+    if (force || !normalizeSettlementMonthInput(constructionSettlementEndMonth?.value)) {
+      constructionSettlementEndMonth.value = endMonth;
+    }
+  }
+
+  function fillSettlementMonthSelectors(
+    baseSettlementMonthValue = "",
+    startYear = null,
+    startMonth = null,
+    endYear = null,
+    endMonth = null,
+    { forceDefaultPair = false } = {},
+  ) {
+    fillSettlementYearMonthSelectors(baseSettlementMonthValue);
+    if (normalizeSettlementYearInput(startYear)) constructionSettlementStartYear.value = normalizeSettlementYearInput(startYear);
+    if (normalizeSettlementMonthInput(startMonth)) constructionSettlementStartMonth.value = normalizeSettlementMonthInput(startMonth);
+    if (normalizeSettlementYearInput(endYear)) constructionSettlementEndYear.value = normalizeSettlementYearInput(endYear);
+    if (normalizeSettlementMonthInput(endMonth)) constructionSettlementEndMonth.value = normalizeSettlementMonthInput(endMonth);
+    const hasValidStart = Boolean(
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementStartMonth?.value),
+    );
+    const hasValidEnd = Boolean(
+      normalizeSettlementYearInput(constructionSettlementEndYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
+    );
+    if (forceDefaultPair || !hasValidStart || !hasValidEnd) {
+      applySettlementMonthDefaultPair(baseSettlementMonthValue, { force: true });
+    }
+  }
+
+  function applyDefaultSettlementMonthPairFromBase() {
+    const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
+    fillSettlementMonthSelectors(
+      baseSettlementMonthValue,
+      constructionSettlementStartYear?.value,
+      constructionSettlementStartMonth?.value,
+      constructionSettlementEndYear?.value,
+      constructionSettlementEndMonth?.value,
+      { forceDefaultPair: true },
+    );
+  }
+
+  function syncSettlementMonthSelectorsFromInputs() {
+    return Boolean(
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)
+      && normalizeSettlementYearInput(constructionSettlementEndYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
+    );
+  }
+
+  function getFallbackSettlementMonths() {
+    const base = parseSettlementYearMonth(constructionSettlementMonth?.value || "");
+    if (!base) {
+      return {
+        startYear: "",
+        startMonth: "",
+        endYear: "",
+        endMonth: "",
+      };
+    }
+    const prev = shiftYearMonth(base.year, base.month, -1);
+    return {
+      startYear: String(prev.year),
+      startMonth: String(prev.month),
+      endYear: String(base.year),
+      endMonth: String(base.month),
+    };
+  }
+
   function collectDashboardPayload() {
     const rawCircles = Array.isArray(state.circles) && state.circles.length ? state.circles : [];
+    const fallbackMonths = getFallbackSettlementMonths();
+    const selectedStartYear = normalizeSettlementYearInput(constructionSettlementStartYear?.value);
+    const selectedStartMonth = normalizeSettlementMonthInput(constructionSettlementStartMonth?.value);
+    const selectedStartDay = constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20;
+    const selectedEndYear = normalizeSettlementYearInput(constructionSettlementEndYear?.value);
+    const selectedEndMonth = normalizeSettlementMonthInput(constructionSettlementEndMonth?.value);
+    const selectedEndDay = constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20;
+    const startYearForDate = parseSettlementYearInput(selectedStartYear || fallbackMonths.startYear);
+    const startMonthForDate = Number(selectedStartMonth || fallbackMonths.startMonth);
+    const endYearForDate = parseSettlementYearInput(selectedEndYear || fallbackMonths.endYear);
+    const endMonthForDate = Number(selectedEndMonth || fallbackMonths.endMonth);
+    const settlementStartDate = buildIsoDateFromParts(startYearForDate, startMonthForDate, selectedStartDay);
+    const settlementEndDate = buildIsoDateFromParts(endYearForDate, endMonthForDate, selectedEndDay);
     // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
       datasetId: constructionDatasetSelect.value || constructionState.activeDatasetId,
@@ -7456,8 +7927,14 @@ function inferOpenRectangleVertices(vertices) {
       locations: [...constructionState.selectedLocations],
       remainingThreshold: constructionRemainingThreshold.value ? Number(constructionRemainingThreshold.value) : null,
       settlementMonth: constructionSettlementMonth.value || null,
-      settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 25,
-      settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
+      settlementStartYear: selectedStartYear || fallbackMonths.startYear || null,
+      settlementStartMonth: selectedStartMonth || fallbackMonths.startMonth || null,
+      settlementStartDay: selectedStartDay,
+      settlementStartDate,
+      settlementEndYear: selectedEndYear || fallbackMonths.endYear || null,
+      settlementEndMonth: selectedEndMonth || fallbackMonths.endMonth || null,
+      settlementEndDay: selectedEndDay,
+      settlementEndDate,
     };
   }
 
@@ -7616,14 +8093,18 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.selectedWeek = "";
     constructionState.legendFilterKey = "";
     constructionState.settlementPreviewOnly = false;
-    if (constructionState.dashboard?.filters?.options?.dateBounds?.min) constructionDateFrom.value = constructionState.dashboard.filters.options.dateBounds.min;
-    if (constructionState.dashboard?.filters?.options?.dateBounds?.max) constructionDateTo.value = constructionState.dashboard.filters.options.dateBounds.max;
+    const { minDate, maxDate } = resolveDashboardDateBounds(constructionState.dashboard);
+    if (minDate) constructionDateFrom.value = minDate;
+    if (maxDate) constructionDateTo.value = maxDate;
     constructionMonth.value = "";
     refreshWeekSelect();
     constructionOverlayMode.value = "status";
     constructionRemainingThreshold.value = "0";
-    if (constructionState.dashboard?.filters?.applied?.settlementMonth) constructionSettlementMonth.value = constructionState.dashboard.filters.applied.settlementMonth;
-    constructionSettlementStartDay.value = "25";
+    if (constructionState.dashboard?.filters?.applied?.settlementMonth) {
+      constructionSettlementMonth.value = constructionState.dashboard.filters.applied.settlementMonth;
+      applyDefaultSettlementMonthPairFromBase();
+    }
+    constructionSettlementStartDay.value = "20";
     constructionSettlementEndDay.value = "20";
     updateSettlementPreviewButton();
     rebuildLegend();
@@ -7763,6 +8244,19 @@ function inferOpenRectangleVertices(vertices) {
     setSyncStatus("데이터셋을 선택했습니다. 적용 버튼으로 반영하세요.");
   });
 
+  if (constructionSettlementMonth) {
+    constructionSettlementMonth.addEventListener("change", () => {
+      applyDefaultSettlementMonthPairFromBase();
+    });
+  }
+  [constructionSettlementStartYear, constructionSettlementStartMonth, constructionSettlementEndYear, constructionSettlementEndMonth]
+    .forEach((select) => {
+      if (!select) return;
+      select.addEventListener("change", () => {
+        syncSettlementMonthSelectorsFromInputs();
+      });
+    });
+
   constructionApplyBtn.addEventListener("click", async () => {
     try {
       await refreshDashboard();
@@ -7773,6 +8267,10 @@ function inferOpenRectangleVertices(vertices) {
 
   constructionSettlementApplyBtn.addEventListener("click", async () => {
     try {
+      if (!syncSettlementMonthSelectorsFromInputs()) {
+        setSyncStatus("기성 시작월/종료월을 선택해주세요.", true);
+        return;
+      }
       await refreshDashboard();
     } catch (error) {
       setSyncStatus(errorMessage(error), true);
@@ -7925,7 +8423,9 @@ function inferOpenRectangleVertices(vertices) {
     constructionState.foundationHatchShowFoundationTop = Boolean(constructionFoundationHatchTop?.checked);
     constructionState.foundationHatchShowPit = Boolean(constructionFoundationHatchPit?.checked);
     normalizeFoundationHatchExclusiveState();
-    constructionState.foundationAreaHatchVisible = true;
+    if (constructionState.foundationAreaHatchVisible == null) {
+      constructionState.foundationAreaHatchVisible = false;
+    }
     syncFoundationControlValues();
   }
   if (constructionFoundationOverlayThickness) {
@@ -8101,6 +8601,16 @@ function inferOpenRectangleVertices(vertices) {
   }
   if (constructionFoundationPfList) {
     constructionFoundationPfList.addEventListener("click", (event) => {
+      const scopeButton = event.target?.closest?.("[data-foundation-pf-scope-key]");
+      if (scopeButton) {
+        const pfKey = scopeButton.dataset.foundationPfScopeKey || "";
+        const scope = scopeButton.dataset.foundationPfScope || "";
+        const mm = scopeButton.dataset.foundationPfThicknessMm;
+        if (pfKey && scope) {
+          togglePfScopeSelection(pfKey, scope, mm);
+        }
+        return;
+      }
       const button = event.target?.closest?.("[data-foundation-pf-key]");
       if (!button) return;
       const key = button.dataset.foundationPfKey || "";
