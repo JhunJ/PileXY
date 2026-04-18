@@ -1261,9 +1261,11 @@ def test_settlement_period_uses_previous_month_when_start_equals_end():
         settlement_start_year=None,
         settlement_start_month=None,
         settlement_start_day=20,
+        settlement_start_date=None,
         settlement_end_year=None,
         settlement_end_month=None,
         settlement_end_day=20,
+        settlement_end_date=None,
     )
 
     assert period["month"] == "2025-09"
@@ -1278,9 +1280,11 @@ def test_settlement_period_always_uses_previous_month_for_start_day():
         settlement_start_year=None,
         settlement_start_month=None,
         settlement_start_day=5,
+        settlement_start_date=None,
         settlement_end_year=None,
         settlement_end_month=None,
         settlement_end_day=28,
+        settlement_end_date=None,
     )
 
     assert period["month"] == "2025-09"
@@ -1295,9 +1299,11 @@ def test_settlement_period_uses_selected_year_month_as_is():
         settlement_start_year=2025,
         settlement_start_month=12,
         settlement_start_day=20,
+        settlement_start_date=None,
         settlement_end_year=2026,
         settlement_end_month=1,
         settlement_end_day=20,
+        settlement_end_date=None,
     )
 
     assert period["month"] == "2026-01"
@@ -1307,6 +1313,30 @@ def test_settlement_period_uses_selected_year_month_as_is():
     assert period["endMonth"] == 1
     assert period["startDate"] == "2025-12-20"
     assert period["endDate"] == "2026-01-20"
+
+
+def test_settlement_period_prefers_explicit_iso_dates_over_parts():
+    period = construction_reports._build_settlement_period(
+        months=["2026-03", "2026-04"],
+        settlement_month="2026-04",
+        settlement_start_year=2026,
+        settlement_start_month=4,
+        settlement_start_day=20,
+        settlement_start_date="2026-03-20",
+        settlement_end_year=2026,
+        settlement_end_month=4,
+        settlement_end_day=20,
+        settlement_end_date="2026-04-20",
+    )
+
+    assert period["startYear"] == 2026
+    assert period["startMonth"] == 3
+    assert period["startDay"] == 20
+    assert period["endYear"] == 2026
+    assert period["endMonth"] == 4
+    assert period["endDay"] == 20
+    assert period["startDate"] == "2026-03-20"
+    assert period["endDate"] == "2026-04-20"
 
 
 def test_build_dashboard_applies_explicit_settlement_year_month(monkeypatch):

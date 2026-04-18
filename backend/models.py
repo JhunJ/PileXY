@@ -377,9 +377,11 @@ class ConstructionDashboardRequest(BaseModel):
     settlement_start_year: Optional[int] = Field(None, alias="settlementStartYear")
     settlement_start_month: Optional[int] = Field(None, alias="settlementStartMonth")
     settlement_start_day: Optional[int] = Field(20, alias="settlementStartDay")
+    settlement_start_date: Optional[str] = Field(None, alias="settlementStartDate")
     settlement_end_year: Optional[int] = Field(None, alias="settlementEndYear")
     settlement_end_month: Optional[int] = Field(None, alias="settlementEndMonth")
     settlement_end_day: Optional[int] = Field(20, alias="settlementEndDay")
+    settlement_end_date: Optional[str] = Field(None, alias="settlementEndDate")
     exclude_identical_geometry_duplicates: bool = Field(
         False,
         alias="excludeIdenticalGeometryDuplicates",

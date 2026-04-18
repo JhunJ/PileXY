@@ -1265,6 +1265,17 @@
     return Number.isInteger(year) ? year : null;
   }
 
+  function toSettlementIsoDate(yearRaw, monthRaw, dayRaw) {
+    const year = parseSettlementYearInput(yearRaw);
+    const month = Number(normalizeSettlementMonthInput(monthRaw));
+    const day = Number(dayRaw);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    const lastDay = new Date(year, month, 0).getDate();
+    const safeDay = Math.min(day, lastDay);
+    return `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+  }
+
   function overlayStatusLabel(status) {
     const s = String(status ?? "").trim().toLowerCase();
     if (s === "installed") return "시공완료";
@@ -7852,8 +7863,16 @@ function inferOpenRectangleVertices(vertices) {
     const fallbackMonths = getFallbackSettlementMonths();
     const selectedStartYear = normalizeSettlementYearInput(constructionSettlementStartYear?.value);
     const selectedStartMonth = normalizeSettlementMonthInput(constructionSettlementStartMonth?.value);
+    const selectedStartDay = constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20;
     const selectedEndYear = normalizeSettlementYearInput(constructionSettlementEndYear?.value);
     const selectedEndMonth = normalizeSettlementMonthInput(constructionSettlementEndMonth?.value);
+    const selectedEndDay = constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20;
+    const startYearForDate = parseSettlementYearInput(selectedStartYear || fallbackMonths.startYear);
+    const startMonthForDate = Number(selectedStartMonth || fallbackMonths.startMonth);
+    const endYearForDate = parseSettlementYearInput(selectedEndYear || fallbackMonths.endYear);
+    const endMonthForDate = Number(selectedEndMonth || fallbackMonths.endMonth);
+    const settlementStartDate = buildIsoDateFromParts(startYearForDate, startMonthForDate, selectedStartDay);
+    const settlementEndDate = buildIsoDateFromParts(endYearForDate, endMonthForDate, selectedEndDay);
     // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
       datasetId: constructionDatasetSelect.value || constructionState.activeDatasetId,
@@ -7870,10 +7889,12 @@ function inferOpenRectangleVertices(vertices) {
       settlementMonth: constructionSettlementMonth.value || null,
       settlementStartYear: selectedStartYear || fallbackMonths.startYear || null,
       settlementStartMonth: selectedStartMonth || fallbackMonths.startMonth || null,
-      settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20,
+      settlementStartDay: selectedStartDay,
+      settlementStartDate,
       settlementEndYear: selectedEndYear || fallbackMonths.endYear || null,
       settlementEndMonth: selectedEndMonth || fallbackMonths.endMonth || null,
-      settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
+      settlementEndDay: selectedEndDay,
+      settlementEndDate,
     };
   }
 
