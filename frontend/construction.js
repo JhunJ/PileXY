@@ -181,10 +181,12 @@
         <div class="construction-filter-grid construction-filter-grid--settlement">
           <label>기준 월<select id="construction-settlement-month" class="save-work-select"></select></label>
           <div class="construction-settlement-monthday-group">
+            <label>시작년<select id="construction-settlement-start-year" class="save-work-select"></select></label>
             <label>시작월<select id="construction-settlement-start-month" class="save-work-select"></select></label>
             <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
           </div>
           <div class="construction-settlement-monthday-group">
+            <label>종료년<select id="construction-settlement-end-year" class="save-work-select"></select></label>
             <label>종료월<select id="construction-settlement-end-month" class="save-work-select"></select></label>
             <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
           </div>
@@ -446,7 +448,9 @@
   const constructionAutoMatchedTable = q("#construction-auto-matched-table");
   const constructionDiagnosticIssues = q("#construction-diagnostic-issues");
   const constructionSettlementMonth = q("#construction-settlement-month");
+  const constructionSettlementStartYear = q("#construction-settlement-start-year");
   const constructionSettlementStartMonth = q("#construction-settlement-start-month");
+  const constructionSettlementEndYear = q("#construction-settlement-end-year");
   const constructionSettlementEndMonth = q("#construction-settlement-end-month");
   const constructionSettlementStartDay = q("#construction-settlement-start-day");
   const constructionSettlementEndDay = q("#construction-settlement-end-day");
@@ -1230,6 +1234,35 @@
         : "-"
     );
     constructionSettlementPeriod.innerHTML = `<span class="construction-period-month">${monthLabel}</span><span class="construction-period-range">${rangeLabel}</span>`;
+  }
+
+  function parseYearMonthTokenStrict(value) {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function buildSettlementYearOptions(baseSettlementMonthValue = "") {
+    const base = parseYearMonthTokenStrict(baseSettlementMonthValue);
+    const currentYear = new Date().getFullYear();
+    const years = new Set([currentYear - 1, currentYear, currentYear + 1]);
+    if (base) {
+      years.add(base.year - 1);
+      years.add(base.year);
+      years.add(base.year + 1);
+    }
+    return [...years]
+      .sort((a, b) => a - b)
+      .map((year) => ({ value: String(year), label: `${year}년` }));
+  }
+
+  function parseSettlementYearInput(value) {
+    const year = Number(String(value ?? "").trim());
+    return Number.isInteger(year) ? year : null;
   }
 
   function overlayStatusLabel(status) {
@@ -2835,61 +2868,6 @@
     return Number.isInteger(month) && month >= 1 && month <= 12 ? `${month}월` : "";
   }
 
-  function setupSettlementMonthSelectors(baseYearMonth) {
-    const base = parseYearMonthToken(baseYearMonth);
-    if (!base) return;
-    const createOptions = () => Array.from({ length: 12 }, (_, idx) => {
-      const month = idx + 1;
-      return {
-        value: buildYearMonthToken(base.year, month),
-        label: monthOptionLabel(month),
-      };
-    });
-    const options = createOptions();
-    fillSelect(
-      constructionSettlementStartMonth,
-      options,
-      constructionSettlementStartMonth?.value || "",
-      null,
-      (item) => item,
-    );
-    fillSelect(
-      constructionSettlementEndMonth,
-      options,
-      constructionSettlementEndMonth?.value || "",
-      null,
-      (item) => item,
-    );
-  }
-
-  function setSettlementMonthDefaultsFromBase(baseYearMonth) {
-    const base = parseYearMonthToken(baseYearMonth);
-    if (!base) return;
-    const prevMonth = base.month > 1 ? base.month - 1 : 12;
-    const prevYear = base.month > 1 ? base.year : base.year - 1;
-    if (constructionSettlementStartMonth) {
-      const startValue = buildYearMonthToken(base.year, prevMonth);
-      const fallback = buildYearMonthToken(prevYear, prevMonth);
-      constructionSettlementStartMonth.value =
-        [...constructionSettlementStartMonth.options].some((opt) => opt.value === startValue)
-          ? startValue
-          : fallback;
-    }
-    if (constructionSettlementEndMonth) {
-      constructionSettlementEndMonth.value = buildYearMonthToken(base.year, base.month);
-    }
-  }
-
-  function parseYearMonthOrNull(value) {
-    const raw = String(value || "").trim();
-    const m = raw.match(/^(\d{4})-(\d{2})$/);
-    if (!m) return null;
-    const year = Number(m[1]);
-    const month = Number(m[2]);
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
-    return { year, month };
-  }
-
   function shiftYearMonth(year, month, delta) {
     let y = Number(year);
     let m = Number(month);
@@ -2911,22 +2889,6 @@
       d += 1;
     }
     return { year: y, month: m };
-  }
-
-  function syncSettlementMonthSelectorsFromBaseMonth(baseMonthValue, { keepCurrent = false } = {}) {
-    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
-    const base = parseYearMonthOrNull(baseMonthValue);
-    if (!base) {
-      if (!keepCurrent) {
-        constructionSettlementStartMonth.value = "12";
-        constructionSettlementEndMonth.value = "1";
-      }
-      return;
-    }
-    if (keepCurrent) return;
-    const prev = shiftYearMonth(base.year, base.month, -1);
-    constructionSettlementStartMonth.value = String(prev.month);
-    constructionSettlementEndMonth.value = String(base.month);
   }
 
   function renderChipGroup(container, items, selectedValues, category) {
@@ -7564,7 +7526,7 @@ function inferOpenRectangleVertices(vertices) {
     fillSelect(constructionSettlementMonth, [], null, null);
     const now = new Date();
     const fallbackBaseSettlementMonth = buildYearMonthToken(now.getFullYear(), now.getMonth() + 1);
-    fillSettlementMonthSelectors(fallbackBaseSettlementMonth, null, null, { forceDefaultPair: true });
+    fillSettlementMonthSelectors(fallbackBaseSettlementMonth, null, null, null, null, { forceDefaultPair: true });
     constructionWeek.disabled = true;
 
     renderChipGroup(constructionEquipmentChips, [], [], "equipments");
@@ -7640,11 +7602,15 @@ function inferOpenRectangleVertices(vertices) {
     fillSelect(constructionSettlementMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.settlementMonth, null);
     fillSettlementMonthSelectors(
       dashboard?.filters?.applied?.settlementMonth || constructionSettlementMonth?.value || "",
+      dashboard?.filters?.applied?.settlementStartYear,
       dashboard?.filters?.applied?.settlementStartMonth,
+      dashboard?.filters?.applied?.settlementEndYear,
       dashboard?.filters?.applied?.settlementEndMonth,
       {
         forceDefaultPair:
-          dashboard?.filters?.applied?.settlementStartMonth == null
+          dashboard?.filters?.applied?.settlementStartYear == null
+          || dashboard?.filters?.applied?.settlementStartMonth == null
+          || dashboard?.filters?.applied?.settlementEndYear == null
           || dashboard?.filters?.applied?.settlementEndMonth == null,
       },
     );
@@ -7706,53 +7672,20 @@ function inferOpenRectangleVertices(vertices) {
     return typeof getActiveProjectName === "function" ? getActiveProjectName() : "기본";
   }
 
-  function getFallbackSettlementMonths() {
-    const value = String(constructionSettlementMonth?.value || "").trim();
-    const match = value.match(/^(\d{4})-(\d{2})$/);
-    if (!match) {
-      return { startMonth: "", endMonth: "" };
-    }
+  function parseSettlementYearMonth(value) {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
     const year = Number(match[1]);
     const month = Number(match[2]);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-      return { startMonth: "", endMonth: "" };
-    }
-    const prev = month === 1 ? 12 : month - 1;
-    return { startMonth: String(prev), endMonth: String(month) };
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
   }
 
-  function buildSettlementMonthOptions(baseSettlementMonthValue = "") {
-    const base = String(baseSettlementMonthValue || "").trim();
-    const match = base.match(/^(\d{4})-(\d{2})$/);
-    const year = match ? Number(match[1]) : null;
-    const labels = [];
-    for (let m = 1; m <= 12; m += 1) {
-      const mm = String(m).padStart(2, "0");
-      const monthLabel = year ? `${year}-${mm} (${m}월)` : `${m}월`;
-      labels.push({ value: String(m), label: monthLabel });
-    }
-    return labels;
-  }
-
-  function applySettlementMonthDefaultPair(baseSettlementMonthValue = "", { force = false } = {}) {
-    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
-    const value = String(baseSettlementMonthValue || "").trim();
-    const match = value.match(/^(\d{4})-(\d{2})$/);
-    if (!match) return;
-    const month = Number(match[2]);
-    if (!Number.isFinite(month) || month < 1 || month > 12) return;
-    const prev = month === 1 ? 12 : month - 1;
-    const startValue = String(prev);
-    const endValue = String(month);
-    const hasStart = [...constructionSettlementStartMonth.options].some((option) => option.value === startValue);
-    const hasEnd = [...constructionSettlementEndMonth.options].some((option) => option.value === endValue);
-    if (!hasStart || !hasEnd) return;
-    if (force || !String(constructionSettlementStartMonth.value || "").trim()) {
-      constructionSettlementStartMonth.value = startValue;
-    }
-    if (force || !String(constructionSettlementEndMonth.value || "").trim()) {
-      constructionSettlementEndMonth.value = endValue;
-    }
+  function normalizeSettlementYearInput(value) {
+    const year = Number(String(value ?? "").trim());
+    if (!Number.isInteger(year) || year < 1900 || year > 2100) return "";
+    return String(year);
   }
 
   function normalizeSettlementMonthInput(value) {
@@ -7772,30 +7705,103 @@ function inferOpenRectangleVertices(vertices) {
     return "";
   }
 
-  function fillSettlementMonthSelectors(
-    baseSettlementMonthValue = "",
-    startMonth = null,
-    endMonth = null,
-    { forceDefaultPair = false } = {},
-  ) {
-    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
-    const options = buildSettlementMonthOptions(baseSettlementMonthValue);
+  function getSettlementMonthYears(baseSettlementMonthValue = "") {
+    const base = parseSettlementYearMonth(baseSettlementMonthValue || constructionSettlementMonth?.value || "");
+    if (base) return [base.year - 1, base.year, base.year + 1];
+    const now = new Date();
+    const year = now.getFullYear();
+    return [year - 1, year, year + 1];
+  }
+
+  function buildSettlementMonthOptions() {
+    return Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      return { value: String(month), label: `${month}월` };
+    });
+  }
+
+  function fillSettlementYearMonthSelectors(baseSettlementMonthValue = "") {
+    const years = getSettlementMonthYears(baseSettlementMonthValue);
+    const yearOptions = years.map((year) => ({ value: String(year), label: `${year}년` }));
+    const monthOptions = buildSettlementMonthOptions();
+    fillSelect(
+      constructionSettlementStartYear,
+      yearOptions,
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value),
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementEndYear,
+      yearOptions,
+      normalizeSettlementYearInput(constructionSettlementEndYear?.value),
+      null,
+      (item) => item,
+    );
     fillSelect(
       constructionSettlementStartMonth,
-      options,
-      normalizeSettlementMonthInput(startMonth),
+      monthOptions,
+      normalizeSettlementMonthInput(constructionSettlementStartMonth?.value),
       null,
       (item) => item,
     );
     fillSelect(
       constructionSettlementEndMonth,
-      options,
-      normalizeSettlementMonthInput(endMonth),
+      monthOptions,
+      normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
       null,
       (item) => item,
     );
-    const hasValidStart = Boolean(normalizeSettlementMonthInput(constructionSettlementStartMonth.value));
-    const hasValidEnd = Boolean(normalizeSettlementMonthInput(constructionSettlementEndMonth.value));
+  }
+
+  function applySettlementMonthDefaultPair(baseSettlementMonthValue = "", { force = false } = {}) {
+    const base = parseSettlementYearMonth(baseSettlementMonthValue);
+    if (!base) return;
+    const prev = shiftYearMonth(base.year, base.month, -1);
+    const startYear = String(prev.year);
+    const startMonth = String(prev.month);
+    const endYear = String(base.year);
+    const endMonth = String(base.month);
+    const hasStartYear = [...(constructionSettlementStartYear?.options || [])].some((option) => option.value === startYear);
+    const hasStartMonth = [...(constructionSettlementStartMonth?.options || [])].some((option) => option.value === startMonth);
+    const hasEndYear = [...(constructionSettlementEndYear?.options || [])].some((option) => option.value === endYear);
+    const hasEndMonth = [...(constructionSettlementEndMonth?.options || [])].some((option) => option.value === endMonth);
+    if (!hasStartYear || !hasStartMonth || !hasEndYear || !hasEndMonth) return;
+    if (force || !normalizeSettlementYearInput(constructionSettlementStartYear?.value)) {
+      constructionSettlementStartYear.value = startYear;
+    }
+    if (force || !normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)) {
+      constructionSettlementStartMonth.value = startMonth;
+    }
+    if (force || !normalizeSettlementYearInput(constructionSettlementEndYear?.value)) {
+      constructionSettlementEndYear.value = endYear;
+    }
+    if (force || !normalizeSettlementMonthInput(constructionSettlementEndMonth?.value)) {
+      constructionSettlementEndMonth.value = endMonth;
+    }
+  }
+
+  function fillSettlementMonthSelectors(
+    baseSettlementMonthValue = "",
+    startYear = null,
+    startMonth = null,
+    endYear = null,
+    endMonth = null,
+    { forceDefaultPair = false } = {},
+  ) {
+    fillSettlementYearMonthSelectors(baseSettlementMonthValue);
+    if (normalizeSettlementYearInput(startYear)) constructionSettlementStartYear.value = normalizeSettlementYearInput(startYear);
+    if (normalizeSettlementMonthInput(startMonth)) constructionSettlementStartMonth.value = normalizeSettlementMonthInput(startMonth);
+    if (normalizeSettlementYearInput(endYear)) constructionSettlementEndYear.value = normalizeSettlementYearInput(endYear);
+    if (normalizeSettlementMonthInput(endMonth)) constructionSettlementEndMonth.value = normalizeSettlementMonthInput(endMonth);
+    const hasValidStart = Boolean(
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementStartMonth?.value),
+    );
+    const hasValidEnd = Boolean(
+      normalizeSettlementYearInput(constructionSettlementEndYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
+    );
     if (forceDefaultPair || !hasValidStart || !hasValidEnd) {
       applySettlementMonthDefaultPair(baseSettlementMonthValue, { force: true });
     }
@@ -7805,7 +7811,9 @@ function inferOpenRectangleVertices(vertices) {
     const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
     fillSettlementMonthSelectors(
       baseSettlementMonthValue,
+      constructionSettlementStartYear?.value,
       constructionSettlementStartMonth?.value,
+      constructionSettlementEndYear?.value,
       constructionSettlementEndMonth?.value,
       { forceDefaultPair: true },
     );
@@ -7815,19 +7823,44 @@ function inferOpenRectangleVertices(vertices) {
     const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
     fillSettlementMonthSelectors(
       baseSettlementMonthValue,
+      constructionSettlementStartYear?.value,
       constructionSettlementStartMonth?.value,
+      constructionSettlementEndYear?.value,
       constructionSettlementEndMonth?.value,
     );
     return Boolean(
-      normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)
+      normalizeSettlementYearInput(constructionSettlementStartYear?.value)
+      && normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)
+      && normalizeSettlementYearInput(constructionSettlementEndYear?.value)
       && normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
     );
+  }
+
+  function getFallbackSettlementMonths() {
+    const base = parseSettlementYearMonth(constructionSettlementMonth?.value || "");
+    if (!base) {
+      return {
+        startYear: "",
+        startMonth: "",
+        endYear: "",
+        endMonth: "",
+      };
+    }
+    const prev = shiftYearMonth(base.year, base.month, -1);
+    return {
+      startYear: String(prev.year),
+      startMonth: String(prev.month),
+      endYear: String(base.year),
+      endMonth: String(base.month),
+    };
   }
 
   function collectDashboardPayload() {
     const rawCircles = Array.isArray(state.circles) && state.circles.length ? state.circles : [];
     const fallbackMonths = getFallbackSettlementMonths();
+    const selectedStartYear = normalizeSettlementYearInput(constructionSettlementStartYear?.value);
     const selectedStartMonth = normalizeSettlementMonthInput(constructionSettlementStartMonth?.value);
+    const selectedEndYear = normalizeSettlementYearInput(constructionSettlementEndYear?.value);
     const selectedEndMonth = normalizeSettlementMonthInput(constructionSettlementEndMonth?.value);
     // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
@@ -7843,8 +7876,10 @@ function inferOpenRectangleVertices(vertices) {
       locations: [...constructionState.selectedLocations],
       remainingThreshold: constructionRemainingThreshold.value ? Number(constructionRemainingThreshold.value) : null,
       settlementMonth: constructionSettlementMonth.value || null,
+      settlementStartYear: selectedStartYear || fallbackMonths.startYear || null,
       settlementStartMonth: selectedStartMonth || fallbackMonths.startMonth || null,
       settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20,
+      settlementEndYear: selectedEndYear || fallbackMonths.endYear || null,
       settlementEndMonth: selectedEndMonth || fallbackMonths.endMonth || null,
       settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
     };
@@ -8157,6 +8192,13 @@ function inferOpenRectangleVertices(vertices) {
       applyDefaultSettlementMonthPairFromBase();
     });
   }
+  [constructionSettlementStartYear, constructionSettlementStartMonth, constructionSettlementEndYear, constructionSettlementEndMonth]
+    .forEach((select) => {
+      if (!select) return;
+      select.addEventListener("change", () => {
+        syncSettlementMonthSelectorsFromInputs();
+      });
+    });
 
   constructionApplyBtn.addEventListener("click", async () => {
     try {

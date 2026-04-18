@@ -5593,9 +5593,13 @@ td {
 
 .construction-settlement-monthday-group {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(88px, 110px);
+  grid-template-columns: minmax(110px, 140px) minmax(0, 1fr) minmax(88px, 110px);
   gap: 0.45rem;
   align-items: end;
+}
+
+.construction-settlement-monthday-group label {
+  min-width: 0;
 }
 
 .construction-range-note {
@@ -5751,7 +5755,7 @@ td {
   }
 
   .construction-settlement-monthday-group {
-    grid-template-columns: minmax(0, 1fr) minmax(88px, 110px);
+    grid-template-columns: minmax(98px, 120px) minmax(0, 1fr) minmax(82px, 96px);
   }
 }
 
