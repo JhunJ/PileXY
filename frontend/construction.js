@@ -7756,9 +7756,20 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function normalizeSettlementMonthInput(value) {
-    const month = Number(String(value ?? "").trim());
-    if (!Number.isInteger(month) || month < 1 || month > 12) return "";
-    return String(month);
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const monthOnly = Number(raw);
+    if (Number.isInteger(monthOnly) && monthOnly >= 1 && monthOnly <= 12) {
+      return String(monthOnly);
+    }
+    const yearMonthMatch = raw.match(/^(\d{4})-(\d{1,2})$/);
+    if (yearMonthMatch) {
+      const month = Number(yearMonthMatch[2]);
+      if (Number.isInteger(month) && month >= 1 && month <= 12) {
+        return String(month);
+      }
+    }
+    return "";
   }
 
   function fillSettlementMonthSelectors(
@@ -7816,6 +7827,8 @@ function inferOpenRectangleVertices(vertices) {
   function collectDashboardPayload() {
     const rawCircles = Array.isArray(state.circles) && state.circles.length ? state.circles : [];
     const fallbackMonths = getFallbackSettlementMonths();
+    const selectedStartMonth = normalizeSettlementMonthInput(constructionSettlementStartMonth?.value);
+    const selectedEndMonth = normalizeSettlementMonthInput(constructionSettlementEndMonth?.value);
     // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
       datasetId: constructionDatasetSelect.value || constructionState.activeDatasetId,
@@ -7830,9 +7843,9 @@ function inferOpenRectangleVertices(vertices) {
       locations: [...constructionState.selectedLocations],
       remainingThreshold: constructionRemainingThreshold.value ? Number(constructionRemainingThreshold.value) : null,
       settlementMonth: constructionSettlementMonth.value || null,
-      settlementStartMonth: constructionSettlementStartMonth?.value || fallbackMonths.startMonth || null,
+      settlementStartMonth: selectedStartMonth || fallbackMonths.startMonth || null,
       settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20,
-      settlementEndMonth: constructionSettlementEndMonth?.value || fallbackMonths.endMonth || null,
+      settlementEndMonth: selectedEndMonth || fallbackMonths.endMonth || null,
       settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
     };
   }
