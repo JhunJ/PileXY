@@ -4565,6 +4565,8 @@ async def get_construction_dashboard(payload: ConstructionDashboardRequest) -> D
             locations=payload.locations,
             remaining_threshold=payload.remaining_threshold,
             settlement_month=payload.settlement_month,
+            settlement_start_month=payload.settlement_start_month,
+            settlement_end_month=payload.settlement_end_month,
             settlement_start_day=payload.settlement_start_day,
             settlement_end_day=payload.settlement_end_day,
             exclude_identical_geometry_duplicates=payload.exclude_identical_geometry_duplicates,

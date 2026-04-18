@@ -1254,6 +1254,8 @@ def test_settlement_period_uses_previous_month_when_start_equals_end():
     period = construction_reports._build_settlement_period(
         months=["2025-08", "2025-09"],
         settlement_month="2025-09",
+        settlement_start_month=None,
+        settlement_end_month=None,
         settlement_start_day=20,
         settlement_end_day=20,
     )
@@ -1267,6 +1269,8 @@ def test_settlement_period_always_uses_previous_month_for_start_day():
     period = construction_reports._build_settlement_period(
         months=["2025-08", "2025-09"],
         settlement_month="2025-09",
+        settlement_start_month=None,
+        settlement_end_month=None,
         settlement_start_day=5,
         settlement_end_day=28,
     )

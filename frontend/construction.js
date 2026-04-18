@@ -176,11 +176,13 @@
             <span>월별 기성 기준</span>
             <small class="soft-liability-note soft-liability-note--compact"><span aria-hidden="true">※</span>책임은 사용자에게 있습니다.</small>
           </div>
-          <small>기본은 전달 20일 ~ 선택월 20일입니다. 필요하면 월과 일자를 직접 바꿀 수 있습니다.</small>
+          <small>기본은 시작월=전달, 종료월=선택월이며 일자는 20일입니다. 필요하면 시작/종료 월·일자를 직접 바꿀 수 있습니다.</small>
         </div>
         <div class="construction-filter-grid construction-filter-grid--settlement">
           <label>기준 월<select id="construction-settlement-month" class="save-work-select"></select></label>
+          <label>시작월<select id="construction-settlement-start-month" class="save-work-select"></select></label>
           <label>시작일<input type="number" id="construction-settlement-start-day" class="save-work-input" min="1" max="31" value="20" /></label>
+          <label>종료월<select id="construction-settlement-end-month" class="save-work-select"></select></label>
           <label>종료일<input type="number" id="construction-settlement-end-day" class="save-work-input" min="1" max="31" value="20" /></label>
           <div class="construction-range-note" id="construction-settlement-period-note">기성 범위를 계산하는 중입니다.</div>
         </div>
@@ -440,6 +442,8 @@
   const constructionAutoMatchedTable = q("#construction-auto-matched-table");
   const constructionDiagnosticIssues = q("#construction-diagnostic-issues");
   const constructionSettlementMonth = q("#construction-settlement-month");
+  const constructionSettlementStartMonth = q("#construction-settlement-start-month");
+  const constructionSettlementEndMonth = q("#construction-settlement-end-month");
   const constructionSettlementStartDay = q("#construction-settlement-start-day");
   const constructionSettlementEndDay = q("#construction-settlement-end-day");
   const constructionSettlementApplyBtn = q("#construction-settlement-apply-btn");
@@ -2802,6 +2806,123 @@
     } else if (!value && placeholder === null && select.options.length) {
       select.value = select.options[0].value;
     }
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function parseYearMonthToken(value) {
+    const raw = String(value || "").trim();
+    const m = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function buildYearMonthToken(year, month) {
+    return `${year}-${pad2(month)}`;
+  }
+
+  function monthOptionLabel(monthNumber) {
+    const month = Number(monthNumber);
+    return Number.isInteger(month) && month >= 1 && month <= 12 ? `${month}월` : "";
+  }
+
+  function setupSettlementMonthSelectors(baseYearMonth) {
+    const base = parseYearMonthToken(baseYearMonth);
+    if (!base) return;
+    const createOptions = () => Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      return {
+        value: buildYearMonthToken(base.year, month),
+        label: monthOptionLabel(month),
+      };
+    });
+    const options = createOptions();
+    fillSelect(
+      constructionSettlementStartMonth,
+      options,
+      constructionSettlementStartMonth?.value || "",
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementEndMonth,
+      options,
+      constructionSettlementEndMonth?.value || "",
+      null,
+      (item) => item,
+    );
+  }
+
+  function setSettlementMonthDefaultsFromBase(baseYearMonth) {
+    const base = parseYearMonthToken(baseYearMonth);
+    if (!base) return;
+    const prevMonth = base.month > 1 ? base.month - 1 : 12;
+    const prevYear = base.month > 1 ? base.year : base.year - 1;
+    if (constructionSettlementStartMonth) {
+      const startValue = buildYearMonthToken(base.year, prevMonth);
+      const fallback = buildYearMonthToken(prevYear, prevMonth);
+      constructionSettlementStartMonth.value =
+        [...constructionSettlementStartMonth.options].some((opt) => opt.value === startValue)
+          ? startValue
+          : fallback;
+    }
+    if (constructionSettlementEndMonth) {
+      constructionSettlementEndMonth.value = buildYearMonthToken(base.year, base.month);
+    }
+  }
+
+  function parseYearMonthOrNull(value) {
+    const raw = String(value || "").trim();
+    const m = raw.match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return { year, month };
+  }
+
+  function shiftYearMonth(year, month, delta) {
+    let y = Number(year);
+    let m = Number(month);
+    let d = Number(delta) || 0;
+    while (d > 0) {
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      d -= 1;
+    }
+    while (d < 0) {
+      m -= 1;
+      if (m < 1) {
+        m = 12;
+        y -= 1;
+      }
+      d += 1;
+    }
+    return { year: y, month: m };
+  }
+
+  function syncSettlementMonthSelectorsFromBaseMonth(baseMonthValue, { keepCurrent = false } = {}) {
+    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
+    const base = parseYearMonthOrNull(baseMonthValue);
+    if (!base) {
+      if (!keepCurrent) {
+        constructionSettlementStartMonth.value = "12";
+        constructionSettlementEndMonth.value = "1";
+      }
+      return;
+    }
+    if (keepCurrent) return;
+    const prev = shiftYearMonth(base.year, base.month, -1);
+    constructionSettlementStartMonth.value = String(prev.month);
+    constructionSettlementEndMonth.value = String(base.month);
   }
 
   function renderChipGroup(container, items, selectedValues, category) {
@@ -7568,8 +7689,24 @@ function inferOpenRectangleVertices(vertices) {
     return typeof getActiveProjectName === "function" ? getActiveProjectName() : "기본";
   }
 
+  function getFallbackSettlementMonths() {
+    const value = String(constructionSettlementMonth?.value || "").trim();
+    const match = value.match(/^(\d{4})-(\d{2})$/);
+    if (!match) {
+      return { startMonth: "", endMonth: "" };
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return { startMonth: "", endMonth: "" };
+    }
+    const prev = month === 1 ? 12 : month - 1;
+    return { startMonth: String(prev), endMonth: String(month) };
+  }
+
   function collectDashboardPayload() {
     const rawCircles = Array.isArray(state.circles) && state.circles.length ? state.circles : [];
+    const fallbackMonths = getFallbackSettlementMonths();
     // 전체 원을 보냄 — 서버가 기하 병합 후 매칭하고, 겹치는 형제 원 id마다 오버레이를 복제한다.
     return {
       datasetId: constructionDatasetSelect.value || constructionState.activeDatasetId,
@@ -7584,7 +7721,9 @@ function inferOpenRectangleVertices(vertices) {
       locations: [...constructionState.selectedLocations],
       remainingThreshold: constructionRemainingThreshold.value ? Number(constructionRemainingThreshold.value) : null,
       settlementMonth: constructionSettlementMonth.value || null,
+      settlementStartMonth: constructionSettlementStartMonth?.value || fallbackMonths.startMonth || null,
       settlementStartDay: constructionSettlementStartDay.value ? Number(constructionSettlementStartDay.value) : 20,
+      settlementEndMonth: constructionSettlementEndMonth?.value || fallbackMonths.endMonth || null,
       settlementEndDay: constructionSettlementEndDay.value ? Number(constructionSettlementEndDay.value) : 20,
     };
   }
@@ -7891,6 +8030,12 @@ function inferOpenRectangleVertices(vertices) {
     setSyncStatus("데이터셋을 선택했습니다. 적용 버튼으로 반영하세요.");
   });
 
+  if (constructionSettlementMonth) {
+    constructionSettlementMonth.addEventListener("change", () => {
+      applyDefaultSettlementMonthPairFromBase();
+    });
+  }
+
   constructionApplyBtn.addEventListener("click", async () => {
     try {
       await refreshDashboard();
@@ -7901,6 +8046,10 @@ function inferOpenRectangleVertices(vertices) {
 
   constructionSettlementApplyBtn.addEventListener("click", async () => {
     try {
+      if (!syncSettlementMonthSelectorsFromInputs()) {
+        setSyncStatus("기성 시작월/종료월을 선택해주세요.", true);
+        return;
+      }
       await refreshDashboard();
     } catch (error) {
       setSyncStatus(errorMessage(error), true);

@@ -1674,7 +1674,9 @@ def _last_day_of_month(year: int, month: int) -> int:
 def _build_settlement_period(
     months: Sequence[str],
     settlement_month: Optional[str],
+    settlement_start_month: Optional[int],
     settlement_start_day: Optional[int],
+    settlement_end_month: Optional[int],
     settlement_end_day: Optional[int],
 ) -> Dict[str, Any]:
     available_months = sorted(month for month in months if month)
@@ -1692,18 +1694,26 @@ def _build_settlement_period(
         }
 
     year, month = (int(part) for part in resolved_month.split("-", 1))
-    # 기성 기간 시작은 항상 전달 기준으로 계산한다.
-    # 예) 시작 7 / 종료 20 => 전달 7일 ~ 해당월 20일
-    # 예) 시작 25 / 종료 20 => 전달 25일 ~ 해당월 20일
-    start_year, start_month = _shift_month(year, month, -1)
+    start_month = _coerce_int(settlement_start_month, month - 1, 1, 12)
+    end_month = _coerce_int(settlement_end_month, month, 1, 12)
+    if start_month <= month:
+        start_year = year
+    else:
+        start_year = year - 1
+    if end_month <= month:
+        end_year = year
+    else:
+        end_year = year - 1
 
     start_day = min(start_day, _last_day_of_month(start_year, start_month))
-    end_day = min(end_day, _last_day_of_month(year, month))
+    end_day = min(end_day, _last_day_of_month(end_year, end_month))
     start_date = date(start_year, start_month, start_day)
-    end_date = date(year, month, end_day)
+    end_date = date(end_year, end_month, end_day)
     return {
         "month": resolved_month,
+        "startMonth": start_month,
         "startDay": start_day,
+        "endMonth": end_month,
         "endDay": end_day,
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
@@ -3026,13 +3036,22 @@ def _build_settlement_summary(
     circles: Sequence[Dict[str, Any]],
     *,
     settlement_month: Optional[str],
+    settlement_start_month: Optional[int],
     settlement_start_day: Optional[int],
+    settlement_end_month: Optional[int],
     settlement_end_day: Optional[int],
     remaining_threshold: Optional[float],
     parking_unified_location: Optional[str] = None,
 ) -> Dict[str, Any]:
     months = sorted({record.get("construction_month") for record in records if record.get("construction_month")})
-    period = _build_settlement_period(months, settlement_month, settlement_start_day, settlement_end_day)
+    period = _build_settlement_period(
+        months,
+        settlement_month,
+        settlement_start_month,
+        settlement_start_day,
+        settlement_end_month,
+        settlement_end_day,
+    )
     start_date = period.get("startDate")
     end_date = period.get("endDate")
 
@@ -3126,7 +3145,9 @@ def build_dashboard(
     locations: Optional[Sequence[str]] = None,
     remaining_threshold: Optional[float] = None,
     settlement_month: Optional[str] = None,
+    settlement_start_month: Optional[int] = None,
     settlement_start_day: Optional[int] = 20,
+    settlement_end_month: Optional[int] = None,
     settlement_end_day: Optional[int] = 20,
     exclude_identical_geometry_duplicates: bool = False,
 ) -> Dict[str, Any]:
@@ -3227,7 +3248,9 @@ def build_dashboard(
         category_filtered_records,
         circles,
         settlement_month=settlement_month,
+        settlement_start_month=settlement_start_month,
         settlement_start_day=settlement_start_day,
+        settlement_end_month=settlement_end_month,
         settlement_end_day=settlement_end_day,
         remaining_threshold=remaining_threshold,
         parking_unified_location=parking_unified_location,
@@ -3248,7 +3271,9 @@ def build_dashboard(
                 "locations": _merge_filter_values(location, locations, normalizer=_normalize_location),
                 "remainingThreshold": remaining_threshold,
                 "settlementMonth": settlement["period"]["month"],
+                "settlementStartMonth": settlement["period"].get("startMonth"),
                 "settlementStartDay": settlement["period"]["startDay"],
+                "settlementEndMonth": settlement["period"].get("endMonth"),
                 "settlementEndDay": settlement["period"]["endDay"],
                 "excludeIdenticalGeometryDuplicates": exclude_identical_geometry_duplicates,
             },
