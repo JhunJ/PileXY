@@ -7562,6 +7562,9 @@ function inferOpenRectangleVertices(vertices) {
     fillSelect(constructionMonth, [], null, "전체 기간");
     fillSelect(constructionWeek, [], null, "월 먼저 선택");
     fillSelect(constructionSettlementMonth, [], null, null);
+    const now = new Date();
+    const fallbackBaseSettlementMonth = buildYearMonthToken(now.getFullYear(), now.getMonth() + 1);
+    fillSettlementMonthSelectors(fallbackBaseSettlementMonth, null, null, { forceDefaultPair: true });
     constructionWeek.disabled = true;
 
     renderChipGroup(constructionEquipmentChips, [], [], "equipments");
@@ -7635,6 +7638,16 @@ function inferOpenRectangleVertices(vertices) {
     fillSelect(constructionMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.month, "전체 기간");
     refreshWeekSelect(dashboard?.filters?.applied?.dateFrom, dashboard?.filters?.applied?.dateTo);
     fillSelect(constructionSettlementMonth, dashboard?.filters?.options?.months || [], dashboard?.filters?.applied?.settlementMonth, null);
+    fillSettlementMonthSelectors(
+      dashboard?.filters?.applied?.settlementMonth || constructionSettlementMonth?.value || "",
+      dashboard?.filters?.applied?.settlementStartMonth,
+      dashboard?.filters?.applied?.settlementEndMonth,
+      {
+        forceDefaultPair:
+          dashboard?.filters?.applied?.settlementStartMonth == null
+          || dashboard?.filters?.applied?.settlementEndMonth == null,
+      },
+    );
 
     constructionRemainingThreshold.value = dashboard?.filters?.applied?.remainingThreshold ?? constructionRemainingThreshold.value;
     constructionSettlementStartDay.value = dashboard?.filters?.applied?.settlementStartDay ?? constructionSettlementStartDay.value;
@@ -7740,6 +7753,64 @@ function inferOpenRectangleVertices(vertices) {
     if (force || !String(constructionSettlementEndMonth.value || "").trim()) {
       constructionSettlementEndMonth.value = endValue;
     }
+  }
+
+  function normalizeSettlementMonthInput(value) {
+    const month = Number(String(value ?? "").trim());
+    if (!Number.isInteger(month) || month < 1 || month > 12) return "";
+    return String(month);
+  }
+
+  function fillSettlementMonthSelectors(
+    baseSettlementMonthValue = "",
+    startMonth = null,
+    endMonth = null,
+    { forceDefaultPair = false } = {},
+  ) {
+    if (!constructionSettlementStartMonth || !constructionSettlementEndMonth) return;
+    const options = buildSettlementMonthOptions(baseSettlementMonthValue);
+    fillSelect(
+      constructionSettlementStartMonth,
+      options,
+      normalizeSettlementMonthInput(startMonth),
+      null,
+      (item) => item,
+    );
+    fillSelect(
+      constructionSettlementEndMonth,
+      options,
+      normalizeSettlementMonthInput(endMonth),
+      null,
+      (item) => item,
+    );
+    const hasValidStart = Boolean(normalizeSettlementMonthInput(constructionSettlementStartMonth.value));
+    const hasValidEnd = Boolean(normalizeSettlementMonthInput(constructionSettlementEndMonth.value));
+    if (forceDefaultPair || !hasValidStart || !hasValidEnd) {
+      applySettlementMonthDefaultPair(baseSettlementMonthValue, { force: true });
+    }
+  }
+
+  function applyDefaultSettlementMonthPairFromBase() {
+    const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
+    fillSettlementMonthSelectors(
+      baseSettlementMonthValue,
+      constructionSettlementStartMonth?.value,
+      constructionSettlementEndMonth?.value,
+      { forceDefaultPair: true },
+    );
+  }
+
+  function syncSettlementMonthSelectorsFromInputs() {
+    const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
+    fillSettlementMonthSelectors(
+      baseSettlementMonthValue,
+      constructionSettlementStartMonth?.value,
+      constructionSettlementEndMonth?.value,
+    );
+    return Boolean(
+      normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)
+      && normalizeSettlementMonthInput(constructionSettlementEndMonth?.value),
+    );
   }
 
   function collectDashboardPayload() {

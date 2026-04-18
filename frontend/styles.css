@@ -5591,17 +5591,11 @@ td {
   align-items: end;
 }
 
-.construction-settlement-month-day {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.construction-settlement-month-day-row {
+.construction-settlement-monthday-group {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 110px;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 110px);
   gap: 0.45rem;
-  align-items: center;
+  align-items: end;
 }
 
 .construction-range-note {
@@ -5754,6 +5748,10 @@ td {
 
   .construction-chart-card--wide {
     grid-column: span 1;
+  }
+
+  .construction-settlement-monthday-group {
+    grid-template-columns: minmax(0, 1fr) minmax(88px, 110px);
   }
 }
 
