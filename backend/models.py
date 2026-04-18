@@ -374,7 +374,7 @@ class ConstructionDashboardRequest(BaseModel):
     locations: List[str] = Field(default_factory=list)
     remaining_threshold: Optional[float] = Field(None, alias="remainingThreshold")
     settlement_month: Optional[str] = Field(None, alias="settlementMonth")
-    settlement_start_day: Optional[int] = Field(25, alias="settlementStartDay")
+    settlement_start_day: Optional[int] = Field(20, alias="settlementStartDay")
     settlement_end_day: Optional[int] = Field(20, alias="settlementEndDay")
     exclude_identical_geometry_duplicates: bool = Field(
         False,

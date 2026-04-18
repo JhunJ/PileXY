@@ -2252,7 +2252,7 @@
       locations: [],
       remainingThreshold: null,
       settlementMonth: null,
-      settlementStartDay: 25,
+      settlementStartDay: 20,
       settlementEndDay: 20,
     };
   }

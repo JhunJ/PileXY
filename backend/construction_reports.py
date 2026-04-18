@@ -1679,7 +1679,7 @@ def _build_settlement_period(
 ) -> Dict[str, Any]:
     available_months = sorted(month for month in months if month)
     resolved_month = settlement_month if settlement_month in available_months else (available_months[-1] if available_months else None)
-    start_day = _coerce_int(settlement_start_day, 25, 1, 31)
+    start_day = _coerce_int(settlement_start_day, 20, 1, 31)
     end_day = _coerce_int(settlement_end_day, 20, 1, 31)
     if not resolved_month:
         return {
@@ -3126,7 +3126,7 @@ def build_dashboard(
     locations: Optional[Sequence[str]] = None,
     remaining_threshold: Optional[float] = None,
     settlement_month: Optional[str] = None,
-    settlement_start_day: Optional[int] = 25,
+    settlement_start_day: Optional[int] = 20,
     settlement_end_day: Optional[int] = 20,
     exclude_identical_geometry_duplicates: bool = False,
 ) -> Dict[str, Any]:
