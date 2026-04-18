@@ -888,23 +888,32 @@
       const parsed = parseIsoDate(dateValue);
       if (!parsed) return;
       const rawStart = startOfWeek(parsed);
-      const rawEnd = endOfWeek(parsed);
       const key = toIsoDate(rawStart);
-      if (grouped.has(key)) return;
-
       const rangeStart = rawStart < monthStart ? monthStart : rawStart;
-      const rangeEnd = rawEnd > monthEnd ? monthEnd : rawEnd;
-      const index = grouped.size + 1;
-      grouped.set(key, {
-        key,
-        value: `${toIsoDate(rangeStart)}|${toIsoDate(rangeEnd)}`,
-        startDate: toIsoDate(rangeStart),
-        endDate: toIsoDate(rangeEnd),
-        label: `${index}주차 · ${formatCompactDate(toIsoDate(rangeStart))} ~ ${formatCompactDate(toIsoDate(rangeEnd))}`,
-      });
+      const rangeEnd = endOfWeek(parsed) > monthEnd ? monthEnd : endOfWeek(parsed);
+      const iso = toIsoDate(parsed);
+      const bucket = grouped.get(key);
+      if (!bucket) {
+        grouped.set(key, {
+          key,
+          rangeStartIso: toIsoDate(rangeStart),
+          rangeEndIso: toIsoDate(rangeEnd),
+          firstIso: iso,
+          lastIso: iso,
+        });
+      } else {
+        if (iso < bucket.firstIso) bucket.firstIso = iso;
+        if (iso > bucket.lastIso) bucket.lastIso = iso;
+      }
     });
 
-    return Array.from(grouped.values());
+    return Array.from(grouped.values()).map((bucket, index) => ({
+      key: bucket.key,
+      value: `${bucket.firstIso}|${bucket.lastIso}`,
+      startDate: bucket.firstIso,
+      endDate: bucket.lastIso,
+      label: `${index + 1}주차 · ${formatCompactDate(bucket.firstIso)} ~ ${formatCompactDate(bucket.lastIso)}`,
+    }));
   }
 
   function refreshWeekSelect(appliedDateFrom = null, appliedDateTo = null) {
