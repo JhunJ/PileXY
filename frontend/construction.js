@@ -7820,14 +7820,6 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function syncSettlementMonthSelectorsFromInputs() {
-    const baseSettlementMonthValue = String(constructionSettlementMonth?.value || "").trim();
-    fillSettlementMonthSelectors(
-      baseSettlementMonthValue,
-      constructionSettlementStartYear?.value,
-      constructionSettlementStartMonth?.value,
-      constructionSettlementEndYear?.value,
-      constructionSettlementEndMonth?.value,
-    );
     return Boolean(
       normalizeSettlementYearInput(constructionSettlementStartYear?.value)
       && normalizeSettlementMonthInput(constructionSettlementStartMonth?.value)
@@ -8046,7 +8038,10 @@ function inferOpenRectangleVertices(vertices) {
     refreshWeekSelect();
     constructionOverlayMode.value = "status";
     constructionRemainingThreshold.value = "0";
-    if (constructionState.dashboard?.filters?.applied?.settlementMonth) constructionSettlementMonth.value = constructionState.dashboard.filters.applied.settlementMonth;
+    if (constructionState.dashboard?.filters?.applied?.settlementMonth) {
+      constructionSettlementMonth.value = constructionState.dashboard.filters.applied.settlementMonth;
+      applyDefaultSettlementMonthPairFromBase();
+    }
     constructionSettlementStartDay.value = "20";
     constructionSettlementEndDay.value = "20";
     updateSettlementPreviewButton();
