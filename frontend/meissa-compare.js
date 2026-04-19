@@ -354,6 +354,8 @@
   let meissa2dOrthoRgbFitCacheGen = 0;
   /** @type {Map<string, { tier: string, delta?: number|null, darkestNorm?: number, ringAsym?: number }>} */
   let meissa2dOrthoRgbFitCache = new Map();
+  /** 드래그/줌 중 재분석 대기(pending)에서도 색이 회색으로 깜빡이지 않도록 최근 유효 적합도 유지 */
+  let meissa2dOrthoRgbLastStableById = new Map();
   /** @type {{ id: string, ts: number, lines: string[] }[]} */
   let meissaOrthoAnalyzeDebugTail = [];
   const MEISSA_ORTHO_ANALYZE_DEBUG_MAX = 48;
@@ -3146,6 +3148,9 @@
     meissaOrthoPdamCancelPrefetch();
     meissa2dOrthoRgbFitCacheGen++;
     meissa2dOrthoRgbFitCache.clear();
+    if (meissa2dOrthoRgbLastStableById.size > 12000) {
+      meissa2dOrthoRgbLastStableById.clear();
+    }
     meissaOrthoAnalyzeDebugTail = [];
     renderMeissaOrthoAnalyzeDebugPanel();
   }
@@ -5610,11 +5615,38 @@
     }
     const ck = `${meissa2dOrthoRgbFitCacheGen}:${id}`;
     const hit = meissa2dOrthoRgbFitCache.get(ck);
+    const fallbackToStableFit = (reasonLabel, fallbackFit) => {
+      if (!fallbackFit) return null;
+      const safeReason = String(reasonLabel || "").trim() || "pending";
+      const stable = {
+        ...fallbackFit,
+        reason: `pending-stale:${safeReason}`,
+        staleFromCache: true,
+      };
+      meissa2dOrthoRgbLastStableById.set(id, stable);
+      return stable;
+    };
     if (hit) {
+      if (hit.staleFromCache && hit.reason === "pending-stale:no-georef") {
+        const natRetryFromStale = fileCoordToOrthoNaturalPixel(circle?.center_x, circle?.center_y);
+        if (natRetryFromStale) {
+          meissa2dOrthoRgbFitCache.delete(ck);
+          if (!forceSync) {
+            meissaOrthoPdamEnqueue(id);
+            const staleAgain = fallbackToStableFit("no-georef", meissa2dOrthoRgbLastStableById.get(id) || null);
+            if (staleAgain) return staleAgain;
+            return { tier: "na", delta: null, offsetM: null, reason: "pending" };
+          }
+          return meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, natRetryFromStale);
+        }
+      }
       if (
         (hit.offsetM != null && Number.isFinite(Number(hit.offsetM))) ||
         (hit.tier && hit.tier !== "na")
       ) {
+        if (!hit.staleFromCache) {
+          meissa2dOrthoRgbLastStableById.set(id, hit);
+        }
         return hit;
       }
       const r = String(hit.reason || "");
@@ -5638,6 +5670,12 @@
         });
         if (outFallback) {
           meissa2dOrthoRgbFitCache.set(ck, outFallback);
+          if (
+            (outFallback.offsetM != null && Number.isFinite(Number(outFallback.offsetM))) ||
+            (outFallback.tier && outFallback.tier !== "na")
+          ) {
+            meissa2dOrthoRgbLastStableById.set(id, outFallback);
+          }
           return outFallback;
         }
       }
@@ -5648,6 +5686,11 @@
       meissa2dOrthoRgbFitCache.delete(ck);
       if (!forceSync) {
         meissaOrthoPdamEnqueue(id);
+        const stale = fallbackToStableFit("no-georef", meissa2dOrthoRgbLastStableById.get(id) || null);
+        if (stale) {
+          meissa2dOrthoRgbFitCache.set(ck, stale);
+          return stale;
+        }
         return { tier: "na", delta: null, offsetM: null, reason: "pending" };
       }
       return meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, natRetry);
@@ -5655,13 +5698,31 @@
     const nat = fileCoordToOrthoNaturalPixel(circle?.center_x, circle?.center_y);
     if (!nat) {
       const outFallback = meissa2dBuildPlanFallbackFitById(id, "no-georef", {});
-      if (outFallback) return outFallback;
+      if (outFallback) {
+        meissa2dOrthoRgbLastStableById.set(id, outFallback);
+        return outFallback;
+      }
+      if (!forceSync) {
+        const stale = fallbackToStableFit("no-georef", meissa2dOrthoRgbLastStableById.get(id) || null);
+        if (stale) {
+          meissa2dOrthoRgbFitCache.set(ck, stale);
+          return stale;
+        }
+      }
       return { tier: "na", delta: null, offsetM: null, reason: "no-georef" };
     }
     if (!forceSync) {
       meissaOrthoPdamEnqueue(id);
       const outFallback = meissa2dBuildPlanFallbackFitById(id, "pending", {});
-      if (outFallback) return outFallback;
+      if (outFallback) {
+        meissa2dOrthoRgbLastStableById.set(id, outFallback);
+        return outFallback;
+      }
+      const stale = fallbackToStableFit("pending", meissa2dOrthoRgbLastStableById.get(id) || null);
+      if (stale) {
+        meissa2dOrthoRgbFitCache.set(ck, stale);
+        return stale;
+      }
       return { tier: "na", delta: null, offsetM: null, reason: "pending" };
     }
     if (
@@ -5676,11 +5737,27 @@
       const outFallback = meissa2dBuildPlanFallbackFitById(id, "analysis-image-loading", {});
       if (outFallback) {
         meissa2dOrthoRgbFitCache.set(ck, outFallback);
+        meissa2dOrthoRgbLastStableById.set(id, outFallback);
         return outFallback;
+      }
+      if (!forceSync) {
+        const stale = fallbackToStableFit("analysis-image-loading", meissa2dOrthoRgbLastStableById.get(id) || null);
+        if (stale) {
+          meissa2dOrthoRgbFitCache.set(ck, stale);
+          return stale;
+        }
       }
       return { tier: "na", delta: null, offsetM: null, reason: "analysis-image-loading" };
     }
-    return meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, nat);
+    const computed = meissa2dComputeOrthoPdamRgbFitSyncFromNat(circle, id, ck, nat);
+    if (
+      computed &&
+      ((computed.offsetM != null && Number.isFinite(Number(computed.offsetM))) ||
+        (computed.tier && computed.tier !== "na"))
+    ) {
+      meissa2dOrthoRgbLastStableById.set(id, computed);
+    }
+    return computed;
   }
 
   function meissa2dCirclePassesRemainingFilter(circle) {
@@ -10685,7 +10762,11 @@
     const sizeBox = pan || wrap;
     const w = Math.max(1, sizeBox.clientWidth);
     const h = Math.max(1, sizeBox.clientHeight);
-    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const circlesRaw = Array.isArray(state.circles) ? state.circles : [];
+    const circles =
+      meissa2dColorModeValue() === "ortho_pdam"
+        ? meissa2dDedupCirclesForOrthoPdam(circlesRaw)
+        : circlesRaw;
     const projectId =
       (els.meissaProjectSelect?.value || "").trim() || (els.projectId?.value || "").trim();
     const sid =
@@ -10933,7 +11014,11 @@
     meissa2dLabelSvgFrameFrag = null;
     meissa2dClearPickHits();
     meissa2dClearExpiredInboundFocus();
-    const circles = Array.isArray(state.circles) ? state.circles : [];
+    const circlesRaw = Array.isArray(state.circles) ? state.circles : [];
+    const circles =
+      meissa2dColorModeValue() === "ortho_pdam"
+        ? meissa2dDedupCirclesForOrthoPdam(circlesRaw)
+        : circlesRaw;
     const overlayWarm =
       Date.now() < meissa2dOverlayWarmUntil && circles.length >= MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES;
     const effectiveOverlayWarm = false;
