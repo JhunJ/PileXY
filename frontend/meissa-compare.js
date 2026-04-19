@@ -5235,17 +5235,6 @@
 
   const MEISSA_ORTHO_GEOM_DEDUP_EPS = 1e-4;
 
-  function meissa2dIsTouchLikeDevice() {
-    try {
-      return (
-        (typeof navigator !== "undefined" && Number(navigator.maxTouchPoints || 0) > 0) ||
-        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches)
-      );
-    } catch (_) {
-      return false;
-    }
-  }
-
   function meissa2dCircleGeomDedupKey(circle) {
     const cx = Number(circle?.center_x ?? circle?.centerX);
     const cy = Number(circle?.center_y ?? circle?.centerY);
@@ -5546,9 +5535,8 @@
     meissaOrthoPdamIdleCallbackId = window.setTimeout(() => {
       meissaOrthoPdamIdleCallbackId = 0;
       let slice = 0;
-      const tabletLike = meissa2dIsTabletLikeDevice();
-      const maxPerSlice = meissa2dDragging ? 3 : tabletLike ? 10 : 32;
-      const budgetMs = meissa2dDragging ? 4 : tabletLike ? 10 : 24;
+      const maxPerSlice = meissa2dDragging ? 4 : 32;
+      const budgetMs = meissa2dDragging ? 6 : 24;
       const t0 = (typeof performance !== "undefined" && performance.now)
         ? performance.now()
         : Date.now();
@@ -5574,7 +5562,7 @@
         if (tn - t0 >= budgetMs) break;
       }
       if (meissaOrthoPdamPrefetchQueue.length > 0) {
-        const delay = meissa2dDragging ? 28 : tabletLike ? 14 : 4;
+        const delay = meissa2dDragging ? 24 : 4;
         meissaOrthoPdamIdleCallbackId = window.setTimeout(() => {
           meissaOrthoPdamIdleCallbackId = 0;
           scheduleMeissaOrthoPdamPrefetch();
@@ -5962,21 +5950,6 @@
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
-  }
-
-  function meissa2dShouldDrawDashedPileRadius() {
-    return meissa2dColorModeValue() !== "ortho_pdam";
-  }
-
-  function meissa2dIsTabletLikeDevice() {
-    try {
-      const touch = Number(navigator?.maxTouchPoints || 0);
-      const coarse = Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
-      const maxSide = Math.max(window.innerWidth || 0, window.innerHeight || 0);
-      return (touch > 0 || coarse) && maxSide >= 700;
-    } catch (_) {
-      return false;
-    }
   }
 
   /**
@@ -10648,7 +10621,6 @@
     const onOrtho = Boolean(opts?.overlayOnOrtho);
     const deferHeavyOverlay = Boolean(opts?.deferHeavyOverlay);
     const getOrthoFit = typeof opts?.getOrthoFit === "function" ? opts.getOrthoFit : null;
-    const drawDashedRadius = meissa2dShouldDrawDashedPileRadius();
     const ps = Number(pixelScale) > 0 ? Number(pixelScale) : 1;
     const lw = meissa2dOverlayLineWidthCssPx(ps, 1.15);
     const b = getFileCoordBoundsFromCircles(circles);
@@ -10748,7 +10720,7 @@
       if (hasFoot) {
         meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRF, paint);
       }
-      if (drawDashedRadius && Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
+      if (Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
         meissa2dDrawPileFileRadiusDashedCircle(ctx, px, py, rPx, maxRF);
       }
       const dotBaseF = hasFoot ? 1.25 : Math.max(2.4, Math.min(5.2, Math.floor(Math.sqrt(b.n) * 0.35)));
@@ -11049,8 +11021,7 @@
         : circlesRaw;
     const overlayWarm =
       Date.now() < meissa2dOverlayWarmUntil && circles.length >= MEISSA_2D_OVERLAY_WARMUP_MIN_CIRCLES;
-    const effectiveOverlayWarm = overlayWarm && meissa2dIsTouchLikeDevice();
-    const drawDashedRadius = meissa2dShouldDrawDashedPileRadius();
+    const effectiveOverlayWarm = false;
     const renderFitCache = new Map();
     const getOrthoFitForRender = (circle) => {
       if (meissa2dColorModeValue() !== "ortho_pdam") return null;
@@ -11338,7 +11309,7 @@
         if (hasFoot) {
           meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxR, paint);
         }
-        if (drawDashedRadius && Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
+        if (Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
           meissa2dDrawPileFileRadiusDashedCircle(ctx, px, py, rPx, maxR);
         }
         const dotBase = hasFoot ? 1.25 : 2.6;
@@ -11533,7 +11504,7 @@
             if (hasFoot) {
               meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRc, paint);
             }
-            if (drawDashedRadius && Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
+            if (Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
               meissa2dDrawPileFileRadiusDashedCircle(ctx, px, py, rPx, maxRc);
             }
             const dotBaseC = hasFoot ? 1.25 : 2.6;
@@ -11650,7 +11621,7 @@
       if (hasFoot) {
         meissa2dDrawPileFootprintDisk(ctx, px, py, rPx, maxRt, paint);
       }
-      if (drawDashedRadius && Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
+      if (Number.isFinite(rad) && rad > 1e-6 && Number.isFinite(rPx)) {
         meissa2dDrawPileFileRadiusDashedCircle(ctx, px, py, rPx, maxRt);
       }
       const dotBaseT = hasFoot ? 1.25 : 2.6;
