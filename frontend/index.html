@@ -1258,7 +1258,8 @@
             <label>
               점 색 기준
               <select id="meissa-3d-color-mode" class="meissa-select">
-                <option value="remaining" selected>PDAM 잔량</option>
+                <option value="cad" selected>CAD 기본</option>
+                <option value="remaining">PDAM 잔량</option>
                 <option value="mz_zone">Meissa Z vs 구역 기준</option>
                 <option value="ortho_pdam">정사·시공 적합도(평면·RGB·형태)</option>
               </select>
@@ -1293,7 +1294,7 @@
           <div class="meissa-2d-overlay-wrap">
             <img id="meissa-cloud-2d-image-local" class="meissa-cloud-2d-image-local" alt="Meissa 2D 배경" />
           </div>
-          <details class="meissa-dom-overlay-wrap">
+          <details class="meissa-dom-overlay-wrap" hidden>
             <summary>대체 뷰(빠른 DOM 오버레이 · URL 이미지 기반)</summary>
             <div class="meissa-dom-overlay-stage" id="meissa-dom-overlay-stage">
               <img
