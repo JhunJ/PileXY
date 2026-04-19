@@ -5829,19 +5829,20 @@
     if (!Number.isFinite(rPx) || rPx < 0.12) return;
     if (Number.isFinite(maxRPx) && maxRPx > 0 && rPx > maxRPx) return;
     const vs = meissa2dPanzoomScaleSanitized();
-    const lineW = Math.max(0.4, 0.95 / vs);
+    const lineW = Math.max(0.28, 0.62 / vs);
     const tint = meissa2dFootprintUsesPdamTint() && paint && paint.fill;
     ctx.save();
     ctx.beginPath();
     ctx.arc(px, py, rPx, 0, Math.PI * 2);
     if (tint) {
-      ctx.fillStyle = meissa2dAdjustRgbaAlpha(paint.fill, 0.58);
+      // 직경 원은 단순 반투명 단색면(그라데이션/블러 느낌 최소화)
+      ctx.fillStyle = meissa2dAdjustRgbaAlpha(paint.fill, 0.44);
       ctx.fill();
-      ctx.strokeStyle = paint.stroke || "rgba(30, 41, 59, 0.55)";
+      ctx.strokeStyle = paint.stroke || "rgba(30, 41, 59, 0.42)";
     } else {
-      ctx.fillStyle = "rgba(241, 245, 249, 0.04)";
+      ctx.fillStyle = "rgba(241, 245, 249, 0.16)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(147, 197, 253, 0.88)";
+      ctx.strokeStyle = "rgba(147, 197, 253, 0.45)";
     }
     ctx.lineWidth = lineW;
     ctx.lineJoin = "round";
