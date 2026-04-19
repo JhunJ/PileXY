@@ -310,6 +310,8 @@
   let meissa2dOverlayWarmUntil = 0;
   /** @type {Array<{x:number,y:number,r:number,circle:Record<string, unknown>,tooltip?:string,fit?:Record<string, unknown>|null}>} */
   let meissa2dPickHits = [];
+  /** 캔버스 대신 SVG 텍스트로 선명하게 그리기 위한 프레임별 라벨 버퍼. */
+  let meissa2dLabelSvgFrameFrag = null;
   /** 말뚝 데이터셋: Ctrl+클릭으로 토글되는 circle id */
   let meissaDatasetSelectedIds = new Set();
   /** @type {HTMLCanvasElement|null} */
@@ -3088,6 +3090,7 @@
 
   function meissa2dClearPickHits() {
     meissa2dPickHits = [];
+    hideMeissa2dLabelSvgLayer();
   }
 
   function meissa2dColorModeValue() {
@@ -6155,10 +6158,49 @@
     return [label, coordLine, pdamLine].filter(Boolean).join("\n");
   }
 
+  function meissa2dPickBestHitAt(contentX, contentY) {
+    const x = Number(contentX);
+    const y = Number(contentY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    let best = null;
+    let bestD = 1e9;
+    const seen = new Set();
+    for (const h of meissa2dPickHits) {
+      const id = String(h?.circle?.id ?? "").trim();
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      const d = Math.hypot(x - Number(h.x), y - Number(h.y));
+      if (d <= Number(h.r) && d < bestD) {
+        bestD = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
   function meissa2dPushPickHit(px, py, hitR, circle, orthoFitOverride) {
+    const x = Number(px);
+    const y = Number(py);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const mergedTol = Math.max(0.5, Number(hitR) * 0.18);
+    const cid = String(circle?.id ?? "").trim();
+    for (let i = 0; i < meissa2dPickHits.length; i++) {
+      const ex = meissa2dPickHits[i];
+      const exId = String(ex?.circle?.id ?? "").trim();
+      const sameCircle = !!cid && !!exId && cid === exId;
+      const near = Math.hypot(Number(ex.x) - x, Number(ex.y) - y) <= mergedTol;
+      if (!sameCircle && !near) continue;
+      // 중복 원/라벨이 겹친 경우 hover 대상이 튀지 않도록 반경만 합치고 기존 항목을 재사용
+      ex.r = Math.max(Number(ex.r) || 0, Math.max(6, Number(hitR) || 0));
+      if (!ex.fit && orthoFitOverride) ex.fit = orthoFitOverride;
+      if (!ex.circle && circle) ex.circle = circle;
+      return;
+    }
     meissa2dPickHits.push({
-      x: px,
-      y: py,
+      x,
+      y,
       r: Math.max(6, hitR),
       circle,
       fit: orthoFitOverride || null,
@@ -6308,6 +6350,25 @@
     if (!label) return;
     const vs = meissa2dPanzoomScaleSanitized();
     void _circleCount;
+    if (!ctx) {
+      if (!meissa2dLabelSvgFrameFrag) meissa2dLabelSvgFrameFrag = document.createDocumentFragment();
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      const targetScreenCssPx = 11.5;
+      const fsCanvas = Math.max(0.65, targetScreenCssPx / vs);
+      const off = Math.max(1.25, 5 / vs);
+      t.setAttribute("x", String(px + off));
+      t.setAttribute("y", String(py - off));
+      t.setAttribute("font-size", String(fsCanvas));
+      t.setAttribute("font-family", 'ui-monospace, Consolas, "Courier New", monospace');
+      t.setAttribute("fill", "rgba(248, 250, 252, 0.88)");
+      t.setAttribute("stroke", "rgba(15, 23, 42, 0.58)");
+      t.setAttribute("stroke-width", String(Math.max(0.25, 2.2 / vs)));
+      t.setAttribute("paint-order", "stroke fill");
+      t.setAttribute("stroke-linejoin", "round");
+      t.textContent = label;
+      meissa2dLabelSvgFrameFrag.appendChild(t);
+      return;
+    }
     // 캔버스 좌표는 panzoom 루트의 scale(vs)와 함께 커지므로, 글자는 (목표 화면 px)/vs 로 그려야 화면에서 일정함.
     // 예전 Math.max(4, …) 최소값 때문에 확대 시 4*vs 로 비정상 커지는 문제가 있었음.
     const targetScreenCssPx = 11.5;
@@ -6324,6 +6385,25 @@
     ctx.fillStyle = "rgba(248, 250, 252, 0.88)";
     ctx.fillText(label, px + off, py - off);
     ctx.restore();
+  }
+
+  function meissa2dFlushLabelSvgLayer(logicalW, logicalH) {
+    const svg = ensureMeissa2dLabelSvgLayer();
+    if (!svg) return;
+    const w = Math.max(1, Number(logicalW) || 1);
+    const h = Math.max(1, Number(logicalH) || 1);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("width", String(w));
+    svg.setAttribute("height", String(h));
+    svg.style.position = "absolute";
+    svg.style.left = "0px";
+    svg.style.top = "0px";
+    svg.style.width = `${w}px`;
+    svg.style.height = `${h}px`;
+    svg.style.zIndex = "4";
+    svg.style.display = "block";
+    svg.replaceChildren(meissa2dLabelSvgFrameFrag || document.createDocumentFragment());
+    meissa2dLabelSvgFrameFrag = null;
   }
 
   function ensureMeissa2dOverlayTooltip() {
@@ -6380,15 +6460,7 @@
     if (!iframeEl) return;
     const cc = contentCoordsFromMeissaOverlay(clientX, clientY);
     if (!cc) return;
-    let best = null;
-    let bestD = 1e9;
-    for (const h of meissa2dPickHits) {
-      const d = Math.hypot(cc.x - h.x, cc.y - h.y);
-      if (d <= h.r && d < bestD) {
-        bestD = d;
-        best = h;
-      }
-    }
+    const best = meissa2dPickBestHitAt(cc.x, cc.y);
     if (!best?.circle) return;
     const c = best.circle;
     const fx = Number(c.center_x);
@@ -8487,6 +8559,23 @@
     return layer;
   }
 
+  function ensureMeissa2dLabelSvgLayer() {
+    const root = ensureMeissa2dPanZoomRoot();
+    if (!root) return null;
+    let svg = document.getElementById("meissa-cloud-2d-labels-overlay");
+    if (!svg) {
+      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.id = "meissa-cloud-2d-labels-overlay";
+      svg.classList.add("meissa-cloud-2d-labels-overlay");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("pointer-events", "none");
+      root.appendChild(svg);
+    } else if (svg.parentNode !== root) {
+      root.appendChild(svg);
+    }
+    return svg;
+  }
+
   function ensureMeissa2dOrthoHiBadge() {
     const wrap = document.querySelector(".meissa-2d-overlay-wrap");
     if (!wrap) return null;
@@ -8850,6 +8939,16 @@
       }
       hi.style.display = "none";
     }
+    const labelSvg = document.getElementById("meissa-cloud-2d-labels-overlay");
+    if (labelSvg) {
+      try {
+        labelSvg.replaceChildren();
+      } catch (_) {
+        /* ignore */
+      }
+      labelSvg.style.display = "none";
+    }
+    meissa2dLabelSvgFrameFrag = null;
   }
 
   /** 뷰패치만 끄고 배지(replay·고화질 줄)는 건드리지 않음 */
@@ -8920,6 +9019,16 @@
       }
       hi.style.display = "none";
     }
+    const labels = document.getElementById("meissa-cloud-2d-labels-overlay");
+    if (labels) {
+      try {
+        labels.replaceChildren();
+      } catch (_) {
+        /* ignore */
+      }
+      labels.style.display = "none";
+    }
+    meissa2dLabelSvgFrameFrag = null;
   }
 
   function ensureMeissa2dOrthoViewportHiCanvas() {
@@ -10555,7 +10664,7 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
         const px = mapX(x);
         const py = mapY(y);
-        meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+        meissa2dDrawCircleLabel(null, px, py, c, circles.length);
       }
     }
     ctx.restore();
@@ -10795,6 +10904,7 @@
 
   function renderMeissa2dPointsOverlay() {
     const layer = ensureMeissa2dPointsOverlayLayer();
+    const labelSvg = ensureMeissa2dLabelSvgLayer();
     const wrap = document.querySelector(".meissa-2d-overlay-wrap");
     if (!layer || !wrap) return;
     const canvas = /** @type {HTMLCanvasElement} */ (layer);
@@ -10815,6 +10925,11 @@
     if (!ctx) return;
     ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    if (labelSvg) {
+      labelSvg.replaceChildren();
+      labelSvg.style.display = "none";
+    }
+    meissa2dLabelSvgFrameFrag = null;
     meissa2dClearPickHits();
     meissa2dClearExpiredInboundFocus();
     const circles = Array.isArray(state.circles) ? state.circles : [];
@@ -11141,7 +11256,7 @@
           meissa2dMaybeDrawInboundFocusOnCircle(ctx, px, py, dotR, c);
           if (!effectiveOverlayWarm) {
             meissa2dPushPickHit(px, py, Math.max(dotR + 8, 12), c, fit);
-            meissa2dDrawCircleLabel(ctx, px, py, c, circles.length);
+            meissa2dDrawCircleLabel(null, px, py, c, circles.length);
           }
         });
       }
@@ -11191,8 +11306,9 @@
       }
       if (!effectiveOverlayWarm) {
         georefDrawItems.forEach((it) => {
-          meissa2dDrawCircleLabel(ctx, it.px, it.py, it.c, circles.length);
+          meissa2dDrawCircleLabel(null, it.px, it.py, it.c, circles.length);
         });
+        meissa2dFlushLabelSvgLayer(w, h);
       }
       if (shouldLogStats && statCount > 0) {
         const mapNullRatePct = dbgGeorefFiltered > 0 ? (100 * dbgGeorefNullMap) / dbgGeorefFiltered : 0;
@@ -11212,6 +11328,7 @@
         deferHeavyOverlay: overlayWarm,
         getOrthoFit: getOrthoFitForRender,
       });
+      meissa2dFlushLabelSvgLayer(w, h);
       ctx.save();
       ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
       ctx.fillStyle = "rgba(148, 163, 184, 0.95)";
@@ -11320,7 +11437,7 @@
               if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
               const m = mapFileToCartaPx(fx, fy, false);
               if (!m) return;
-              meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
+              meissa2dDrawCircleLabel(null, m.px, m.py, c, circles.length);
             });
           }
           return;
@@ -11437,7 +11554,7 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         const m = mapFileToTileOverlayPx(x, y, false);
         if (!m) return;
-        meissa2dDrawCircleLabel(ctx, m.px, m.py, c, circles.length);
+        meissa2dDrawCircleLabel(null, m.px, m.py, c, circles.length);
       });
     }
   }
@@ -11453,6 +11570,18 @@
         scheduleMeissaOrthoOffsetPanelRefresh(hasAnalysis ? 320 : 520);
       }
     });
+  }
+
+  function hideMeissa2dLabelSvgLayer() {
+    const labelSvg = document.getElementById("meissa-cloud-2d-labels-overlay");
+    if (!labelSvg) return;
+    try {
+      labelSvg.replaceChildren();
+    } catch (_) {
+      /* ignore */
+    }
+    labelSvg.style.display = "none";
+    meissa2dLabelSvgFrameFrag = null;
   }
 
   function meissaDomOverlayCurrentSnapshotKey() {
@@ -12486,6 +12615,8 @@
       if (mosaic) mosaic.style.transform = "";
       const points = document.getElementById("meissa-cloud-2d-points-overlay");
       if (points) points.style.transform = "";
+      const labels = document.getElementById("meissa-cloud-2d-labels-overlay");
+      if (labels) labels.style.transform = "";
       const orthoHi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
       if (orthoHi) orthoHi.style.transform = "";
     } else {
@@ -12495,6 +12626,8 @@
       if (mosaic) mosaic.style.transform = tf;
       const points = document.getElementById("meissa-cloud-2d-points-overlay");
       if (points) points.style.transform = tf;
+      const labels = document.getElementById("meissa-cloud-2d-labels-overlay");
+      if (labels) labels.style.transform = tf;
       const orthoHi = document.getElementById("meissa-cloud-2d-ortho-viewport-hi");
       if (orthoHi) orthoHi.style.transform = tf;
     }
@@ -12883,15 +13016,7 @@
   function meissaDatasetTogglePickAt(clientX, clientY) {
     const cc = contentCoordsFromMeissaOverlay(clientX, clientY);
     if (!cc) return;
-    let best = null;
-    let bestD = 1e9;
-    for (const h of meissa2dPickHits) {
-      const d = Math.hypot(cc.x - h.x, cc.y - h.y);
-      if (d <= h.r && d < bestD) {
-        bestD = d;
-        best = h;
-      }
-    }
+    const best = meissa2dPickBestHitAt(cc.x, cc.y);
     if (!best?.circle) return;
     const id = String(best.circle.id ?? "");
     if (!id) return;
@@ -13363,15 +13488,7 @@
         }
         const cc = contentCoordsFromMeissaOverlay(evt.clientX, evt.clientY);
         if (!cc) return;
-        let best = null;
-        let bestD = 1e9;
-        for (const h of meissa2dPickHits) {
-          const d = Math.hypot(cc.x - h.x, cc.y - h.y);
-          if (d <= h.r && d < bestD) {
-            bestD = d;
-            best = h;
-          }
-        }
+        const best = meissa2dPickBestHitAt(cc.x, cc.y);
         if (best) {
           if (!best.tooltip) best.tooltip = meissa2dBuildPickTooltip(best.circle, best.fit);
           setMeissa2dOverlayTooltip(best.tooltip || "", evt.clientX, evt.clientY, true);
