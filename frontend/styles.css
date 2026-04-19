@@ -5587,15 +5587,20 @@ td {
 }
 
 .construction-filter-grid--settlement {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   align-items: end;
+}
+
+.construction-filter-grid--settlement > * {
+  min-width: 0;
 }
 
 .construction-settlement-monthday-group {
   display: grid;
-  grid-template-columns: minmax(110px, 140px) minmax(0, 1fr) minmax(88px, 110px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.45rem;
   align-items: end;
+  min-width: 0;
 }
 
 .construction-settlement-monthday-group label {
@@ -5755,7 +5760,7 @@ td {
   }
 
   .construction-settlement-monthday-group {
-    grid-template-columns: minmax(98px, 120px) minmax(0, 1fr) minmax(82px, 96px);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
