@@ -2042,7 +2042,7 @@
       await mod.ensureInit("#meissa-3d-root");
       const planTh = meissaPlanDeviationThresholds();
       mod.updateRecords(state.lastCompareRecords, {
-        colorMode: els.meissa3dColorMode?.value || "cad",
+        colorMode: els.meissa3dColorMode?.value || "remaining",
         viewMode: "overlay",
         overlay2dMode: true,
         obliqueImageMode: false,
@@ -3076,7 +3076,7 @@
   }
 
   function meissa2dColorModeValue() {
-    const v = (els.meissa3dColorMode?.value || "cad").trim();
+    const v = (els.meissa3dColorMode?.value || "remaining").trim();
     return v === "plan_dev" ? "ortho_pdam" : v;
   }
 
@@ -5677,17 +5677,17 @@
     return Number.isFinite(n) && n >= minR;
   }
 
-  /** 예전 점 색 옵션(plan·zdelta 등) 제거 후에도 복원된 폼 값이 남으면 CAD 기본으로 맞춤 */
+  /** 예전 점 색 옵션(plan·zdelta 등) 제거 후에도 복원된 폼 값이 남으면 잔량으로 맞춤 */
   function normalizeMeissa3dColorModeSelect() {
     const el = els.meissa3dColorMode;
     if (!el) return;
     let v = String(el.value || "").trim();
     if (v === "plan_dev") v = "ortho_pdam";
-    if (v === "cad" || v === "remaining" || v === "mz_zone" || v === "ortho_pdam") {
+    if (v === "remaining" || v === "mz_zone" || v === "ortho_pdam") {
       el.value = v;
       return;
     }
-    el.value = "cad";
+    el.value = "remaining";
   }
 
   function syncMeissaLegendRowVisibility() {
@@ -5757,9 +5757,10 @@
     return found;
   }
 
-  /** 기본 모드는 CAD 유지: PDAM 로드가 색상 모드를 자동 변경하지 않도록 한다. */
+  /** PDAM에 잔량 숫자가 있으면 점 색 기준을 잔량으로 맞춘다(사용자가 다른 옵션을 고른 뒤에는 change 핸들러가 유지). */
   function applyDefaultMeissaColorModeFromPdam() {
     if (!pdamMapHasPileRemaining() || !els.meissa3dColorMode) return;
+    els.meissa3dColorMode.value = "remaining";
   }
 
   /** CAD에서 불러온 말뚝: 직경(diameter)이 있으면 반지름=직경/2, 없으면 circle.radius */

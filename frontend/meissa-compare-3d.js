@@ -769,7 +769,7 @@ function drawFallback2d(
  * @param {{ colorMode?: string, viewMode?: "overlay"|"meissa"|"compare", overlay2dMode?: boolean, legendEl?: HTMLElement|null, basePoints?: Array<[number, number, number]>, basePointColors?: Array<[number,number,number]>, baseResourceCount?: number, obliqueImageMode?: boolean, overlayImageUrl?: string|null, planDevOkM?: number, planDevBadM?: number }} [options]
  */
 export function updateRecords(records, options) {
-  const colorMode = options?.colorMode || "cad";
+  const colorMode = options?.colorMode || "remaining";
   const viewMode = options?.viewMode || "overlay";
   const overlay2dMode = Boolean(options?.overlay2dMode);
   const obliqueImageMode = Boolean(options?.obliqueImageMode);
