@@ -1581,6 +1581,20 @@
     if (els.meissa2dLoadStatus) els.meissa2dLoadStatus.textContent = meissa2dLoadLogLines.join("\n");
   }
 
+  /** 모바일/터치 환경에서 확대 시 캔버스가 비는 현상을 막기 위한 백킹 크기 상한. */
+  function meissa2dOverlayMaxBackingSize() {
+    let maxBacking = 16384;
+    try {
+      const touchLike =
+        (typeof navigator !== "undefined" && Number(navigator.maxTouchPoints || 0) > 0) ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      if (touchLike) maxBacking = 4096;
+    } catch (_) {
+      /* ignore */
+    }
+    return maxBacking;
+  }
+
   /** CSS 줌(scale)에 맞춰 캔버스 백킹 스토어 배율 — 확대 시 점·라벨 흐림 완화(메모리·GPU 한도 내 상향) */
   function meissa2dOverlayPixelScale(w, h) {
     const viewScale = Math.max(
@@ -1589,7 +1603,7 @@
     );
     const dpr = Math.min(2.25, window.devicePixelRatio || 1);
     let s = dpr * Math.min(MEISSA_2D_ZOOM_MAX_SCALE, Math.max(1, viewScale));
-    const maxBacking = 16384;
+    const maxBacking = meissa2dOverlayMaxBackingSize();
     s = Math.min(s, maxBacking / Math.max(1, w), maxBacking / Math.max(1, h), 40);
     return Math.max(dpr * 0.55, s);
   }
@@ -1607,8 +1621,9 @@
     const wW = Math.max(1, Number(ww) || 1);
     const wH = Math.max(1, Number(wh) || 1);
     let s = dpr * vs;
-    const capW = (8192 * vs) / wW;
-    const capH = (8192 * vs) / wH;
+    const maxBacking = meissa2dOverlayMaxBackingSize();
+    const capW = (maxBacking * vs) / wW;
+    const capH = (maxBacking * vs) / wH;
     s = Math.min(s, capW, capH, 72);
     return Math.max(dpr * 0.95, s);
   }
@@ -5981,6 +5996,9 @@
     const installed = isPdamCircleMappingInstalled(row);
     const neutralFill = "rgba(156, 166, 184, 0.38)";
     const neutralStroke = "rgba(51, 65, 85, 0.48)";
+    /** PDAM 미적용 기본(CAD) 시각 톤: 회색보다 이전 기본 블루 계열에 가깝게 유지 */
+    const cadFallbackFill = "rgba(148, 186, 222, 0.38)";
+    const cadFallbackStroke = "rgba(71, 105, 138, 0.52)";
     const grayUnavail = "rgba(148, 163, 184, 0.34)";
     const grayStroke = "rgba(71, 85, 105, 0.5)";
     if (mode === "ortho_pdam") {
@@ -6045,7 +6063,7 @@
       const n = raw != null && String(raw).trim() !== "" ? parseFloat(String(raw).replace(/,/g, "")) : NaN;
 
       if (!state.pdamByCircleId || state.pdamByCircleId.size === 0) {
-        return { fill: neutralFill, stroke: neutralStroke, dotRScale: 1 };
+        return { fill: cadFallbackFill, stroke: cadFallbackStroke, dotRScale: 1 };
       }
       if (!Number.isFinite(n)) {
         if (installed) {
