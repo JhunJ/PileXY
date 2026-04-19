@@ -5980,6 +5980,9 @@
     const installed = isPdamCircleMappingInstalled(row);
     const neutralFill = "rgba(156, 166, 184, 0.38)";
     const neutralStroke = "rgba(51, 65, 85, 0.48)";
+    /** PDAM 미적용 기본(CAD) 시각 톤: 회색보다 이전 기본 블루 계열에 가깝게 유지 */
+    const cadFallbackFill = "rgba(148, 186, 222, 0.38)";
+    const cadFallbackStroke = "rgba(71, 105, 138, 0.52)";
     const grayUnavail = "rgba(148, 163, 184, 0.34)";
     const grayStroke = "rgba(71, 85, 105, 0.5)";
     if (mode === "ortho_pdam") {
@@ -6044,7 +6047,7 @@
       const n = raw != null && String(raw).trim() !== "" ? parseFloat(String(raw).replace(/,/g, "")) : NaN;
 
       if (!state.pdamByCircleId || state.pdamByCircleId.size === 0) {
-        return { fill: neutralFill, stroke: neutralStroke, dotRScale: 1 };
+        return { fill: cadFallbackFill, stroke: cadFallbackStroke, dotRScale: 1 };
       }
       if (!Number.isFinite(n)) {
         if (installed) {
