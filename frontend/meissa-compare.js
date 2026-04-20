@@ -458,8 +458,8 @@
   let meissa2dOrthoPatchCanvas = null;
   /** false: 2D와 3D를 함께 로드(기본). true로 두면 2D만 우선. */
   const MEISSA_2D_PRIORITY_MODE = true;
-  /** false: 상단 iframe을 Meissa /3d 뷰어로 연다(기본). true면 스냅샷(2D) URL만 사용. */
-  const MEISSA_3D_EXCLUDED = true;
+  /** true: iframe·링크를 스냅샷(2D) 페이지만 연다. false: 프로젝트·존·촬영일 선택 시 `/…/snapshots/…/3d` 뷰어(기본). */
+  const MEISSA_3D_EXCLUDED = false;
   /** false: 공식 Meissa 화면을 페이지 안 iframe에 띄우지 않고 새 탭 링크만 맞춤(임베드 3D·로그인 뷰 제거). */
   const MEISSA_CLOUD_3D_FRAME_VISIBLE = true;
   /** true: 심플 2D 모드 활성화(대체뷰·정사 이미지 중심). */
