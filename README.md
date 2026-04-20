@@ -1,90 +1,175 @@
-# 파일 좌표 추출 도구
+# PileXY · 파일 마스터
 
-FastAPI + ezdxf powers the backend and a vanilla HTML/CSS/JS SPA handles the UI. Upload a DXF to parse CIRCLE + numeric TEXT entities, convert them into world coordinates (including INSERT transforms), match each circle to its nearest numeric label, visualize everything on a 2D canvas, inspect duplicate groups, and download CSV/XLSX reports.
+**CAD 말뚝 도면(DXF/DWG)에서 원·텍스트를 읽어 세계좌표로 정리하고, 현장 시공·드론 측량 데이터와 한 화면에서 맞춰 보는** 웹 애플리케이션입니다.  
+도면 속 “어디에 몇 번 말뚝이 있는지”를 빠르게 숫자와 좌표로 뽑고, 버전을 남기며, 엑셀·PDAM·Meissa(드론)와 연동해 **설계–시공–검증** 흐름을 이어 주는 것이 목표입니다.
 
-## Project Layout
+---
+
+## 이 프로젝트가 지향하는 것
+
+- **도면을 그대로 신뢰하기 어려운 순간**에도, 원과 번호 텍스트의 위치 관계를 규칙적으로 해석해 **재현 가능한 좌표 목록**을 만듭니다.
+- **블록·배열 INSERT**, 레이어, 직경·텍스트 높이 필터로 **현장에서 의미 있는 말뚝 후보만** 남깁니다.
+- 한 번 잡은 매칭·동 구획·수정 이력을 **작업 버전**으로 저장해, 나중에 같은 현장을 다시 열었을 때 **이어서** 작업할 수 있습니다.
+- 시공 실적(엑셀)과 드론 스냅샷(Meissa)을 붙이면, **평면만이 아니라 고도·정사영상**까지 겹쳐 보며 차이를 좁힐 수 있습니다.
+
+---
+
+## 주요 기능
+
+### 도면 파싱 · 말뚝 추출
+
+- **DXF** 직접 파싱, **DWG**는 [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) 등으로 DXF로 변환 후 처리(환경에 ODA 실행 파일이 있어야 함).
+- **CIRCLE**과 숫자(및 현장에서 쓰는 번호 패턴) **TEXT/MTEXT**를 읽고, INSERT 변환(이동·회전·스케일·배열)을 반영한 **월드 좌표**로 정규화.
+- 원과 텍스트는 **공간 해시**로 근접 탐색해 매칭하며, 매칭 거리 이상치·라벨 방향 등을 고려한 **재매칭·정제** 로직이 있습니다.
+- **기초 P/F** 등 도면 표기는 “말뚝 자동 매칭에서 제외”하되 뷰어에는 표시하는 등, **현장 표기 관례**를 반영합니다.
+- **동·주차장·타워크레인 구역** 등 다각형으로 구획을 나누고, 말뚝에 동 정보를 붙일 수 있습니다.
+- **중복 좌표 그룹**을 찾아 내고, CSV/XLSX로 내보낼 때 대표 한 줄로 묶는 등 보고용 정리가 가능합니다.
+
+### 뷰어 · 편집
+
+- **2D 캔버스**에 원·텍스트·매칭 선을 표시하고, 레이어·필터·표시 옵션으로 도면을 읽기 쉽게 조정.
+- **수동 매칭**으로 잘못 붙은 번호를 고치고, 필요 시 **매칭 이력**을 반영해 다시 계산합니다.
+- **버전 비교**: 저장해 둔 작업끼리 차이를 확인(도면 변경·좌표·매칭 변화 추적에 활용).
+
+### 작업 저장 · 프로젝트
+
+- 업로드·필터·매칭·동 설정 등 **전체 작업 상태**를 **프로젝트(버전 그룹) / 구분 / 제목**과 함께 서버에 저장합니다.
+- **불러오기 / 신규 저장 / 수정 저장**으로 반복 작업과 협업 시나리오를 지원합니다.
+
+### 시공 · 기성
+
+- 시공일지·기성 관련 **엑셀 워크북 가져오기**, 컬럼 별칭 매핑, SQLite 기반 **데이터셋·대시보드**.
+- **PDAM** 보고서와 동기화해 실적 엑셀을 끌어오는 흐름(엔드포인트·경로 추정 로직 포함).
+- **기초골조 두께**, **시공현황**, **기성정리** 등 UI에서 시공 데이터와 도면 말뚝 정보를 함께 다루는 화면이 있습니다.
+
+### Meissa · 드론(3D) 비교
+
+- Meissa 계정 로그인(2FA 대응), 프로젝트·존·스냅샷·리소스 탐색.
+- 스냅샷 **오버레이 이미지**, **정사영(orthophoto) 프리뷰**, **DSM 기반 Z 배치** 등으로 도면 좌표와 현장 영상·고도를 맞춰 봅니다.
+- 디스크 캐시로 반복 요청을 줄이고, Carta DSM 등은 선택적 의존성(`rasterio` / `tifffile`)으로 동작합니다.
+
+### 엑셀 비교
+
+- 워크북 **검사·비교** API로 두 버전의 차이를 분석하는 도구가 백엔드에 포함되어 있습니다.
+
+### 말뚝 정사 패치 데이터셋(선택)
+
+- 뷰어에서 잘라 낸 **PNG + 메타데이터(품질 라벨)** 를 서버에 누적 저장해, 추후 학습·검수용 데이터셋으로 쓸 수 있습니다(`pile_dataset` API).
+
+### 대용량 업로드
+
+- **청크 업로드**로 수백 MB급 DXF도 끊기지 않게 올릴 수 있습니다(특히 Cloudflare Tunnel 등 프록시 뒤에서 유용).
+- nginx 등 **리버스 프록시** 사용 시 `proxy_request_buffering off` 권장(문서 하단 참고).
+
+---
+
+## 기술 스택
+
+| 구분 | 사용 |
+|------|------|
+| 백엔드 | Python 3.10+, FastAPI, ezdxf, pandas, openpyxl, scikit-learn 등 |
+| 프론트엔드 | 바닐라 HTML/CSS/JS SPA(정적 파일을 FastAPI가 서빙) |
+| 데이터 | 로컬 `data/` 아래 저장 작업, 시공 SQLite, 크롭 이미지 등 |
+
+---
+
+## 프로젝트 구조(요약)
 
 ```
-project-root/
-├── backend/
-│   ├── main.py          # FastAPI app + filters + exports
-│   ├── dxf_parser.py    # ezdxf loader (CIRCLE + TEXT + transforms)
-│   ├── models.py        # Pydantic response models
-│   └── requirements.txt # Backend dependencies
-├── frontend/
-│   ├── index.html       # Single-page UI
-│   ├── app.js           # Upload/filter/viewer/duplicate/download logic
-│   └── styles.css       # UI styling
+PileXY/
+├── backend/           # FastAPI 앱, DXF 파싱, Meissa·시공·엑셀 연동
+├── frontend/          # 단일 페이지 UI (index.html, app.js, styles.css …)
+├── data/              # 저장 작업, 시공 DB, 캐시 등(실행 시 생성·갱신)
+├── cloudflared-config.yml
+├── cloudflare-worker.js
+├── start_server.bat   # Windows에서 venv·의존성·uvicorn 실행
 └── README.md
 ```
 
-## Backend
+---
 
-1. Install dependencies (recommend venv):
-   ```bash
-   cd backend
-   python -m venv .venv
-   .venv\Scripts\activate        # macOS/Linux: source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. Run FastAPI (CORS enabled):
-   ```bash
-   uvicorn backend.main:app --reload --host 0.0.0.0 --port 3001
-   ```
-   Windows에서 `start_server.bat`는 기본 **3001**로 뜹니다. 실행 시 **이미 같은 포트를 쓰는 프로세스**(이전에 띄운 uvicorn 등)가 있으면 먼저 종료한 뒤 다시 띄웁니다. 다른 포트는 실행 전 `set PILEXY_PORT=8001`처럼 지정합니다. Node 등에서 흔한 전역 환경 변수 `PORT`는 이 배치에서 쓰지 않습니다(값이 8001로 박혀 있어도 기본 3001이 적용되도록 `PILEXY_PORT`만 사용).
-3. Key endpoints
-   - `POST /api/upload-dxf` – multipart form with `file`, `min_diameter`, `max_diameter`, `text_height_min`, `text_height_max`. Parses DXF, filters entities, matches circles↔texts, detects duplicates, and returns summary/circles/texts/duplicates/filter information.
-   - `GET /api/circles` – re-run server-side filters on the last uploaded DXF without re-uploading.
-   - `GET /api/circles/export?format=csv|xlsx` – exports the filtered set (duplicate coordinates collapsed to a single representative row).
+## 설치 및 실행
 
-**대용량 DXF 업로드 시 1%에서 멈출 때 (리버스 프록시 사용 시)**  
-nginx 등으로 백엔드를 감싼 경우, 업로드 본문이 버퍼링되어 1~2MB만 전달된 뒤 멈출 수 있습니다. `server { ... }` 블록 안에 다음을 추가한 뒤 nginx를 재시작하세요.
+### 1. 백엔드 의존성
+
+```bash
+cd backend
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. 서버 기동
+
+```bash
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 3001
+```
+
+Windows에서는 저장소 루트의 **`start_server.bat`** 으로 같은 작업을 할 수 있습니다.  
+포트는 기본 **3001**이며, 바꿀 때는 `PILEXY_PORT`(예: `set PILEXY_PORT=8001`)를 사용합니다. 전역 `PORT` 환경 변수는 이 배치에서 의도적으로 사용하지 않습니다.
+
+브라우저에서 `http://127.0.0.1:3001/` 로 접속하면 프론트엔드가 열립니다.  
+백엔드를 다른 호스트에 두는 경우, `frontend`를 정적으로 쓸 때는 `window.__API_BASE_URL__` 로 API 베이스를 지정할 수 있습니다.
+
+### 3. OpenAPI 문서(선택)
+
+기본적으로 `/docs` 는 비활성입니다. 개발 시에만 켜려면 환경 변수 `PILEXY_OPENAPI=1` 을 설정하세요.
+
+---
+
+## API 하이라이트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| POST | `/api/upload-dxf` | DXF/DWG 업로드, 파싱, 필터, 매칭, 중복 검출 |
+| POST | `/api/upload-dxf-chunk` | 대용량 청크 업로드 |
+| GET | `/api/circles` | 마지막 업로드 결과에 필터 재적용 |
+| POST | `/api/circles/recompute` 등 | 재계산·필터·동 할당·수동 매칭 |
+| GET/POST | `/api/circles/export` | CSV / XLSX 내보내기 |
+| CRUD | `/api/saved-works` | 작업 버전 저장·불러오기 |
+| — | `/api/construction/*` | 시공 데이터셋·동기화·대시보드 |
+| — | `/api/meissa/*` | Meissa 로그인·스냅샷·오버레이·orthophoto·DSM Z |
+| POST | `/api/excel/*` | 엑셀 검사·비교 |
+| — | `/api/pile-dataset/*` | 정사 패치 크롭 저장 |
+
+---
+
+## 배포 · 운영 팁
+
+### nginx 뒤에서 업로드가 멈출 때
+
+대용량 본문이 버퍼링되면 진행률이 **1% 근처에서 멈출 수** 있습니다. `server { ... }` 안에 다음을 넣고 nginx를 재시작하세요.
+
 ```nginx
 proxy_request_buffering off;
 ```
 
-Notes:
-- TEXT parsing happens only for numeric strings whose final world-space height falls within **0.5 ~ 1.1** (default, adjustable via API params and UI inputs).
-- Circle↔text matching uses a spatial hash grid for near-neighbor lookups, so large drawings stay responsive.
-- Duplicate detection is dictionary-based on rounded (x, y) keys to keep it O(n).
+### Cloudflare Tunnel
 
-## Frontend
+자체 PC에서 백엔드를 돌리면서 공개 도메인으로 붙일 때 `cloudflared` 로 터널을 열고, 로컬 `http://localhost:3001` 로 포워딩하는 방식이 README에 맞춰 구성되어 있습니다(`cloudflared-config.yml` 참고).  
+Tunnel은 본문을 한 번에 넘기지 않을 수 있어 **대용량은 앱의 청크 업로드**에 의존하는 것이 안전합니다.
 
-If you have a separate frontend, set `window.__API_BASE_URL__` to your backend URL before loading `frontend/app.js`.
-If frontend and backend are served from the same domain, the app will use the current site origin automatically.
-If you open `http://127.0.0.1:3001/`, the backend will now serve `frontend/index.html` directly.
+### Cloudflare Worker
 
-## Cloudflare Tunnel
+별도 Worker 프록시 예시는 `cloudflare-worker.js` 에 있습니다(백엔드를 다른 곳에 둘 때 등).
 
-Use this when the backend runs on your own machine but you want the public domain `https://pilexy.yeobaekstudio.com/` to reach it directly.
+---
 
-1. Install `cloudflared` on the machine running this project.
-2. Log in once with your Cloudflare account:
-   ```bash
-   cloudflared tunnel login
-   ```
-3. Create a tunnel and note its name/ID:
-   ```bash
-   cloudflared tunnel create pilexy
-   ```
-4. Point the tunnel to the local backend using `cloudflared-config.yml`.
-5. In Cloudflare Zero Trust, map `pilexy.yeobaekstudio.com` to that tunnel.
-6. Run the tunnel alongside the local backend:
-   ```bash
-   cloudflared tunnel run pilexy
-   ```
+## 구현 메모
 
-This makes the public domain forward to `http://localhost:3001`, so the browser can keep calling the same origin without hardcoded localhost URLs.
+- INSERT 블록의 **이동·회전·스케일·배열**을 반영한 뒤 필터·매칭을 수행합니다.
+- 텍스트는 기본적으로 **세계 좌표 기준 높이** 등으로 숫자 라벨만 골라 냅니다(파라미터·UI에서 조정).
+- 중복 검출은 좌표 키를 반올림해 **O(n)** 에 가깝게 처리합니다.
 
-**대용량 DXF(약 3MB 초과) 업로드:** Cloudflare Tunnel은 요청 본문을 한 번에 스트리밍하지 않고 버퍼링할 수 있어, 126MB 같은 파일을 한 번에 올리면 1% 근처에서 멈출 수 있습니다. 이 경우 앱이 자동으로 **청크 업로드**(1MB 단위로 잘라 여러 요청 전송)를 사용하므로, `https://pilexy.yeobaekstudio.com` 에서도 대용량 파일이 완료까지 진행됩니다.
+---
 
-## Cloudflare Worker Proxy
+## 면책
 
-The Worker approach is still useful if your backend is hosted elsewhere, but for a local machine the Tunnel setup above is the easiest.
+시공·측량·설계 판단의 최종 책임은 사용자 및 해당 프로젝트의 규정에 따릅니다. 본 도구는 보조용이며, 현장 데이터와 법규를 반드시 별도로 검증해야 합니다.
 
-## Implementation Notes
+---
 
-- Block INSERTs account for translation/rotation/scale and array offsets before any filtering or matching.
-- TEXT labels render at their world insert point with a slight offset so they stay readable; toggles are provided for text labels, points, circles, and match lines.
-- Match lines visually confirm the server-side CIRCLE↔TEXT pairing; unmatched circles render in a contrasting color for easy debugging.
-- CSV outputs include extra metadata: matched text value/height plus duplicate counts and ID lists.
+## 라이선스
+
+저장소에 별도 LICENSE 파일이 없습니다. 사용·배포 조건이 필요하면 저장소 관리자에게 문의하세요.
