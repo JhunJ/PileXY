@@ -13,7 +13,7 @@
       }
       window.gtag = window.gtag || gtag;
       window.gtag("js", new Date());
-      window.gtag("config", "G-WS5RRTXTKW");
+      window.gtag("config", "G-WS5RRTXTKW", { send_page_view: false });
     </script>
   </head>
   <body>
@@ -1293,7 +1293,7 @@
           <div class="meissa-2d-overlay-wrap">
             <img id="meissa-cloud-2d-image-local" class="meissa-cloud-2d-image-local" alt="Meissa 2D 배경" />
           </div>
-          <details class="meissa-dom-overlay-wrap">
+          <details class="meissa-dom-overlay-wrap" hidden aria-hidden="true">
             <summary>대체 뷰(빠른 DOM 오버레이 · URL 이미지 기반)</summary>
             <div class="meissa-dom-overlay-stage" id="meissa-dom-overlay-stage">
               <img
@@ -1453,6 +1453,13 @@
             <div id="meissa-ortho-offset-wrap" class="meissa-ortho-offset-wrap" hidden>
               <h4 class="meissa-ortho-offset-subhead">정사·도면 오프셋 (원 내 RGB·형태 판단, 심각~양호)</h4>
               <p
+                id="meissa-ortho-pdam-prefetch-status"
+                class="meissa-note meissa-ortho-pdam-prefetch-status"
+                role="status"
+                hidden
+                style="margin: 0 0 0.45rem; font-size: 0.8rem; line-height: 1.45; padding: 0.4rem 0.55rem; background: rgba(14, 165, 233, 0.14); border-radius: 6px; color: #0c4a6e"
+              ></p>
+              <p
                 id="meissa-ortho-offset-mapmode-hint"
                 class="meissa-note meissa-ortho-offset-mapmode-hint"
                 hidden
@@ -1522,12 +1529,13 @@
       </div>
     </aside>
 
+    <script src="/frontend/pilexy-session.js?v=1"></script>
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/app.js?v=202604161"></script>
+    <script src="/frontend/app.js?v=202604201"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="/frontend/construction.js?v=2026041715"></script>
+    <script src="/frontend/construction.js?v=202604201"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
-    <script src="/frontend/meissa-compare.js?v=2026041617"></script>
+    <script src="/frontend/meissa-compare.js?v=202604201"></script>
   </body>
 </html>

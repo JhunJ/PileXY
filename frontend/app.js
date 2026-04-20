@@ -207,7 +207,7 @@ function applyGoogleAnalyticsMeasurementId(measurementId, { notify = true } = {}
     gtag("js", new Date());
     gaBootstrapped = true;
   }
-  gtag("config", next);
+  gtag("config", next, { send_page_view: false });
   saveGaMeasurementId(next);
   if (notify) {
     alert(`구글 애널리틱스 설정 완료: ${next}`);
@@ -220,6 +220,18 @@ function initGoogleAnalyticsFromStorage() {
   if (!stored) return;
   applyGoogleAnalyticsMeasurementId(stored, { notify: false });
 }
+
+/** GA4 가상 페이지뷰 — SPA 구간·드로어 전환용 (`construction.js` 등에서 호출) */
+function pilexySendVirtualPageView(pagePath, pageTitle) {
+  if (typeof window.gtag !== "function") return;
+  window.gtag("event", "page_view", {
+    page_path: pagePath,
+    page_title: pageTitle,
+    page_location: window.location.href,
+  });
+}
+
+window.pilexySendVirtualPageView = pilexySendVirtualPageView;
 
 function handleGaSetupTrigger() {
   alert("반가워요! 😊✨");
@@ -1683,6 +1695,7 @@ function openMeissaCompareDrawer() {
   }
   meissaDrawer.classList.add("open");
   meissaDrawer.setAttribute("aria-hidden", "false");
+  pilexySendVirtualPageView("/pilexy/drone-compare", "드론(3D) · PDAM 비교");
   document.dispatchEvent(new CustomEvent("pilexy-meissa-drawer-open"));
 }
 
@@ -1704,6 +1717,7 @@ function init() {
   if (!uploadForm) return;
   restoreSettingsContext();
   initGoogleAnalyticsFromStorage();
+  pilexySendVirtualPageView("/pilexy/main", "파일 마스터 · 메인");
   window.__PILEXY_GET_MEISSA_CONTEXT__ = function pilexyGetMeissaContext() {
     return {
       circles: (state.circles || []).map((c) => ({
@@ -9617,6 +9631,7 @@ function openVersionComparePanel() {
   }
   resetVersionCompareExcelCompareResult();
   populateVersionCompareSelects();
+  pilexySendVirtualPageView("/pilexy/version-compare", "버전 비교");
 }
 
 function closeVersionComparePanel() {
