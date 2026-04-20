@@ -2832,6 +2832,15 @@
         });
       });
     }
+    if (typeof window.pilexySendVirtualPageView === "function") {
+      const vp = {
+        settings: ["/pilexy/construction/settings", "시공 · 설정"],
+        status: ["/pilexy/construction/status", "시공 · 시공현황"],
+        settlement: ["/pilexy/construction/settlement", "시공 · 기성정리"],
+        "foundation-thickness": ["/pilexy/construction/foundation-thickness", "시공 · 기초골조 두께"],
+      }[tab];
+      if (vp) window.pilexySendVirtualPageView(vp[0], vp[1]);
+    }
   }
 
   function openConstructionDrawer(tab, options = {}) {

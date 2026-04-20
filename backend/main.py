@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import threading
 import heapq
 import io
 import json
@@ -16,6 +17,8 @@ import subprocess
 import tempfile
 import uuid
 from collections import defaultdict, deque
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import ezdxf
@@ -106,10 +109,21 @@ from .work_context import (
     update_manual_history,
 )
 
+# 개발 시에만 OpenAPI 문서 노출 (기본: 비활성화)
+_PILEXY_OPENAPI = str(os.environ.get("PILEXY_OPENAPI", "")).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 app = FastAPI(
     title="DXF Circle/Text Service",
     version="0.3.1",
     description="Parses DXF files and exposes filtered circle/text data for the frontend viewer.",
+    docs_url="/docs" if _PILEXY_OPENAPI else None,
+    redoc_url="/redoc" if _PILEXY_OPENAPI else None,
+    openapi_url="/openapi.json" if _PILEXY_OPENAPI else None,
 )
 
 logger = logging.getLogger(__name__)
@@ -460,6 +474,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def pilexy_bind_circle_workspace(request: Request, call_next):
+    """X-PileXY-Session(또는 생략 시 default)별로 DXF/원 메모리 상태를 분리."""
+    sid = _sanitize_pilexy_session_id(request.headers.get(PILEXY_SESSION_HEADER))
+    ws = _get_or_create_circle_workspace(sid)
+    token = _circle_workspace_ctx.set(ws)
+    try:
+        return await call_next(request)
+    finally:
+        _circle_workspace_ctx.reset(token)
+
+
+@app.middleware("http")
 async def add_no_cache_headers(request, call_next):
     response = await call_next(request)
     path = request.url.path
@@ -479,38 +505,75 @@ app.include_router(pile_dataset_router)
 
 FRONTEND_INDEX_PATH = os.path.join(_PROJECT_ROOT, "frontend", "index.html")
 
-last_raw_circles: Optional[List[Dict]] = None
-last_raw_texts: Optional[List[Dict]] = None
-last_raw_polylines: Optional[List[Dict]] = None
-last_result: Optional[CircleResponse] = None
-last_dxf_file_path: Optional[str] = None  # 업로드된 DXF 파일 경로 저장
-building_definitions: List[BuildingDefinition] = []
-current_filters: Optional[FilterSettings] = None
-manual_overrides: Dict[str, str] = {}
-history_manual_overrides: Dict[str, str] = {}
-last_match_corrections: List[Dict[str, Any]] = []
-expected_building_clusters: Optional[int] = None
-clustering_max_distance_from_seed: Optional[float] = None
-clustering_merge_seed_distance: Optional[float] = None
+# ---------- 원/텍스트 처리 세션(요청별 격리; 헤더 없으면 default) ----------
+PILEXY_SESSION_HEADER = "x-pilexy-session"
+SESSION_DEFAULT = "default"
+_SESSION_LOCK = threading.Lock()
+_CIRCLE_WORKSPACES: Dict[str, "CircleWorkspace"] = {}
+_circle_workspace_ctx: ContextVar[Optional["CircleWorkspace"]] = ContextVar(
+    "circle_workspace", default=None
+)
+
+
+@dataclass
+class CircleWorkspace:
+    """DXF 업로드 이후 메모리 상태(사용자·브라우저 세션별)."""
+
+    last_raw_circles: Optional[List[Dict]] = None
+    last_raw_texts: Optional[List[Dict]] = None
+    last_raw_polylines: Optional[List[Dict]] = None
+    last_result: Optional[CircleResponse] = None
+    last_dxf_file_path: Optional[str] = None
+    building_definitions: List[BuildingDefinition] = field(default_factory=list)
+    current_filters: Optional[FilterSettings] = None
+    manual_overrides: Dict[str, str] = field(default_factory=dict)
+    history_manual_overrides: Dict[str, str] = field(default_factory=dict)
+    last_match_corrections: List[Dict[str, Any]] = field(default_factory=list)
+    expected_building_clusters: Optional[int] = None
+    clustering_max_distance_from_seed: Optional[float] = None
+    clustering_merge_seed_distance: Optional[float] = None
+
+
+def _sanitize_pilexy_session_id(raw: Optional[str]) -> str:
+    if not raw or not str(raw).strip():
+        return SESSION_DEFAULT
+    s = re.sub(r"[^\w\-]", "", str(raw).strip())[:64]
+    return s if s else SESSION_DEFAULT
+
+
+def _get_or_create_circle_workspace(session_id: str) -> CircleWorkspace:
+    with _SESSION_LOCK:
+        if session_id not in _CIRCLE_WORKSPACES:
+            _CIRCLE_WORKSPACES[session_id] = CircleWorkspace()
+        return _CIRCLE_WORKSPACES[session_id]
+
+
+def cw() -> CircleWorkspace:
+    """현재 요청의 Circle 작업 공간. 미들웨어 밖에서는 default 버킷."""
+    ws = _circle_workspace_ctx.get()
+    if ws is not None:
+        return ws
+    return _get_or_create_circle_workspace(SESSION_DEFAULT)
 
 
 def set_expected_building_clusters(value: Optional[int]) -> None:
-    global expected_building_clusters
+    ws = cw()
     if value is None:
-        expected_building_clusters = None
+        ws.expected_building_clusters = None
         return
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        expected_building_clusters = None
+        ws.expected_building_clusters = None
         return
-    expected_building_clusters = parsed if parsed > 0 else None
+    ws.expected_building_clusters = parsed if parsed > 0 else None
 
 
 def merged_manual_overrides() -> Dict[str, str]:
     """히스토리 자동 재적용 + 이 세션 수동 매칭(세션이 우선)."""
-    merged = dict(history_manual_overrides)
-    merged.update(manual_overrides)
+    ws = cw()
+    merged = dict(ws.history_manual_overrides)
+    merged.update(ws.manual_overrides)
     return merged
 
 
@@ -523,18 +586,18 @@ def refresh_manual_history_overrides(
     history_reference_work_id: Optional[str] = None,
     clear_session_overrides: bool = False,
 ) -> None:
-    global manual_overrides, history_manual_overrides, last_match_corrections
+    ws = cw()
     if clear_session_overrides:
-        manual_overrides = {}
-    history_manual_overrides = {}
-    last_match_corrections = []
+        ws.manual_overrides = {}
+    ws.history_manual_overrides = {}
+    ws.last_match_corrections = []
     if not reuse:
         return
     if (
-        last_raw_circles is None
-        or last_raw_texts is None
-        or not last_raw_circles
-        or not last_raw_texts
+        ws.last_raw_circles is None
+        or ws.last_raw_texts is None
+        or not ws.last_raw_circles
+        or not ws.last_raw_texts
     ):
         return
     ref_work = str(history_reference_work_id or "").strip() or None
@@ -554,11 +617,11 @@ def refresh_manual_history_overrides(
             else normalize_source_type(source_type)
         )
 
-    history_manual_overrides, last_match_corrections = apply_manual_history(
+    ws.history_manual_overrides, ws.last_match_corrections = apply_manual_history(
         history_project,
         history_source,
-        last_raw_circles,
-        last_raw_texts,
+        ws.last_raw_circles,
+        ws.last_raw_texts,
         reference_work_id=ref_work,
     )
 
@@ -584,8 +647,9 @@ def resolve_filter_values(
     max_match_distance: Optional[float] = None,
     text_reference_point: Optional[str] = None,
 ) -> FilterSettings:
-    if last_result:
-        current = last_result.filter
+    lr = cw().last_result
+    if lr:
+        current = lr.filter
     else:
         current = FilterSettings(
             min_diameter=DEFAULT_MIN_DIAMETER,
@@ -2047,7 +2111,8 @@ def build_response(
     raw_polylines: Optional[List[Dict]],
     filters: FilterSettings,
 ) -> CircleResponse:
-    correction_models = [to_match_correction_model(item) for item in last_match_corrections]
+    _ws = cw()
+    correction_models = [to_match_correction_model(item) for item in _ws.last_match_corrections]
     filtered_circles = filter_circles(
         raw_circles,
         filters.min_diameter,
@@ -2102,9 +2167,9 @@ def build_response(
             cluster_results = cluster_piles(
                 pile_points,
                 cluster_config,
-                expected_building_clusters,
-                max_distance_from_seed=clustering_max_distance_from_seed,
-                merge_seed_distance=clustering_merge_seed_distance,
+                _ws.expected_building_clusters,
+                max_distance_from_seed=_ws.clustering_max_distance_from_seed,
+                merge_seed_distance=_ws.clustering_merge_seed_distance,
             )
         except Exception:
             logger.exception("Failed to cluster pile coordinates.")
@@ -2116,7 +2181,7 @@ def build_response(
     classify_entities(
         filtered_circles,
         filtered_texts,
-        building_definitions,
+        _ws.building_definitions,
         cluster_polylines if cluster_polylines else None,
     )
     extend_same_building_number_duplicates(filtered_circles, errors, duplicate_groups)
@@ -2127,11 +2192,11 @@ def build_response(
         "동 분류 완료: 총 %d개 중 %d개가 영역 할당 (buildings: %d, cluster_polylines: %d)",
         len(filtered_circles),
         assigned_count,
-        len(building_definitions),
+        len(_ws.building_definitions),
         len(cluster_polylines),
     )
     building_summary = compute_building_summary(
-        filtered_circles, filtered_texts, building_definitions
+        filtered_circles, filtered_texts, _ws.building_definitions
     )
     summary = SummaryStats(
         total_circles=len(filtered_circles),
@@ -2148,7 +2213,7 @@ def build_response(
         texts=texts,
         duplicates=duplicate_groups,
         polylines=_ensure_polyline_ids(safe_raw_polylines),
-        buildings=building_definitions,
+        buildings=_ws.building_definitions,
         pile_clusters=cluster_payload,
         cluster_polylines=_ensure_polyline_ids(cluster_polylines),
         errors=errors,
@@ -2159,10 +2224,10 @@ def build_response(
 
 
 def update_cached_result(filters: FilterSettings) -> CircleResponse:
-    global current_filters
-    current_filters = filters
+    ws = cw()
+    ws.current_filters = filters
     # None 체크만 수행 (빈 리스트는 허용)
-    if last_raw_circles is None or last_raw_texts is None:
+    if ws.last_raw_circles is None or ws.last_raw_texts is None:
         # 빈 결과 반환 (404 에러 방지)
         return CircleResponse(
             summary=SummaryStats(total_circles=0, total_texts=0, matched_pairs=0, duplicate_groups=0),
@@ -2173,9 +2238,8 @@ def update_cached_result(filters: FilterSettings) -> CircleResponse:
             filter=filters,
             match_corrections=[],
         )
-    result = build_response(last_raw_circles, last_raw_texts, last_raw_polylines, filters)
-    global last_result
-    last_result = result
+    result = build_response(ws.last_raw_circles, ws.last_raw_texts, ws.last_raw_polylines, filters)
+    ws.last_result = result
     return result
 
 
@@ -2197,31 +2261,31 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
     수동 매칭(추가/해제) 시 사용. 클러스터링·건물 분류는 재사용하고
     매칭·에러·중복만 재계산하여 응답 속도를 높인다.
     """
-    global current_filters, last_result
-    current_filters = filters
-    if last_raw_circles is None or last_raw_texts is None:
+    ws = cw()
+    ws.current_filters = filters
+    if ws.last_raw_circles is None or ws.last_raw_texts is None:
         return _empty_circle_response(filters)
-    if last_result is None:
+    if ws.last_result is None:
         return update_cached_result(filters)
 
     filtered_circles = filter_circles(
-        last_raw_circles,
+        ws.last_raw_circles,
         filters.min_diameter,
         filters.max_diameter,
         filters.min_area,
         filters.max_area,
     )
     filtered_texts = filter_texts(
-        last_raw_texts, filters.text_height_min, filters.text_height_max
+        ws.last_raw_texts, filters.text_height_min, filters.text_height_max
     )
     mo = merged_manual_overrides()
     filtered_circle_ids = {c["id"] for c in filtered_circles}
     filtered_text_ids = {t["id"] for t in filtered_texts}
-    for c in last_raw_circles:
+    for c in ws.last_raw_circles:
         if c["id"] in mo and c["id"] not in filtered_circle_ids:
             filtered_circles.append(c)
             filtered_circle_ids.add(c["id"])
-    for t in last_raw_texts:
+    for t in ws.last_raw_texts:
         if t["id"] in mo.values() and t["id"] not in filtered_text_ids:
             filtered_texts.append(t)
             filtered_text_ids.add(t["id"])
@@ -2249,8 +2313,8 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
     duplicate_groups = build_duplicate_groups(filtered_circles)
 
     # 이전 결과에서 건물명만 복사 (클러스터 재계산 생략)
-    old_circle_by_id = {c.id: c for c in last_result.circles}
-    old_text_by_id = {t.id: t for t in last_result.texts}
+    old_circle_by_id = {c.id: c for c in ws.last_result.circles}
+    old_text_by_id = {t.id: t for t in ws.last_result.texts}
     for c in filtered_circles:
         old = old_circle_by_id.get(c["id"])
         if old and old.building_name is not None and not is_placeholder_building_name(old.building_name):
@@ -2265,7 +2329,7 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
     extend_same_building_number_duplicates(filtered_circles, errors, duplicate_groups)
 
     building_summary = compute_building_summary(
-        filtered_circles, filtered_texts, building_definitions
+        filtered_circles, filtered_texts, ws.building_definitions
     )
     summary = SummaryStats(
         total_circles=len(filtered_circles),
@@ -2280,23 +2344,23 @@ def build_response_light(filters: FilterSettings) -> CircleResponse:
         circles=circles,
         texts=texts,
         duplicates=duplicate_groups,
-        polylines=_ensure_polyline_ids(last_raw_polylines or []),
-        buildings=building_definitions,
-        pile_clusters=last_result.pile_clusters,
-        cluster_polylines=last_result.cluster_polylines,
+        polylines=_ensure_polyline_ids(ws.last_raw_polylines or []),
+        buildings=ws.building_definitions,
+        pile_clusters=ws.last_result.pile_clusters,
+        cluster_polylines=ws.last_result.cluster_polylines,
         errors=errors,
         filter=filters,
         building_summary=building_summary,
-        match_corrections=[to_match_correction_model(item) for item in last_match_corrections],
+        match_corrections=[to_match_correction_model(item) for item in ws.last_match_corrections],
     )
-    last_result = result
+    ws.last_result = result
     return result
 
 
 def apply_building_definitions(definitions: List[BuildingDefinition]) -> CircleResponse:
-    global building_definitions
-    building_definitions = definitions
-    filters = current_filters or FilterSettings(
+    ws = cw()
+    ws.building_definitions = definitions
+    filters = ws.current_filters or FilterSettings(
         min_diameter=DEFAULT_MIN_DIAMETER,
         max_diameter=DEFAULT_MAX_DIAMETER,
         text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -2849,7 +2913,12 @@ def _convert_dwg_to_dxf_via_oda(source_dwg_path: str) -> str:
 async def root():
     if os.path.exists(FRONTEND_INDEX_PATH):
         return FileResponse(FRONTEND_INDEX_PATH)
-    return {"message": "DXF Circle/Text API is running. Open /docs or serve frontend/index.html."}
+    hint = (
+        " OpenAPI 문서는 환경변수 PILEXY_OPENAPI=1 일 때 /docs 에서 제공됩니다."
+        if not _PILEXY_OPENAPI
+        else " Open /docs for API documentation."
+    )
+    return {"message": "DXF Circle/Text API is running. Serve frontend/index.html or use the configured UI." + hint}
 
 
 @app.post("/api/upload-dxf", response_model=CircleResponse)
@@ -2959,12 +3028,12 @@ async def upload_dxf(
                 ) from parse_err
             raise
         logger.info(f"Parsed DXF: {len(circles) if circles else 0} circles, {len(texts) if texts else 0} texts, {len(polylines) if polylines else 0} polylines")
-        global last_raw_circles, last_raw_texts, last_raw_polylines, building_definitions, last_dxf_file_path
+        ws = cw()
         # 빈 리스트도 허용 (None이 아닌 이상)
-        last_raw_circles = circles if circles is not None else []
-        last_raw_texts = texts if texts is not None else []
-        last_raw_polylines = polylines if polylines is not None else []
-        building_definitions = []
+        ws.last_raw_circles = circles if circles is not None else []
+        ws.last_raw_texts = texts if texts is not None else []
+        ws.last_raw_polylines = polylines if polylines is not None else []
+        ws.building_definitions = []
         set_expected_building_clusters(expected_buildings)
         hist_ref = (manual_history_reference_source or "").strip() or None
         hist_work = (manual_history_reference_work_id or "").strip() or None
@@ -2979,16 +3048,17 @@ async def upload_dxf(
 
         # DXF 파일 경로 저장 (텍스트 높이 필터 재적용용)
         # 기존 파일이 있으면 삭제
-        if last_dxf_file_path and os.path.exists(last_dxf_file_path):
+        if ws.last_dxf_file_path and os.path.exists(ws.last_dxf_file_path):
             try:
-                os.remove(last_dxf_file_path)
+                os.remove(ws.last_dxf_file_path)
             except Exception:
                 pass
         # 새 파일을 영구적으로 저장 (재파싱용)
         import uuid as uuid_module
+
         saved_file_path = os.path.join(tempfile.gettempdir(), f"dxf_upload_{uuid_module.uuid4().hex}.dxf")
         shutil.copy2(parse_input_path, saved_file_path)
-        last_dxf_file_path = saved_file_path
+        ws.last_dxf_file_path = saved_file_path
 
         filters = FilterSettings(
             min_diameter=min_diameter,
@@ -3000,7 +3070,7 @@ async def upload_dxf(
             max_match_distance=max_match_distance,
         )
         # 업로드 직후이므로 전역 변수가 설정되었는지 확인
-        if last_raw_circles is None or last_raw_texts is None:
+        if ws.last_raw_circles is None or ws.last_raw_texts is None:
             raise HTTPException(status_code=500, detail="Failed to parse DXF file data.")
         return update_cached_result(filters)
     except HTTPException:
@@ -3104,11 +3174,11 @@ async def upload_dxf_chunk(
             None,
             lambda: parse_dxf_entities(parse_input_path, text_height_min, text_height_max),
         )
-        global last_raw_circles, last_raw_texts, last_raw_polylines, building_definitions, last_dxf_file_path
-        last_raw_circles = circles if circles is not None else []
-        last_raw_texts = texts if texts is not None else []
-        last_raw_polylines = polylines if polylines is not None else []
-        building_definitions = []
+        ws = cw()
+        ws.last_raw_circles = circles if circles is not None else []
+        ws.last_raw_texts = texts if texts is not None else []
+        ws.last_raw_polylines = polylines if polylines is not None else []
+        ws.building_definitions = []
         set_expected_building_clusters(expected_buildings)
         hist_ref = (manual_history_reference_source or "").strip() or None
         hist_work = (manual_history_reference_work_id or "").strip() or None
@@ -3120,14 +3190,14 @@ async def upload_dxf_chunk(
             history_reference_work_id=hist_work,
             clear_session_overrides=True,
         )
-        if last_dxf_file_path and os.path.exists(last_dxf_file_path):
+        if ws.last_dxf_file_path and os.path.exists(ws.last_dxf_file_path):
             try:
-                os.remove(last_dxf_file_path)
+                os.remove(ws.last_dxf_file_path)
             except Exception:
                 pass
         saved_file_path = os.path.join(tempfile.gettempdir(), f"dxf_upload_{uuid.uuid4().hex}.dxf")
         shutil.copy2(parse_input_path, saved_file_path)
-        last_dxf_file_path = saved_file_path
+        ws.last_dxf_file_path = saved_file_path
         filters = FilterSettings(
             min_diameter=min_diameter,
             max_diameter=max_diameter,
@@ -3171,8 +3241,7 @@ async def get_circles(
     max_distance_from_seed: Optional[float] = Query(None),
     merge_seed_distance: Optional[float] = Query(None),
 ) -> CircleResponse:
-    global clustering_max_distance_from_seed, clustering_merge_seed_distance, last_raw_circles, last_raw_texts, last_raw_polylines, last_dxf_file_path
-    
+    ws = cw()
     filters = resolve_filter_values(
         min_diameter, max_diameter, min_area, max_area,
         text_height_min, text_height_max, max_match_distance, text_reference_point
@@ -3180,28 +3249,28 @@ async def get_circles(
     
     # 텍스트 높이 필터가 변경되었는지 확인
     text_height_changed = False
-    if current_filters and (last_dxf_file_path and os.path.exists(last_dxf_file_path)):
+    if ws.current_filters and (ws.last_dxf_file_path and os.path.exists(ws.last_dxf_file_path)):
         # 텍스트 높이 필터가 실제로 변경되었는지 확인
-        if (filters.text_height_min != current_filters.text_height_min or 
-            filters.text_height_max != current_filters.text_height_max):
+        if (filters.text_height_min != ws.current_filters.text_height_min or 
+            filters.text_height_max != ws.current_filters.text_height_max):
             text_height_changed = True
-            logger.info(f"텍스트 높이 필터 변경 감지: {current_filters.text_height_min}-{current_filters.text_height_max} -> {filters.text_height_min}-{filters.text_height_max}")
+            logger.info(f"텍스트 높이 필터 변경 감지: {ws.current_filters.text_height_min}-{ws.current_filters.text_height_max} -> {filters.text_height_min}-{filters.text_height_max}")
     
     # 텍스트 높이 필터가 변경되었으면 DXF 파일을 다시 파싱 (스레드 풀에서 실행해 이벤트 루프 블로킹 방지)
-    if text_height_changed and last_dxf_file_path:
+    if text_height_changed and ws.last_dxf_file_path:
         try:
-            logger.info(f"텍스트 높이 필터 변경으로 인한 DXF 재파싱: {last_dxf_file_path}")
+            logger.info(f"텍스트 높이 필터 변경으로 인한 DXF 재파싱: {ws.last_dxf_file_path}")
             loop = asyncio.get_event_loop()
             circles, texts, polylines = await loop.run_in_executor(
                 None,
                 lambda: parse_dxf_entities(
-                    last_dxf_file_path, filters.text_height_min, filters.text_height_max
+                    ws.last_dxf_file_path, filters.text_height_min, filters.text_height_max
                 ),
             )
-            last_raw_circles = circles if circles is not None else []
-            last_raw_texts = texts if texts is not None else []
-            last_raw_polylines = polylines if polylines is not None else []
-            logger.info(f"재파싱 완료: {len(last_raw_circles)} circles, {len(last_raw_texts)} texts")
+            ws.last_raw_circles = circles if circles is not None else []
+            ws.last_raw_texts = texts if texts is not None else []
+            ws.last_raw_polylines = polylines if polylines is not None else []
+            logger.info(f"재파싱 완료: {len(ws.last_raw_circles)} circles, {len(ws.last_raw_texts)} texts")
         except Exception as exc:
             logger.error(f"DXF 재파싱 실패: {exc}")
             # 재파싱 실패 시 기존 데이터 사용
@@ -3209,27 +3278,25 @@ async def get_circles(
     if expected_buildings is not None:
         set_expected_building_clusters(expected_buildings)
     if max_distance_from_seed is not None:
-        clustering_max_distance_from_seed = max_distance_from_seed
+        ws.clustering_max_distance_from_seed = max_distance_from_seed
     if merge_seed_distance is not None:
-        clustering_merge_seed_distance = merge_seed_distance
+        ws.clustering_merge_seed_distance = merge_seed_distance
     return update_cached_result(filters)
 
 
 @app.post("/api/circles/refresh-manual-history-match", response_model=CircleResponse)
 async def refresh_manual_history_match(payload: ManualHistoryMatchRefreshRequest) -> CircleResponse:
     """히스토리 재적용 여부·참고 구분을 바꾸고 현재 필터로 다시 매칭. DXF가 없으면 본문의 circles/texts로 서버 원시 데이터를 채운다."""
-    global last_raw_circles, last_raw_texts, last_raw_polylines, building_definitions, manual_overrides
-    global history_manual_overrides, current_filters, clustering_max_distance_from_seed
-    global clustering_merge_seed_distance, last_dxf_file_path
+    ws = cw()
 
     if payload.circles and len(payload.circles) > 0:
-        last_raw_circles = [_normalize_circle_for_filter(c) for c in payload.circles]
-        last_raw_texts = [_normalize_text_for_filter(t) for t in (payload.texts or [])]
+        ws.last_raw_circles = [_normalize_circle_for_filter(c) for c in payload.circles]
+        ws.last_raw_texts = [_normalize_text_for_filter(t) for t in (payload.texts or [])]
         if payload.polylines is not None:
-            last_raw_polylines = copy.deepcopy(payload.polylines) if payload.polylines else []
+            ws.last_raw_polylines = copy.deepcopy(payload.polylines) if payload.polylines else []
         if payload.buildings is not None:
-            building_definitions = list(payload.buildings)
-        last_dxf_file_path = None
+            ws.building_definitions = list(payload.buildings)
+        ws.last_dxf_file_path = None
         mo: Dict[str, str] = {}
         if payload.manual_overrides is not None:
             for k, v in payload.manual_overrides.items():
@@ -3244,26 +3311,26 @@ async def refresh_manual_history_match(payload: ManualHistoryMatchRefreshRequest
                 if cid is None or not c.get("manual_match") or not c.get("matched_text_id"):
                     continue
                 mo[str(cid)] = str(c["matched_text_id"])
-            manual_overrides = mo
+            ws.manual_overrides = mo
         else:
-            manual_overrides = {}
+            ws.manual_overrides = {}
             for c in payload.circles:
                 if not isinstance(c, dict):
                     continue
                 cid = c.get("id")
                 if cid is None or not c.get("manual_match") or not c.get("matched_text_id"):
                     continue
-                manual_overrides[str(cid)] = str(c["matched_text_id"])
+                ws.manual_overrides[str(cid)] = str(c["matched_text_id"])
         if payload.filter is not None:
-            current_filters = payload.filter
+            ws.current_filters = payload.filter
         if payload.expected_buildings is not None:
             set_expected_building_clusters(payload.expected_buildings)
         if payload.max_distance_from_seed is not None:
-            clustering_max_distance_from_seed = payload.max_distance_from_seed
+            ws.clustering_max_distance_from_seed = payload.max_distance_from_seed
         if payload.merge_seed_distance is not None:
-            clustering_merge_seed_distance = payload.merge_seed_distance
+            ws.clustering_merge_seed_distance = payload.merge_seed_distance
 
-    if last_raw_circles is None or last_raw_texts is None or not last_raw_circles or not last_raw_texts:
+    if ws.last_raw_circles is None or ws.last_raw_texts is None or not ws.last_raw_circles or not ws.last_raw_texts:
         raise HTTPException(
             status_code=400,
             detail="도면 데이터가 없습니다. 화면에 circle/text가 있어야 하며, 저장 작업 불러오기 후에는 요청에 circles/texts가 포함되어야 합니다.",
@@ -3280,7 +3347,7 @@ async def refresh_manual_history_match(payload: ManualHistoryMatchRefreshRequest
         history_reference_work_id=hist_work_raw,
         clear_session_overrides=False,
     )
-    filters = current_filters or FilterSettings(
+    filters = ws.current_filters or FilterSettings(
         min_diameter=DEFAULT_MIN_DIAMETER,
         max_diameter=DEFAULT_MAX_DIAMETER,
         text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -3345,7 +3412,8 @@ async def recompute_from_circles(payload: RecomputeRequest) -> CircleResponse:
         matched_pairs=matched,
         duplicate_groups=0,
     )
-    filters = current_filters or FilterSettings(
+    ws = cw()
+    filters = ws.current_filters or FilterSettings(
         min_diameter=DEFAULT_MIN_DIAMETER,
         max_diameter=DEFAULT_MAX_DIAMETER,
         text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -3368,7 +3436,7 @@ async def recompute_from_circles(payload: RecomputeRequest) -> CircleResponse:
         errors=[],
         filter=filters,
         building_summary=building_summary,
-        match_corrections=[to_match_correction_model(item) for item in last_match_corrections],
+        match_corrections=[to_match_correction_model(item) for item in ws.last_match_corrections],
     )
 
 
@@ -3787,7 +3855,7 @@ async def apply_filter_to_circles(payload: ApplyFilterRequest) -> CircleResponse
             buildings=list(payload.buildings) if payload.buildings else [],
             manual_overrides_map=payload.manual_overrides,
             response_polylines=[],
-            match_corrections=[to_match_correction_model(item) for item in last_match_corrections],
+            match_corrections=[to_match_correction_model(item) for item in cw().last_match_corrections],
         )
     except Exception as e:
         logger.exception("apply_filter cluster/match pipeline failed: %s", e)
@@ -3798,19 +3866,19 @@ async def apply_filter_to_circles(payload: ApplyFilterRequest) -> CircleResponse
 async def assign_buildings(payload: BuildingApplyRequest) -> CircleResponse:
     # 클라이언트가 circles를 보내면 해당 데이터 기준으로 적용 (다중 사용자 시 전역 상태 오염 방지)
     if payload.circles and len(payload.circles) > 0:
-        global last_raw_circles, last_raw_texts, last_raw_polylines, building_definitions, manual_overrides, history_manual_overrides
-        saved_circles = last_raw_circles
-        saved_texts = last_raw_texts
-        saved_polylines = last_raw_polylines
-        saved_buildings = list(building_definitions)
-        saved_manual_overrides = dict(manual_overrides)
-        saved_history_manual_overrides = dict(history_manual_overrides)
+        ws = cw()
+        saved_circles = ws.last_raw_circles
+        saved_texts = ws.last_raw_texts
+        saved_polylines = ws.last_raw_polylines
+        saved_buildings = list(ws.building_definitions)
+        saved_manual_overrides = dict(ws.manual_overrides)
+        saved_history_manual_overrides = dict(ws.history_manual_overrides)
         try:
             # 불러오기/설정만 적용 시 클라이언트 circles 형식 차이로 500 방지 — apply-filter와 동일하게 정규화
-            last_raw_circles = [_normalize_circle_for_filter(c) for c in payload.circles]
-            last_raw_texts = [_normalize_text_for_filter(t) for t in (payload.texts or [])]
-            last_raw_polylines = copy.deepcopy(payload.polylines) if payload.polylines else []
-            building_definitions = list(payload.buildings)
+            ws.last_raw_circles = [_normalize_circle_for_filter(c) for c in payload.circles]
+            ws.last_raw_texts = [_normalize_text_for_filter(t) for t in (payload.texts or [])]
+            ws.last_raw_polylines = copy.deepcopy(payload.polylines) if payload.polylines else []
+            ws.building_definitions = list(payload.buildings)
             # 수동 매칭: 클라이언트가 보낸 맵으로 서버 전역과 맞춤 (없으면 과거 세션의 stale override가 남아 재매칭이 틀어짐)
             mo: Dict[str, str] = {}
             if payload.manual_overrides is not None:
@@ -3826,8 +3894,8 @@ async def assign_buildings(payload: BuildingApplyRequest) -> CircleResponse:
                     if cid is None or not c.get("manual_match") or not c.get("matched_text_id"):
                         continue
                     mo[str(cid)] = str(c["matched_text_id"])
-                manual_overrides = mo
-                history_manual_overrides = {}
+                ws.manual_overrides = mo
+                ws.history_manual_overrides = {}
             else:
                 for c in payload.circles:
                     if not isinstance(c, dict):
@@ -3835,9 +3903,9 @@ async def assign_buildings(payload: BuildingApplyRequest) -> CircleResponse:
                     cid = c.get("id")
                     if cid is None or not c.get("manual_match") or not c.get("matched_text_id"):
                         continue
-                    manual_overrides[str(cid)] = str(c["matched_text_id"])
-                history_manual_overrides = {}
-            filters = current_filters or FilterSettings(
+                    ws.manual_overrides[str(cid)] = str(c["matched_text_id"])
+                ws.history_manual_overrides = {}
+            filters = ws.current_filters or FilterSettings(
                 min_diameter=DEFAULT_MIN_DIAMETER,
                 max_diameter=DEFAULT_MAX_DIAMETER,
                 text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -3847,12 +3915,12 @@ async def assign_buildings(payload: BuildingApplyRequest) -> CircleResponse:
             )
             return update_cached_result(filters)
         except Exception as e:
-            last_raw_circles = saved_circles
-            last_raw_texts = saved_texts
-            last_raw_polylines = saved_polylines
-            building_definitions = saved_buildings
-            manual_overrides = saved_manual_overrides
-            history_manual_overrides = saved_history_manual_overrides
+            ws.last_raw_circles = saved_circles
+            ws.last_raw_texts = saved_texts
+            ws.last_raw_polylines = saved_polylines
+            ws.building_definitions = saved_buildings
+            ws.manual_overrides = saved_manual_overrides
+            ws.history_manual_overrides = saved_history_manual_overrides
             logger.exception("assign_buildings failed: %s", e)
             raise HTTPException(status_code=500, detail=str(e)) from e
     return apply_building_definitions(payload.buildings)
@@ -3865,9 +3933,10 @@ async def apply_buildings(payload: BuildingApplyRequest) -> CircleResponse:
 
 @app.post("/api/manual-match", response_model=CircleResponse)
 async def create_manual_match(payload: ManualMatchRequest) -> CircleResponse:
-    if not last_raw_circles or not last_raw_texts:
+    ws = cw()
+    if not ws.last_raw_circles or not ws.last_raw_texts:
         # 빈 결과 반환 (404 에러 방지)
-        filters = current_filters or FilterSettings(
+        filters = ws.current_filters or FilterSettings(
             min_diameter=DEFAULT_MIN_DIAMETER,
             max_diameter=DEFAULT_MAX_DIAMETER,
             text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -3884,17 +3953,17 @@ async def create_manual_match(payload: ManualMatchRequest) -> CircleResponse:
             filter=filters,
             match_corrections=[],
         )
-    circle_ids = {circle["id"] for circle in last_raw_circles}
-    text_ids = {text["id"] for text in last_raw_texts}
+    circle_ids = {circle["id"] for circle in ws.last_raw_circles}
+    text_ids = {text["id"] for text in ws.last_raw_texts}
     if payload.circle_id not in circle_ids:
         raise HTTPException(status_code=400, detail="Unknown circle id.")
     if payload.text_id not in text_ids:
         raise HTTPException(status_code=400, detail="Unknown text id.")
-    manual_overrides[payload.circle_id] = payload.text_id
+    ws.manual_overrides[payload.circle_id] = payload.text_id
     filters = (
         payload.filter
         if payload.filter is not None
-        else (current_filters or FilterSettings(
+        else (ws.current_filters or FilterSettings(
             min_diameter=DEFAULT_MIN_DIAMETER,
             max_diameter=DEFAULT_MAX_DIAMETER,
             text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -3921,10 +3990,10 @@ def _update_manual_history_from_saved_payload(data: Dict[str, Any]) -> None:
 
 @app.delete("/api/manual-match/{circle_id}", response_model=CircleResponse)
 async def delete_manual_match(circle_id: str) -> CircleResponse:
-    global history_manual_overrides
-    manual_overrides.pop(circle_id, None)
-    history_manual_overrides.pop(circle_id, None)
-    filters = current_filters or FilterSettings(
+    ws = cw()
+    ws.manual_overrides.pop(circle_id, None)
+    ws.history_manual_overrides.pop(circle_id, None)
+    filters = ws.current_filters or FilterSettings(
         min_diameter=DEFAULT_MIN_DIAMETER,
         max_diameter=DEFAULT_MAX_DIAMETER,
         text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -5262,7 +5331,7 @@ async def export_circles(
     text_reference_point: Optional[str] = Query(None),
     expected_buildings: Optional[int] = Query(None),
 ):
-    global last_result
+    ws = cw()
     filters_override: Optional[FilterSettings] = None
     if any(
         value is not None
@@ -5275,7 +5344,7 @@ async def export_circles(
     if expected_buildings is not None:
         set_expected_building_clusters(expected_buildings)
         if filters_override is None:
-            filters_override = current_filters or FilterSettings(
+            filters_override = ws.current_filters or FilterSettings(
                 min_diameter=DEFAULT_MIN_DIAMETER,
                 max_diameter=DEFAULT_MAX_DIAMETER,
                 text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -5284,10 +5353,11 @@ async def export_circles(
                 text_reference_point="center",
             )
     if filters_override is not None:
-        last_result = update_cached_result(filters_override)
+        update_cached_result(filters_override)
+    lr = ws.last_result
     # 데이터가 없어도 빈 결과로 반환 (404 에러 방지)
-    if not last_result:
-        last_result = CircleResponse(
+    if not lr:
+        lr = CircleResponse(
             summary=SummaryStats(total_circles=0, total_texts=0, matched_pairs=0, duplicate_groups=0),
             circles=[],
             texts=[],
@@ -5303,12 +5373,13 @@ async def export_circles(
             ),
             match_corrections=[],
         )
-    if not last_result.circles:
+        ws.last_result = lr
+    if not lr.circles:
         # 빈 결과로 빈 파일 반환
         rows, error_rows, summary_rows, building_order = [], [], [], []
     else:
         rows, error_rows, summary_rows, building_order = prepare_export_rows(
-            last_result.circles, last_result.texts, last_result.errors, building_definitions
+            lr.circles, lr.texts, lr.errors, ws.building_definitions
         )
     return _build_export_stream(rows, error_rows, summary_rows, building_order, format)
 
