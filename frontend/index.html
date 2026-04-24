@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>파일 마스터</title>
-    <link rel="stylesheet" href="/frontend/styles.css?v=2026041712" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=202604243" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WS5RRTXTKW"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -29,6 +29,18 @@
           <div class="header-action-group">
             <span class="header-action-group-label">시공</span>
             <div class="header-action-group-buttons">
+              <button
+                type="button"
+                id="construction-parcel-review-btn"
+                class="header-construction-btn"
+                disabled
+                title="DXF 업로드 또는 작업 불러오기 후 사용할 수 있습니다."
+              >
+                필지 검토
+              </button>
+              <button type="button" id="construction-manual-btn" class="header-construction-btn header-construction-btn--alt" title="매뉴얼">
+                매뉴얼
+              </button>
               <button type="button" id="construction-foundation-thickness-btn" class="header-construction-btn">기초골조 두께</button>
               <button type="button" id="construction-status-btn" class="header-construction-btn">시공현황</button>
               <button type="button" id="construction-settlement-btn" class="header-construction-btn header-construction-btn--alt">기성정리</button>
@@ -313,6 +325,12 @@
 
     <main class="layout">
       <section class="viewer-section">
+        <details class="viewer-toolbar-details" id="viewer-toolbar-details">
+          <summary class="viewer-toolbar-summary">
+            <span class="viewer-toolbar-summary-title">도면 표시 옵션</span>
+            <span class="viewer-toolbar-summary-meta">레이어 · 가시성 · 윤곽</span>
+          </summary>
+          <div class="viewer-toolbar-panel">
         <div class="viewer-toolbar">
           <div class="viewer-toolbar-group">
             <label>
@@ -363,7 +381,13 @@
             </label>
           </div>
         </div>
+          </div>
+        </details>
         <div class="canvas-wrapper">
+          <div id="parcel-review-canvas-badge" class="parcel-review-canvas-badge hidden" role="status" aria-live="polite">
+            <span class="parcel-review-canvas-badge-kicker">필지 검토 표시 중</span>
+            <span class="parcel-review-canvas-badge-body">이 <strong>도면</strong> 위 · 우측 필지 검토 탭에서 지적도·필지·인접 표시를 끌 수 있음 · 자홍=인접 후보 · 노란=쿼리 · 초록=승자 필지 · 하늘 점선=지적 본번 · 주황=대지 · 붉은색=필지 밖</span>
+          </div>
           <canvas id="circle-canvas"></canvas>
           <div class="canvas-top-left-controls" aria-label="캔버스 검색">
             <button
@@ -416,6 +440,33 @@
             </button>
             <div id="canvas-mode-hint" class="canvas-mode-hint" aria-live="polite"></div>
           </div>
+          <details class="retaining-wall-details" id="retaining-wall-details" aria-label="흙막이 라인과 파일 이격">
+            <summary class="retaining-wall-summary">흙막이 라인(캐드 폴리선)</summary>
+            <div class="retaining-wall-panel-body">
+              <div class="retaining-wall-panel-head">
+                <button type="button" id="retaining-wall-select-btn" class="retaining-wall-btn">선택</button>
+                <button type="button" id="retaining-wall-clear-btn" class="retaining-wall-btn">선택 해제</button>
+                <button type="button" id="retaining-wall-compute-btn" class="retaining-wall-btn">거리 계산</button>
+              </div>
+              <p id="retaining-wall-hint" class="retaining-wall-hint">
+                선택 후 도면에서 폴리라인(열림·닫힘)을 클릭해 여러 개 선택할 수 있습니다. Esc 로 종료. 표 행 클릭 시 해당 좌표로 이동합니다.
+              </p>
+              <div class="retaining-wall-dist-modes" role="group" aria-label="거리 기준">
+                <label class="retaining-wall-dist-label"
+                  ><input type="radio" name="retaining-wall-dist-mode" value="center" checked /> 중심～선분</label
+                >
+                <label class="retaining-wall-dist-label"
+                  ><input type="radio" name="retaining-wall-dist-mode" value="edge" /> 원 외곽～선분 (지름 반영)</label
+                >
+              </div>
+              <label class="retaining-wall-viz-all-label" for="retaining-wall-viz-all">
+                <input type="checkbox" id="retaining-wall-viz-all" />
+                캔버스에 목록 전체 거리선·원 강조
+              </label>
+              <div id="retaining-wall-status" class="retaining-wall-status" aria-live="polite"></div>
+              <div id="retaining-wall-results" class="retaining-wall-results"></div>
+            </div>
+          </details>
           <div id="canvas-tooltip" class="canvas-tooltip hidden"></div>
         </div>
       </section>
@@ -1531,10 +1582,10 @@
 
     <script src="/frontend/pilexy-session.js?v=1"></script>
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/app.js?v=202604201"></script>
+    <script src="/frontend/app.js?v=202604248clean1"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="/frontend/construction.js?v=202604201"></script>
+    <script src="/frontend/construction.js?v=202604248clean1"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/meissa-compare.js?v=202604201"></script>
   </body>

@@ -1,4 +1,12 @@
 
+const BRDS_DEFAULT_SSO_URL = "https://baronet.daewooenc.com/login.do";
+const BRDS_DEFAULT_TARGET_PAGE_URL = "https://aissvp01.daewooenc.com/brds/prugio/";
+
+const BRDS_PRESET_QUESTIONS = {
+  1: "말뚝공사 오시공 시 보강방법과 시공 절차를 알려주세요.",
+  2: "파일 항타기(항타 작업)와의 이격 거리는 얼마나 되어야 하는지, 그리고 오시공의 정의는 무엇인지 설명해 주세요.",
+};
+
 const API_BASE_URL =
   window.__API_BASE_URL__ ||
   (window.location.origin && window.location.origin !== "null" ? window.location.origin : "");
@@ -488,6 +496,25 @@ const state = {
   /** 수동 동 윤곽: 폴리라인 다중 선택 후 최외곽선 생성 — { order, selectedIds: Set<string> } */
   buildingOutlinePickMode: null,
   buildingOutlinePickClick: null,
+  /** 흙막이 참조 폴리라인 다중 선택 — { selectedIds: Set<string> } (열림·닫힘 모두) */
+  retainingWallPickMode: null,
+  retainingWallPickClick: null,
+  /** 흙막이 거리 계산 결과 행 (렌더·표 클릭용) */
+  retainingWallComputedRows: [],
+  retainingWallResultsContext: null,
+  retainingWallStatusPrefix: "",
+  /** 거리 계산 결과 전체에 대해 캔버스 거리선·원 강조 */
+  retainingWallVizAllEnabled: false,
+  /** 필지 검토 오버레이: { siteRing, parcelRing, encroachmentRings } — 좌표는 도면 월드 */
+  parcelReviewViz: null,
+  /** 캔버스 클릭으로 고른 필지: { pnu, isWinner } | null */
+  parcelReviewSelection: null,
+  /** 대지·필지 꼭짓점·쿼리점 호버 시 도면 좌표(선분 위 연속 호버 없음) — 시공 패널 체크박스와 동기 */
+  parcelReviewCoordProbe: true,
+  /** 마우스 근접 시 표시할 점(도면 m) + 툴팁 위치 */
+  parcelReviewCoordHover: null,
+  /** 쿼리점 클릭으로 고정한 좌표 안내(null이면 미고정) */
+  parcelReviewCoordPinned: null,
   /** 동별 클러스터 윤곽 자동생성 — 이름 목록 순서와 동일 */
   autoBuildingOutlineByOrder: [],
   lastUploadedFileName: "",
@@ -635,9 +662,34 @@ function notifyWorkContextChanged() {
 
 function normalizeAreaKind(value) {
   const v = String(value || "").trim().toLowerCase();
-  if (v === AREA_KIND_PARKING) return AREA_KIND_PARKING;
-  if (v === AREA_KIND_TOWER_CRANE || v === "tower" || v === "tower-crane") return AREA_KIND_TOWER_CRANE;
+  if (
+    v === AREA_KIND_PARKING ||
+    v === "basement" ||
+    v === "underground_parking" ||
+    v === "underground-parking" ||
+    v === "undergroundparking" ||
+    v === "parking_lot" ||
+    v === "parkinglot"
+  ) {
+    return AREA_KIND_PARKING;
+  }
+  if (v === AREA_KIND_TOWER_CRANE || v === "tower" || v === "tower-crane" || v === "tower_crane") {
+    return AREA_KIND_TOWER_CRANE;
+  }
   return AREA_KIND_BUILDING;
+}
+
+/** kind 필드가 building 으로만 남아 있어도 이름이 Bn·Tn 이면 지하/타워로 취급 (구버전·외부 JSON 호환). */
+function resolveBuildingOutlineKind(building) {
+  let k = normalizeAreaKind(building?.kind);
+  if (k !== AREA_KIND_BUILDING) return k;
+  const raw = String(building?.name || "").trim();
+  if (!raw) return k;
+  const compact = raw.replace(/[\s_\-()/]+/g, "");
+  if (/^b\d+$/i.test(compact)) return AREA_KIND_PARKING;
+  if (/^t\d+$/i.test(compact)) return AREA_KIND_TOWER_CRANE;
+  if (/(지하주차장|지하주차)/.test(raw) || /^지하\s*\d+\s*층/.test(raw)) return AREA_KIND_PARKING;
+  return k;
 }
 
 function isSlotAreaKind(kind) {
@@ -1034,7 +1086,7 @@ function normalizeAreaDefinitions(buildings = []) {
     [AREA_KIND_TOWER_CRANE]: 0,
   };
   return (Array.isArray(buildings) ? buildings : []).map((building) => {
-    const kind = normalizeAreaKind(building?.kind);
+    const kind = resolveBuildingOutlineKind(building);
     const order = counters[kind];
     counters[kind] += 1;
     const slot = Number.isFinite(Number(building?.slot)) ? Math.round(Number(building.slot)) : undefined;
@@ -1077,7 +1129,7 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
   return (Array.isArray(buildings) ? buildings : [])
     .filter((building) => Array.isArray(building?.vertices) && building.vertices.length >= 3)
     .map((building) => {
-      const kind = normalizeAreaKind(building?.kind);
+      const kind = resolveBuildingOutlineKind(building);
       const order = counters[kind];
       counters[kind] += 1;
       const slot = Number(building?.slot);
@@ -1107,7 +1159,7 @@ function getAreasByKind(kind, buildings = state.buildings) {
   const targetKind = normalizeAreaKind(kind);
   const result = [];
   (Array.isArray(buildings) ? buildings : []).forEach((building, actualIndex) => {
-    if (normalizeAreaKind(building?.kind) !== targetKind) return;
+    if (resolveBuildingOutlineKind(building) !== targetKind) return;
     result.push({ actualIndex, order: result.length, building });
   });
   return result;
@@ -1214,7 +1266,19 @@ function getSourceTypeLabel(value) {
 function getSourceTypeBadgeHtml(value, extraClass = "") {
   const normalized = normalizeSourceType(value);
   const className = ["source-type-badge", extraClass].filter(Boolean).join(" ");
-  return `<span class="${className}" data-source-type="${normalized}">${escapeHtml(getSourceTypeLabel(normalized))}</span>`;
+  const fullLabel = getSourceTypeLabel(normalized);
+  let label = fullLabel;
+  if (
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(max-width: 767px)").matches
+  ) {
+    if (normalized === "contractor_original") label = "시";
+    else if (normalized === "vendor_prepared") label = "업";
+  }
+  const titleAttr = ` title="${escapeHtml(fullLabel)}"`;
+  const ariaAttr = ` aria-label="${escapeHtml(fullLabel)}"`;
+  return `<span class="${className}" data-source-type="${normalized}"${titleAttr}${ariaAttr}>${escapeHtml(label)}</span>`;
 }
 
 function setProjectContext(projectName, sourceType) {
@@ -2019,6 +2083,77 @@ function bindEvents() {
       cancelBuildingOutlinePolylinePick();
     }
   });
+  document.addEventListener("keydown", (e) => {
+    if (!state.retainingWallPickMode) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelRetainingWallPickMode();
+      setUploadStatus("흙막이 라인 선택을 종료했습니다.");
+      updateCanvasModeHint();
+      requestRedraw();
+    }
+  });
+
+  const rwSelectBtn = document.getElementById("retaining-wall-select-btn");
+  const rwClearBtn = document.getElementById("retaining-wall-clear-btn");
+  const rwComputeBtn = document.getElementById("retaining-wall-compute-btn");
+  if (rwSelectBtn) rwSelectBtn.addEventListener("click", () => beginRetainingWallLinePick());
+  if (rwClearBtn) {
+    rwClearBtn.addEventListener("click", () => {
+      if (state.retainingWallPickMode?.selectedIds) {
+        state.retainingWallPickMode.selectedIds.clear();
+        setUploadStatus("흙막이 라인 선택을 모두 해제했습니다.");
+        updateCanvasModeHint();
+        requestRedraw();
+      }
+      const rwRes = document.getElementById("retaining-wall-results");
+      const rwSt = document.getElementById("retaining-wall-status");
+      if (rwRes) rwRes.innerHTML = "";
+      if (rwSt) rwSt.textContent = "";
+      state.retainingWallComputedRows = [];
+      state.retainingWallResultsContext = null;
+      state.retainingWallStatusPrefix = "";
+      clearRetainingWallViz();
+      requestRedraw();
+    });
+  }
+  if (rwComputeBtn) rwComputeBtn.addEventListener("click", () => computeRetainingWallDistancesForPiles());
+  const rwResultsEl = document.getElementById("retaining-wall-results");
+  if (rwResultsEl && !rwResultsEl.dataset.rwUiBound) {
+    rwResultsEl.dataset.rwUiBound = "1";
+    rwResultsEl.addEventListener("click", handleRetainingWallResultsClick);
+  }
+  const rwPanelBody = document.querySelector(".retaining-wall-panel-body");
+  if (rwPanelBody && !rwPanelBody.dataset.rwModeBound) {
+    rwPanelBody.dataset.rwModeBound = "1";
+    rwPanelBody.addEventListener("change", (e) => {
+      if (e.target?.name === "retaining-wall-dist-mode" && state.retainingWallComputedRows?.length) {
+        renderRetainingWallResultsTable();
+        requestRedraw();
+      }
+      if (e.target?.id === "retaining-wall-viz-all") {
+        state.retainingWallVizAllEnabled = !!e.target.checked;
+        requestRedraw();
+      }
+    });
+  }
+
+  const brdsPresetBtns = document.querySelectorAll("button[data-brds-preset]");
+  brdsPresetBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.getAttribute("data-brds-preset");
+      const ta = document.getElementById("header-brds-extra-question");
+      const text = BRDS_PRESET_QUESTIONS[key];
+      if (ta && text) {
+        const cur = (ta.value || "").trim();
+        ta.value = cur ? `${cur}\n\n${text}` : text;
+      }
+    });
+  });
+  const brdsSubmitBtn = document.getElementById("header-brds-submit-btn");
+  if (brdsSubmitBtn) {
+    brdsSubmitBtn.addEventListener("click", () => void submitBrdsPrugioQuestion());
+  }
 
   if (saveProjectBtn) {
     saveProjectBtn.addEventListener("click", handleSaveProject);
@@ -2301,12 +2436,486 @@ function bindEvents() {
   updateHeaderWorkContextLabel();
 }
 
+function appendBrdsManualContent(block) {
+  const el = document.getElementById("header-brds-manual-content");
+  if (!el || block == null) return;
+  const piece = String(block).trim();
+  if (!piece) return;
+  const cur = (el.value || "").trim();
+  el.value = cur ? `${cur}\n\n---\n\n${piece}` : piece;
+}
+
+function getBrdsManualEmbedIframe() {
+  return document.getElementById("construction-brds-manual-iframe");
+}
+
+function setBrdsManualEmbedSrcFromPath(iframePath) {
+  const el = getBrdsManualEmbedIframe();
+  if (!el || !iframePath) return false;
+  const raw = String(API_BASE_URL || "").trim();
+  const base = (raw ? raw.replace(/\/$/, "") : window.location.origin.replace(/\/$/, ""));
+  const p = String(iframePath).startsWith("/") ? String(iframePath) : `/${iframePath}`;
+  el.src = `${base}${p}`;
+  return true;
+}
+
+function navigateBrdsManualEmbedTo(absUrl) {
+  const el = getBrdsManualEmbedIframe();
+  if (!el || !absUrl) return;
+  try {
+    const u = new URL(absUrl);
+    u.searchParams.set("_pilexy_ts", String(Date.now()));
+    el.src = u.toString();
+  } catch {
+    const s = String(absUrl);
+    const sep = s.includes("?") ? "&" : "?";
+    el.src = `${s}${sep}_pilexy_ts=${Date.now()}`;
+  }
+}
+
+/** 시공 매뉴얼 iframe 수동 이동: "sso" = 바로넷, 그 외 = 푸르지오 매뉴얼 */
+function navigateBrdsManualEmbed(kind) {
+  if (kind === "sso") {
+    navigateBrdsManualEmbedTo(BRDS_DEFAULT_SSO_URL);
+    return;
+  }
+  navigateBrdsManualEmbedTo(BRDS_DEFAULT_TARGET_PAGE_URL);
+}
+
+/** 최상위 창에서 BRDS 열기 — iframe 보다 로그인·세션 유지에 유리 */
+function openBrdsUrlInNewWindow(kind) {
+  const url = kind === "sso" ? BRDS_DEFAULT_SSO_URL : BRDS_DEFAULT_TARGET_PAGE_URL;
+  try {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    /* noop */
+  }
+}
+
+function setBrdsLoginFeedback(message, state) {
+  const el = document.getElementById("header-brds-login-feedback");
+  if (!el) return;
+  el.textContent = message ?? "";
+  if (state === "ok") {
+    el.dataset.state = "ok";
+  } else if (state === "err") {
+    el.dataset.state = "err";
+  } else {
+    el.removeAttribute("data-state");
+  }
+}
+
+function parseBrdsHttpDetail(data, fallback) {
+  const d = data?.detail ?? data?.message ?? fallback;
+  let msg = "요청 실패";
+  if (typeof d === "string") msg = d;
+  else if (d && typeof d === "object" && !Array.isArray(d) && typeof d.message === "string") msg = d.message;
+  else if (Array.isArray(d)) msg = d.map((x) => (x && typeof x === "object" && x.msg ? x.msg : String(x))).join("; ");
+  else if (d != null) msg = String(d);
+  return msg;
+}
+
+function renderBrdsManualDebugTrace(payload) {
+  const pre = document.getElementById("header-brds-debug-trace");
+  if (!pre) return;
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload?.debugTrace || (payload?.detail && typeof payload.detail === "object" ? payload.detail.debugTrace : null);
+  if (!Array.isArray(rows) || !rows.length) {
+    pre.textContent = "(단계 로그 없음 — 위 체크박스로 수집 켜기)";
+    return;
+  }
+  pre.textContent = rows
+    .map((r, i) => {
+      const loc = r.location ?? "";
+      const hid = r.hypothesisId ?? "";
+      const msg = r.message ?? "";
+      const ts = r.timestamp != null ? new Date(Number(r.timestamp)).toISOString() : "";
+      const dataStr = r.data && Object.keys(r.data).length ? JSON.stringify(r.data) : "";
+      return `${i + 1}. [${ts}] ${loc}${hid ? " ·" + hid : ""} — ${msg}${dataStr ? "\n   " + dataStr : ""}`;
+    })
+    .join("\n\n");
+}
+
+async function postBrdsPrugioManualApi({ userId, password, loginOnly }) {
+  const debugSteps = document.getElementById("header-brds-debug-steps")?.checked !== false;
+  const res = await fetch(`${API_BASE_URL}/api/brds/prugio-manual`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId,
+      password,
+      ssoEntryUrl: BRDS_DEFAULT_SSO_URL,
+      targetPageUrl: BRDS_DEFAULT_TARGET_PAGE_URL,
+      loginOnly: !!loginOnly,
+      debugSteps,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = parseBrdsHttpDetail(data, res.statusText);
+    const err = new Error(msg);
+    const det = data?.detail;
+    if (det && typeof det === "object" && Array.isArray(det.debugTrace)) {
+      err.debugTrace = det.debugTrace;
+    }
+    renderBrdsManualDebugTrace(data);
+    throw err;
+  }
+  renderBrdsManualDebugTrace(data);
+  return data;
+}
+
+/** 서버가 파싱한 SSO 폼을 iframe 이름으로 제출(로그인 쿠키를 iframe 컨텍스트에 남기기 위함) */
+function submitBrdsSsoFormIntoIframe(payload) {
+  if (!payload?.ok || !payload.action || !payload.fields || typeof payload.fields !== "object") return false;
+  const iframeName = "pilexy-brds-manual-embed";
+  const form = document.createElement("form");
+  const method = String(payload.method || "POST").toUpperCase();
+  form.method = method === "GET" ? "GET" : "POST";
+  form.action = String(payload.action);
+  form.target = iframeName;
+  form.enctype = "application/x-www-form-urlencoded";
+  form.setAttribute("accept-charset", "UTF-8");
+  form.style.cssText =
+    "position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;height:0;width:0;overflow:hidden";
+  for (const [k, v] of Object.entries(payload.fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = k;
+    input.value = String(v ?? "");
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  try {
+    form.submit();
+  } finally {
+    setTimeout(() => {
+      try {
+        form.remove();
+      } catch {
+        /* noop */
+      }
+    }, 4000);
+  }
+  return true;
+}
+
+async function postBrdsSurfSessionApi({ userId, password }) {
+  const res = await fetch(`${API_BASE_URL}/api/brds/surf-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      userId,
+      password,
+      ssoEntryUrl: BRDS_DEFAULT_SSO_URL,
+      targetPageUrl: BRDS_DEFAULT_TARGET_PAGE_URL,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = parseBrdsHttpDetail(data, res.statusText);
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function postBrdsSsoIframeAutopostApi({ userId, password }) {
+  const debugSteps = document.getElementById("header-brds-debug-steps")?.checked !== false;
+  const res = await fetch(`${API_BASE_URL}/api/brds/sso-iframe-autopost`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId,
+      password,
+      ssoEntryUrl: BRDS_DEFAULT_SSO_URL,
+      debugSteps,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = parseBrdsHttpDetail(data, res.statusText);
+    const err = new Error(msg);
+    const det = data?.detail;
+    if (det && typeof det === "object" && Array.isArray(det.debugTrace)) {
+      err.debugTrace = det.debugTrace;
+    }
+    renderBrdsManualDebugTrace(data);
+    throw err;
+  }
+  renderBrdsManualDebugTrace(data);
+  return data;
+}
+
+async function postBrdsPrugioAskApi({ userId, password, question }) {
+  const res = await fetch(`${API_BASE_URL}/api/brds/prugio-ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId,
+      password,
+      question,
+      ssoEntryUrl: BRDS_DEFAULT_SSO_URL,
+      targetPageUrl: BRDS_DEFAULT_TARGET_PAGE_URL,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = data?.detail || data?.message || res.statusText;
+    throw new Error(typeof d === "string" ? d : "요청 실패");
+  }
+  return data;
+}
+
+async function fetchBrdsManualLogin(triggerBtn) {
+  const userId = document.getElementById("header-brds-user-id")?.value?.trim() ?? "";
+  const password = document.getElementById("header-brds-password")?.value ?? "";
+  if (!userId || !password) {
+    setBrdsLoginFeedback("아이디와 비밀번호를 입력하세요.", "err");
+    return;
+  }
+  setBrdsLoginFeedback("로그인 확인 중…");
+  const orig = triggerBtn?.textContent;
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "처리 중…";
+  }
+  try {
+    const data = await postBrdsPrugioManualApi({ userId, password, loginOnly: true });
+    const okLine =
+      data.message || (data.loggedIn ? "로그인에 성공했습니다." : "서버에서 로그인 응답을 받았습니다.");
+
+    let iframeNote = "";
+    try {
+      const surf = await postBrdsSurfSessionApi({ userId, password });
+      if (surf?.ok && surf.iframePath && setBrdsManualEmbedSrcFromPath(surf.iframePath)) {
+        iframeNote = " 아래 iframe 은 서버 역프록시로 BRDS 를 열었습니다(세션은 서버에 보관).";
+      } else {
+        throw new Error("surf");
+      }
+    } catch (surfErr) {
+      console.warn(surfErr);
+      try {
+        const auto = await postBrdsSsoIframeAutopostApi({ userId, password });
+        if (auto?.ok && auto.action && auto.fields && submitBrdsSsoFormIntoIframe(auto)) {
+          iframeNote = " 아래 iframe 에 바로넷 로그인 폼을 제출했습니다.";
+        } else {
+          navigateBrdsManualEmbed("sso");
+          iframeNote = auto?.message
+            ? ` iframe 은 바로넷 로그인 화면으로 열었습니다. (${auto.message})`
+            : " iframe 은 바로넷 로그인 화면으로 열었습니다.";
+        }
+      } catch (inner) {
+        console.warn(inner);
+        navigateBrdsManualEmbed("sso");
+        iframeNote = " iframe 은 바로넷 로그인 화면으로 열었습니다. (역프록시·자동 폼 실패)";
+      }
+    }
+
+    setBrdsLoginFeedback(`${okLine}${iframeNote}`, "ok");
+    setUploadStatus("로그인 확인됨");
+  } catch (e) {
+    console.error(e);
+    const msg = parseErrorMessage(e);
+    setBrdsLoginFeedback(msg, "err");
+    setUploadStatus(msg, true);
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = orig || "로그인";
+    }
+  }
+}
+
+async function fetchBrdsPrugioManual(triggerBtn) {
+  const userId = document.getElementById("header-brds-user-id")?.value?.trim() ?? "";
+  const password = document.getElementById("header-brds-password")?.value ?? "";
+  const statusEl = document.getElementById("header-brds-status");
+  const manualEl = document.getElementById("header-brds-manual-content");
+  if (!userId || !password) {
+    if (statusEl) statusEl.textContent = "매뉴얼을 가져오려면 아이디와 비밀번호를 입력하세요.";
+    return;
+  }
+  if (statusEl) statusEl.textContent = "로그인 후 매뉴얼 본문을 가져오는 중…";
+  const orig = triggerBtn?.textContent;
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "불러오는 중…";
+  }
+  try {
+    const data = await postBrdsPrugioManualApi({ userId, password, loginOnly: false });
+    if (manualEl && data.content != null) manualEl.value = String(data.content);
+    if (statusEl) {
+      let msg =
+        data.source === "relay"
+          ? "릴레이로 매뉴얼 본문을 받았습니다."
+          : "서버 세션으로 로그인한 뒤 페이지 본문을 텍스트로 변환했습니다.";
+      if (data.fetchedUrl) msg += ` URL: ${data.fetchedUrl}`;
+      statusEl.textContent = msg;
+    }
+    setUploadStatus("매뉴얼 본문을 불러왔습니다.");
+  } catch (e) {
+    console.error(e);
+    const msg = parseErrorMessage(e);
+    if (statusEl) statusEl.textContent = msg;
+    setUploadStatus(msg, true);
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = orig || "매뉴얼 불러오기";
+    }
+  }
+}
+
+/** 매뉴얼 본문 + 기본 질문 ①②를 순서대로 요청합니다. */
+async function runBrdsManualAutoPipeline(triggerBtn) {
+  const userId = document.getElementById("header-brds-user-id")?.value?.trim() ?? "";
+  const password = document.getElementById("header-brds-password")?.value ?? "";
+  const statusEl = document.getElementById("header-brds-status");
+  const manualEl = document.getElementById("header-brds-manual-content");
+  const extraTa = document.getElementById("header-brds-extra-question");
+  if (!userId || !password) {
+    if (statusEl) statusEl.textContent = "아이디와 비밀번호를 입력하세요.";
+    return;
+  }
+  const orig = triggerBtn?.textContent;
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "진행 중…";
+  }
+  const bodyParts = [];
+  try {
+    if (statusEl) statusEl.textContent = "매뉴얼 본문을 가져오는 중…";
+    const manualData = await postBrdsPrugioManualApi({ userId, password, loginOnly: false });
+    if (manualData.content != null && String(manualData.content).trim()) {
+      bodyParts.push(`【매뉴얼 본문】\n${String(manualData.content).trim()}`);
+    }
+
+    const presetKeys = ["1", "2"];
+    for (let i = 0; i < presetKeys.length; i += 1) {
+      const key = presetKeys[i];
+      const qtext = BRDS_PRESET_QUESTIONS[key];
+      if (!qtext) continue;
+      if (statusEl) statusEl.textContent = `기본 질문 ${i + 1}/${presetKeys.length} 전송 중…`;
+      if (extraTa) extraTa.value = qtext;
+      const askData = await postBrdsPrugioAskApi({ userId, password, question: qtext });
+      let answerPart = "";
+      if (askData.ok && askData.answer != null && String(askData.answer).length) {
+        answerPart = String(askData.answer);
+      } else if (askData.ok && askData.answer != null && !String(askData.answer).length && askData.raw) {
+        answerPart =
+          typeof askData.raw === "string" ? askData.raw : JSON.stringify(askData.raw, null, 2);
+      } else {
+        answerPart = askData.message || "(자동 답변 없음)";
+      }
+      bodyParts.push(`【질문 ${key}】\n${qtext}\n\n【답변】\n${answerPart}`);
+    }
+    if (manualEl) manualEl.value = bodyParts.join("\n\n---\n\n");
+    if (statusEl) {
+      statusEl.textContent = "매뉴얼과 기본 질문 처리를 마쳤습니다.";
+    }
+    setUploadStatus("매뉴얼·질문 자동 실행 완료");
+  } catch (e) {
+    console.error(e);
+    const msg = parseErrorMessage(e);
+    if (statusEl) statusEl.textContent = msg;
+    setUploadStatus(msg, true);
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = orig || "한 번에 가져오기";
+    }
+  }
+}
+
+window.pilexyFetchBrdsPrugioManual = fetchBrdsPrugioManual;
+window.pilexyFetchBrdsManualLogin = fetchBrdsManualLogin;
+window.pilexyRunBrdsManualAutoPipeline = runBrdsManualAutoPipeline;
+window.pilexyNavigateBrdsManualEmbed = navigateBrdsManualEmbed;
+window.pilexyOpenBrdsUrlInNewWindow = openBrdsUrlInNewWindow;
+
+async function submitBrdsPrugioQuestion() {
+  const userId = document.getElementById("header-brds-user-id")?.value?.trim() ?? "";
+  const password = document.getElementById("header-brds-password")?.value ?? "";
+  const extra = document.getElementById("header-brds-extra-question")?.value?.trim() ?? "";
+  const statusEl = document.getElementById("header-brds-status");
+  const manualEl = document.getElementById("header-brds-manual-content");
+  if (!extra) {
+    if (statusEl) statusEl.textContent = "질문 내용을 입력하거나 프리셋 버튼으로 채우세요.";
+    return;
+  }
+  if (!userId || !password) {
+    if (statusEl) statusEl.textContent = "아이디와 비밀번호를 입력하세요.";
+    return;
+  }
+  if (statusEl) statusEl.textContent = "요청 중…";
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/brds/prugio-ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        password,
+        question: extra,
+        ssoEntryUrl: BRDS_DEFAULT_SSO_URL,
+        targetPageUrl: BRDS_DEFAULT_TARGET_PAGE_URL,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const d = data?.detail || data?.message || res.statusText;
+      throw new Error(typeof d === "string" ? d : "요청 실패");
+    }
+    if (data.ok && data.answer != null && String(data.answer).length) {
+      appendBrdsManualContent(`【질문】\n${extra}\n\n【답변】\n${String(data.answer)}`);
+      if (statusEl) statusEl.textContent = data.relay ? "릴레이에서 답변을 받았습니다." : "답변을 받았습니다.";
+      return;
+    }
+    if (data.ok && data.answer != null && !String(data.answer).length && data.raw) {
+      const rawBlock =
+        typeof data.raw === "string" ? data.raw : JSON.stringify(data.raw, null, 2);
+      appendBrdsManualContent(`【질문】\n${extra}\n\n【응답】\n${rawBlock}`);
+      if (statusEl) statusEl.textContent = "릴레이 응답을 그대로 붙였습니다.";
+      return;
+    }
+    const msg =
+      data.message || "자동 답변 없음: 사내 릴레이가 없거나 응답에 답변 필드가 없습니다. 서버 설정을 확인하세요.";
+    if (statusEl) statusEl.textContent = msg;
+    if (manualEl && !manualEl.value.trim() && data.ssologin_url) {
+      manualEl.placeholder = `웹에 로그인한 뒤 내용을 복사해 여기에 붙여넣으세요.\n${data.ssologin_url}`;
+    }
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.textContent = parseErrorMessage(e);
+  }
+}
+
+function syncViewerToolbarDetailsOpen() {
+  const el = document.getElementById("viewer-toolbar-details");
+  if (!el) return;
+  const wide = window.matchMedia("(min-width: 768px)").matches;
+  if (wide) {
+    el.open = true;
+  }
+}
+
 function handleResize() {
   const parent = canvas.parentElement;
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+  const vw = window.innerWidth || document.documentElement.clientWidth || 800;
   const parentRect = parent ? parent.getBoundingClientRect() : null;
-  const width = Math.max(520, parentRect ? parentRect.width : window.innerWidth * 0.65);
-  const height = Math.max(540, viewportHeight - 220);
+  const rawW =
+    parentRect && parentRect.width > 0 ? parentRect.width : vw * 0.65;
+  const minW = vw <= 640 ? 80 : 520;
+  const width = Math.max(minW, Math.floor(Math.min(rawW, vw - 16)));
+  const minH = vw <= 640 ? 200 : 540;
+  let height;
+  if (parentRect && parentRect.height > 100) {
+    height = Math.max(minH, Math.floor(parentRect.height));
+  } else {
+    height = Math.max(minH, viewportHeight - 220);
+  }
   canvasDisplayWidth = width;
   canvasDisplayHeight = height;
   const ratio = window.devicePixelRatio || 1;
@@ -2317,6 +2926,7 @@ function handleResize() {
   canvas.style.height = `${height}px`;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   canvasRect = canvas.getBoundingClientRect();
+  syncViewerToolbarDetailsOpen();
   requestRedraw();
 }
 
@@ -3135,9 +3745,14 @@ function handlePayload(payload) {
     (pf.exclude_identical_geometry_duplicates === undefined &&
       pf.excludeIdenticalGeometryDuplicates === undefined)
   ) {
-    state.filter.excludeIdenticalGeometryDuplicates = !!prevExcludeIdenticalGeom;
+    // 백엔드 filter에 해당 필드가 없을 때만 세션 값 유지. prev가 없으면 !!undefined → false로
+    // normalizeFilter 기본(true)을 덮어써 체크 UI와 불일치·동일 기하 중복 제외 실패가 난다.
+    if (prevExcludeIdenticalGeom !== undefined) {
+      state.filter.excludeIdenticalGeometryDuplicates = !!prevExcludeIdenticalGeom;
+    }
   }
   state.hasDataset = true;
+  if (typeof window.pilexySetParcelReviewViz === "function") window.pilexySetParcelReviewViz(null);
   state.activeBuildingFilter = "ALL";
   state.highlightedCircleIds.clear();
   resetManualSelection();
@@ -3196,6 +3811,7 @@ function handlePayload(payload) {
   updateFilterInputs(state.filter);
   updateCanvasSearchAvailability();
   syncMeissaCompareBtnEnabled();
+  if (typeof window.pilexyUpdateConstructionButtonsState === "function") window.pilexyUpdateConstructionButtonsState();
   updateCircleTable();
   updateDuplicatesTable();
   updateErrorsTable();
@@ -3355,7 +3971,7 @@ function updateCircleTable() {
       });
       row.addEventListener("mouseleave", () => {
         hoveredCircleId = null;
-        hideTooltip();
+        drawTooltip();
         requestRedraw();
       });
       row.addEventListener("click", () => {
@@ -4388,7 +5004,9 @@ function clusterCirclesByCoLocatedGeometryPolicy(circles) {
 
 /** 겹침 중복 Union-Find에 넣을 쌍인지(옵션과 일관되게) */
 function shouldUnionGeometricDuplicatePair(a, b) {
-  if (state.filter?.excludeIdenticalGeometryDuplicates && sameFileCircleGeometryLoose(a, b)) {
+  // 「동일 좌표·크기 원은 중복 제외」: 이 목록은 엄격 동일 기하(이중 엔티티)만 묶는다.
+  // 느슨 판정이 실패하고 엄격만 맞는 경우까지 union 되면 캔버스·요약에 '중복'이 남는다.
+  if (state.filter?.excludeIdenticalGeometryDuplicates) {
     return false;
   }
   return sameFileCircleGeometry(a, b);
@@ -5954,18 +6572,28 @@ function toggleBuildingEditMode() {
   requestRedraw();
 }
 
+function canvasHintUsesTouchUi() {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return (
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 767px)").matches
+  );
+}
+
+function pilexyMobileCompactUi() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(max-width: 767px)").matches
+  );
+}
+
 /**
  * 캔버스 우측 편집모드/화면이동 안내 문구 갱신
  */
 function updateCanvasModeHint() {
   if (!canvasModeHint) return;
-  const construction = state?.construction || null;
-  const foundationWindowMode = Boolean(
-    construction
-    && construction.isOpen
-    && construction.activeTab === "foundation-thickness"
-    && construction.foundationWindowSelect,
-  );
+  const touchUi = canvasHintUsesTouchUi();
   if (state.areaRectCreate) {
     const { order, startWorld, kind: rectKind } = state.areaRectCreate;
     const rk = normalizeAreaKind(rectKind);
@@ -5974,6 +6602,11 @@ function updateCanvasModeHint() {
     canvasModeHint.textContent = startWorld
       ? `${name} 네모 생성: 우하단 점을 클릭하세요`
       : `${name} 네모 생성: 좌상단 점을 클릭하세요`;
+    return;
+  }
+  if (state.retainingWallPickMode) {
+    const n = state.retainingWallPickMode.selectedIds?.size ?? 0;
+    canvasModeHint.textContent = `흙막이 라인: 폴리라인(열림·닫힘) 클릭으로 선택·해제 (${n}개). Esc 로 종료 후 「거리 계산」을 누르세요.`;
     return;
   }
   if (state.buildingOutlinePickMode) {
@@ -5985,9 +6618,11 @@ function updateCanvasModeHint() {
     return;
   }
   if (state.buildingEditMode) {
-    canvasModeHint.textContent = "편집모드 작동중\n\n화면 이동: 휠 가운데 버튼\n(휠 가운데 버튼으로 이동)";
+    canvasModeHint.textContent = touchUi
+      ? ""
+      : "편집모드 작동중\n\n화면 이동: 휠 가운데 버튼\n(휠 가운데 버튼으로 이동)";
   } else {
-    canvasModeHint.textContent = "화면 이동: 좌측 마우스 클릭·드래그";
+    canvasModeHint.textContent = touchUi ? "" : "화면 이동: 좌측 마우스 클릭·드래그";
   }
 }
 
@@ -6112,7 +6747,441 @@ function pickBuildingOutlinePolylineIdAtCanvas(canvasX, canvasY) {
   return bestId;
 }
 
+/** 텍스트 높이·원 직경으로 m 도면 vs mm 도면 추정(기초 탭 P/F 로직과 유사) */
+function getDrawingLikelyMeters() {
+  const texts = state.texts || [];
+  const hs = texts.map((t) => Number(t.height)).filter((h) => Number.isFinite(h) && h > 0);
+  if (hs.length) {
+    hs.sort((a, b) => a - b);
+    const med = hs[Math.floor(hs.length / 2)];
+    if (med < 45) return true;
+    if (med >= 200) return false;
+  }
+  const circ = state.circles || [];
+  const ds = circ.map((c) => Number(c.diameter)).filter((x) => Number.isFinite(x) && x > 0);
+  if (ds.length) {
+    ds.sort((a, b) => a - b);
+    const med = ds[Math.floor(ds.length / 2)];
+    if (med < 2.5) return true;
+    if (med > 80) return false;
+  }
+  return true;
+}
+
+/** 도면 1 단위를 실제 m로 환산(추정 단위 기준) */
+function worldDistanceToPhysicalMeters(worldDist) {
+  if (!Number.isFinite(worldDist)) return NaN;
+  return getDrawingLikelyMeters() ? worldDist : worldDist * 0.001;
+}
+
+function physicalMeterThresholds() {
+  const m = getDrawingLikelyMeters();
+  return { world1: m ? 1 : 1000, world2: m ? 2 : 2000, unitLabel: m ? "m(도면)" : "mm(도면)" };
+}
+
+/** 흙막이 거리·선택용: raw 우선, 없으면 cluster. 열림·닫힘(또는 좌표상 닫힌 형태) 모두 포함. */
+function getRetainingWallPolylineRows() {
+  const raw = Array.isArray(state.rawPolylines) && state.rawPolylines.length ? state.rawPolylines : [];
+  const cluster = Array.isArray(state.clusterPolylines) ? state.clusterPolylines : [];
+  const source = raw.length ? raw : cluster;
+  const fromCluster = !raw.length;
+  return source
+    .map((polyline, index) => {
+      const points = (Array.isArray(polyline?.points) ? polyline.points : [])
+        .filter((pt) => Number.isFinite(Number(pt?.x)) && Number.isFinite(Number(pt?.y)))
+        .map((pt) => ({ x: Number(pt.x), y: Number(pt.y) }));
+      if (points.length < 2) return null;
+      const id = String(
+        polyline?.id ??
+          polyline?.cluster_id ??
+          (fromCluster ? `cluster-open-${index}` : `polyline-${index}`),
+      );
+      const explicitClosed = polyline?.closed !== false;
+      const closed = explicitClosed || isPolylineClosedRough(points);
+      return { id, points, closed };
+    })
+    .filter(Boolean);
+}
+
+function pickRetainingWallPolylineIdAtCanvas(canvasX, canvasY) {
+  const world = canvasToWorld(canvasX, canvasY);
+  const tol = Math.max(6 / view.scale, 0.05);
+  let bestId = null;
+  let bestD = Infinity;
+  getRetainingWallPolylineRows().forEach((row) => {
+    if (row.points.length < 2) return;
+    for (let i = 0; i < row.points.length - 1; i += 1) {
+      const d = pointToSegmentDistance(world, row.points[i], row.points[i + 1]);
+      if (d < bestD && d <= tol) {
+        bestD = d;
+        bestId = row.id;
+      }
+    }
+    if (row.closed && row.points.length >= 3) {
+      const a = row.points[row.points.length - 1];
+      const b = row.points[0];
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 1e-6) {
+        const d = pointToSegmentDistance(world, a, b);
+        if (d < bestD && d <= tol) {
+          bestD = d;
+          bestId = row.id;
+        }
+      }
+    }
+  });
+  return bestId;
+}
+
+function cancelRetainingWallPickMode() {
+  state.retainingWallPickMode = null;
+  state.retainingWallPickClick = null;
+}
+
+function beginRetainingWallLinePick() {
+  if (state.buildingOutlinePickMode) {
+    setUploadStatus("동 윤곽 폴리라인 선택을 먼저 완료하거나 Esc로 취소하세요.", true);
+    return;
+  }
+  if (!state.hasDataset) {
+    setUploadStatus("DXF 데이터가 필요합니다.", true);
+    return;
+  }
+  if (!getRetainingWallPolylineRows().length) {
+    setUploadStatus("선택할 폴리라인(LWPOLYLINE 등)이 없습니다.", true);
+    return;
+  }
+  state.retainingWallPickMode = { selectedIds: new Set() };
+  state.retainingWallPickClick = null;
+  updateCanvasModeHint();
+  setUploadStatus("흙막이 기준 폴리라인(열림·닫힘)을 클릭해 선택합니다. 여러 개 선택 가능. Esc 로 종료.");
+  requestRedraw();
+}
+
+function getRetainingWallDistanceMode() {
+  const el = document.querySelector('input[name="retaining-wall-dist-mode"]:checked');
+  return el?.value === "edge" ? "edge" : "center";
+}
+
+function clearRetainingWallViz() {
+  state.retainingWallVizAllEnabled = false;
+  const vizAll = document.getElementById("retaining-wall-viz-all");
+  if (vizAll) vizAll.checked = false;
+}
+
+function isRetainingWallVizHighlightCircle(circleId) {
+  if (!state.retainingWallVizAllEnabled) return false;
+  return (state.retainingWallComputedRows || []).some((r) => r.circleId === circleId);
+}
+
+function focusRetainingWallResultRow(row) {
+  if (!row || !Number.isFinite(row.x) || !Number.isFinite(row.y)) return;
+  const r = Number(row.radiusWorld) || 0;
+  const qx = row.qx;
+  const qy = row.qy;
+  if (!Number.isFinite(qx) || !Number.isFinite(qy)) return;
+  const wdist = Number(row.worldDist);
+  const pad = Math.max(r * 1.8, Number.isFinite(wdist) ? wdist * 3.5 : 0, 1.5);
+  const dq = Math.hypot(row.x - qx, row.y - qy);
+  const half = Math.max(dq / 2 + r + pad, r * 3.5, 2.5);
+  const cx = (row.x + qx) / 2;
+  const cy = (row.y + qy) / 2;
+  fitViewToBounds({
+    minX: cx - half,
+    maxX: cx + half,
+    minY: cy - half,
+    maxY: cy + half,
+  });
+  requestRedraw();
+}
+
+function handleRetainingWallResultsClick(e) {
+  const tr = e.target.closest("tr.retaining-wall-data-row");
+  if (!tr) return;
+  const idx = Number(tr.dataset.rwIndex);
+  const row = state.retainingWallComputedRows?.[idx];
+  if (!row) return;
+  focusRetainingWallResultRow(row);
+}
+
+function renderRetainingWallResultsTable() {
+  const resultsEl = document.getElementById("retaining-wall-results");
+  const statusEl = document.getElementById("retaining-wall-status");
+  const rows = state.retainingWallComputedRows || [];
+  const ctxInfo = state.retainingWallResultsContext;
+  const unitLabel = ctxInfo?.unitLabel ?? "m(도면)";
+  const mode = getRetainingWallDistanceMode();
+  const physKey = mode === "edge" ? "physEdgeM" : "physM";
+  const sorted = [...rows].sort((a, b) => a[physKey] - b[physKey]);
+  const within1 = sorted.filter((r) => r[physKey] <= 1 + 1e-9);
+  const within2only = sorted.filter((r) => r[physKey] > 1 + 1e-9 && r[physKey] <= 2 + 1e-9);
+  const modeNote =
+    mode === "edge"
+      ? "1m/2m 구간·정렬: 원 외곽(중심 거리 − 반지름) 기준. 중심·외곽 열은 모두 표시됩니다."
+      : "1m/2m 구간·정렬: 파일 중심～선분 최단거리 기준.";
+  const fmt = (r) => {
+    const i = r.rowIndex;
+    return `<tr class="retaining-wall-data-row" data-rw-index="${i}" title="행 클릭: 캔버스를 이 파일 근처로 이동">
+      <td>${escapeHtml(String(r.label))}</td>
+      <td>${r.x.toFixed(3)}</td>
+      <td>${r.y.toFixed(3)}</td>
+      <td>${r.physM.toFixed(3)}</td>
+      <td>${r.physEdgeM.toFixed(3)}</td>
+      <td>${escapeHtml(String(r.polyId))}</td>
+      <td>${r.segIndex}</td>
+    </tr>`;
+  };
+  if (resultsEl) {
+    resultsEl.innerHTML = `
+      <p class="retaining-wall-unit-note">중심 거리: 중심에서 폴리 세그먼트까지 최단거리. 외곽 거리: max(0, 중심거리−반지름)을 실측 ${unitLabel}로 환산 · ${modeNote}</p>
+      <h4 class="retaining-wall-subh">1m 이내 (${within1.length}건)</h4>
+      <table class="retaining-wall-table">
+        <thead><tr><th>파일/라벨</th><th>X</th><th>Y</th><th>중심(m)</th><th>외곽(m)</th><th>폴리 ID</th><th>세그</th></tr></thead>
+        <tbody>${
+          within1.length ? within1.map(fmt).join("") : '<tr><td colspan="7" class="empty-row">없음</td></tr>'
+        }</tbody>
+      </table>
+      <h4 class="retaining-wall-subh">1m 초과 ~ 2m 이내 (${within2only.length}건)</h4>
+      <table class="retaining-wall-table">
+        <thead><tr><th>파일/라벨</th><th>X</th><th>Y</th><th>중심(m)</th><th>외곽(m)</th><th>폴리 ID</th><th>세그</th></tr></thead>
+        <tbody>${
+          within2only.length ? within2only.map(fmt).join("") : '<tr><td colspan="7" class="empty-row">없음</td></tr>'
+        }</tbody>
+      </table>
+    `;
+  }
+  if (statusEl) {
+    const prefix = state.retainingWallStatusPrefix || "";
+    statusEl.textContent = `${prefix}${prefix ? " · " : ""}1m 이내 ${within1.length}건 · 1~2m ${within2only.length}건`;
+  }
+}
+
+/** 흙막이 거리 시각화: 측정선 위 m 단위 라벨(배경 포함) */
+function drawRetainingWallDistanceLabel(canvasX, canvasY, physM, physEdgeM, p0, p1) {
+  const line1 = `중심 ${Number(physM).toFixed(3)} m`;
+  const line2 = `외곽 ${Number(physEdgeM).toFixed(3)} m`;
+  const lines = [line1, line2];
+  const pad = 4;
+  const lineHeight = 13;
+  const font = "11px 'Malgun Gothic','Segoe UI',sans-serif";
+  ctx.save();
+  ctx.font = font;
+  let maxW = 0;
+  lines.forEach((ln) => {
+    maxW = Math.max(maxW, ctx.measureText(ln).width);
+  });
+  const w = maxW + pad * 2;
+  const h = lines.length * lineHeight + pad * 2;
+  let ox = 0;
+  let oy = 0;
+  const dx = p1.x - p0.x;
+  const dy = p1.y - p0.y;
+  const nlen = Math.hypot(dx, dy);
+  if (nlen > 1e-3) {
+    const nx = (-dy / nlen) * 16;
+    const ny = (dx / nlen) * 16;
+    ox = nx;
+    oy = ny;
+  }
+  const cx = canvasX + ox;
+  const cy = canvasY + oy;
+  const x0 = cx - w / 2;
+  const y0 = cy - h / 2;
+  ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+  ctx.strokeStyle = "rgba(45, 212, 191, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x0, y0, w, h, 5);
+  } else {
+    ctx.rect(x0, y0, w, h);
+  }
+  ctx.fill();
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  lines.forEach((ln, i) => {
+    ctx.fillStyle = i === 0 ? "#f8fafc" : "rgba(226, 232, 240, 0.92)";
+    ctx.fillText(ln, cx, y0 + pad + lineHeight * (i + 0.5));
+  });
+  ctx.restore();
+}
+
+function drawRetainingWallVizLinks() {
+  if (!state.retainingWallVizAllEnabled) return;
+  const rows = state.retainingWallComputedRows || [];
+  if (!rows.length) return;
+  const mode = getRetainingWallDistanceMode();
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  rows.forEach((row) => {
+    if (!row || !Number.isFinite(row.qx)) return;
+    const px = row.x;
+    const py = row.y;
+    const qx = row.qx;
+    const qy = row.qy;
+    const r = Number(row.radiusWorld) || 0;
+    const dx = qx - px;
+    const dy = qy - py;
+    const len = Math.hypot(dx, dy);
+    let x0 = px;
+    let y0 = py;
+    if (mode === "edge" && len > 1e-9 && r > 1e-9) {
+      x0 = px + (dx / len) * r;
+      y0 = py + (dy / len) * r;
+    }
+    const p0 = worldToCanvas(x0, y0);
+    const p1 = worldToCanvas(qx, qy);
+    if (Number.isFinite(row.ax) && Number.isFinite(row.ay) && Number.isFinite(row.bx) && Number.isFinite(row.by)) {
+      const sa = worldToCanvas(row.ax, row.ay);
+      const sb = worldToCanvas(row.bx, row.by);
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.88)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = "rgba(45, 212, 191, 0.95)";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(45, 212, 191, 0.98)";
+    ctx.beginPath();
+    ctx.arc(p0.x, p0.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(p1.x, p1.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    const mcx = (p0.x + p1.x) / 2;
+    const mcy = (p0.y + p1.y) / 2;
+    drawRetainingWallDistanceLabel(mcx, mcy, row.physM, row.physEdgeM, p0, p1);
+  });
+  ctx.restore();
+}
+
+function computeRetainingWallDistancesForPiles() {
+  const statusEl = document.getElementById("retaining-wall-status");
+  const resultsEl = document.getElementById("retaining-wall-results");
+  clearRetainingWallViz();
+  const rows = getRetainingWallPolylineRows();
+  if (!rows.length) {
+    state.retainingWallComputedRows = [];
+    state.retainingWallResultsContext = null;
+    state.retainingWallStatusPrefix = "";
+    if (statusEl) statusEl.textContent = "폴리라인이 없습니다.";
+    if (resultsEl) resultsEl.innerHTML = "";
+    return;
+  }
+  const mode = state.retainingWallPickMode;
+  const selected = mode?.selectedIds instanceof Set ? mode.selectedIds : null;
+  let useRows = rows;
+  let prefix = "";
+  if (selected && selected.size) {
+    const filtered = rows.filter((r) => selected.has(r.id));
+    if (filtered.length) {
+      useRows = filtered;
+      prefix = `선택 ${selected.size}개 중 ${filtered.length}개 라인을 사용합니다.`;
+    } else {
+      prefix = "선택과 일치하는 폴리선이 없어 전체 폴리선을 사용합니다.";
+    }
+  } else {
+    prefix = "선택 없음: 모든 폴리선을 기준으로 계산합니다.";
+  }
+  state.retainingWallStatusPrefix = prefix;
+  const segments = [];
+  useRows.forEach((row) => {
+    const n = row.points.length;
+    for (let i = 0; i < n - 1; i += 1) {
+      const a = row.points[i];
+      const b = row.points[i + 1];
+      segments.push({ polyId: row.id, segIndex: i, ax: a.x, ay: a.y, bx: b.x, by: b.y });
+    }
+    if (row.closed && n >= 3) {
+      const a = row.points[n - 1];
+      const b = row.points[0];
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 1e-6) {
+        segments.push({ polyId: row.id, segIndex: n - 1, ax: a.x, ay: a.y, bx: b.x, by: b.y });
+      }
+    }
+  });
+  if (!segments.length) {
+    state.retainingWallComputedRows = [];
+    state.retainingWallResultsContext = null;
+    if (statusEl) statusEl.textContent = `${prefix} · 선분이 없습니다.`;
+    if (resultsEl) resultsEl.innerHTML = "";
+    return;
+  }
+  const { world1, world2, unitLabel } = physicalMeterThresholds();
+  state.retainingWallResultsContext = { unitLabel, world1, world2 };
+  const circles = getVisibleCircles();
+  const out = [];
+  circles.forEach((c) => {
+    const px = Number(c.center_x);
+    const py = Number(c.center_y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+    const radiusWorld = Number(c.radius ?? (Number(c.diameter) / 2)) || 0;
+    let bestW = Infinity;
+    let bestSeg = null;
+    segments.forEach((seg) => {
+      const d = pointToSegmentDistance(
+        { x: px, y: py },
+        { x: seg.ax, y: seg.ay },
+        { x: seg.bx, y: seg.by },
+      );
+      if (d < bestW) {
+        bestW = d;
+        bestSeg = seg;
+      }
+    });
+    if (!bestSeg || !Number.isFinite(bestW)) return;
+    const physM = worldDistanceToPhysicalMeters(bestW);
+    if (!Number.isFinite(physM) || physM > worldDistanceToPhysicalMeters(world2) + 1e-9) return;
+    const q = closestPointOnSegment(
+      { x: px, y: py },
+      { x: bestSeg.ax, y: bestSeg.ay },
+      { x: bestSeg.bx, y: bestSeg.by },
+    );
+    const worldEdgeDist = Math.max(0, bestW - radiusWorld);
+    const physEdgeM = worldDistanceToPhysicalMeters(worldEdgeDist);
+    const label =
+      (c.matched_text && String(c.matched_text.text)) || String(c.id || "").slice(0, 12);
+    out.push({
+      circleId: c.id,
+      label,
+      x: px,
+      y: py,
+      radiusWorld,
+      worldDist: bestW,
+      physM,
+      physEdgeM,
+      polyId: bestSeg.polyId,
+      segIndex: bestSeg.segIndex,
+      ax: bestSeg.ax,
+      ay: bestSeg.ay,
+      bx: bestSeg.bx,
+      by: bestSeg.by,
+      qx: q.x,
+      qy: q.y,
+    });
+  });
+  out.forEach((row, i) => {
+    row.rowIndex = i;
+  });
+  state.retainingWallComputedRows = out;
+  renderRetainingWallResultsTable();
+  requestRedraw();
+}
+
 function beginBuildingOutlinePolylinePick(order) {
+  if (state.retainingWallPickMode) {
+    setUploadStatus("흙막이 라인 선택을 먼저 Esc로 종료하세요.", true);
+    return;
+  }
   if (!state.hasDataset) {
     setUploadStatus("DXF 데이터가 필요합니다.", true);
     return;
@@ -6657,20 +7726,30 @@ function fitViewToBounds(bounds) {
   const spanY = bounds.maxY - bounds.minY || 1;
   const scaleX = innerWidth / spanX;
   const scaleY = innerHeight / spanY;
-  view.scale = Math.min(scaleX, scaleY);
+  let nextScale = Math.min(scaleX, scaleY);
+  if (!Number.isFinite(nextScale) || nextScale <= 0) nextScale = VIEW_SCALE_MIN;
+  view.scale = Math.max(VIEW_SCALE_MIN, Math.min(VIEW_SCALE_MAX, nextScale));
   view.offsetX = (bounds.minX + bounds.maxX) / 2;
   view.offsetY = (bounds.minY + bounds.maxY) / 2;
 }
 
-/** 동 윤곽선(해치) 영역 클릭 시 해당 동 인덱스 반환. 캔버스 좌표 사용. */
+/** 동·지하·타워 윤곽(표시 옵션·종류 일치) 영역 클릭 시 buildings 인덱스 반환. 캔버스 좌표 사용. */
 function hitTestBuildingFill(canvasX, canvasY) {
   const world = canvasToWorld(canvasX, canvasY);
   const kindPriority = [AREA_KIND_BUILDING, AREA_KIND_PARKING, AREA_KIND_TOWER_CRANE];
   for (const kind of kindPriority) {
     for (let i = state.buildings.length - 1; i >= 0; i--) {
       const building = state.buildings[i];
-      if (!building || normalizeAreaKind(building?.kind) !== kind) continue;
+      if (!building || resolveBuildingOutlineKind(building) !== kind) continue;
       if (!Array.isArray(building.vertices) || building.vertices.length < 3) continue;
+      const bKind = resolveBuildingOutlineKind(building);
+      const hatchOn =
+        bKind === AREA_KIND_BUILDING
+          ? state.showBuildingHatch
+          : bKind === AREA_KIND_PARKING
+            ? state.showParkingHatch
+            : state.showTowerCraneHatch;
+      if (!hatchOn && !state.buildingEditMode) continue;
       if (pointInPolygon(world, building.vertices)) return i;
     }
   }
@@ -6928,32 +8007,958 @@ function drawCanvas() {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0f172a";
   ctx.fillRect(0, 0, width, height);
-  if (!state.hasDataset || !state.circles.length) {
+  const parcelOverlay =
+    state.parcelReviewViz != null || pilexyParcelReviewVizHasGeometry(state.parcelReviewViz);
+  if ((!state.hasDataset || !state.circles.length) && !parcelOverlay) {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "16px 'Segoe UI'";
     ctx.textAlign = "center";
     ctx.fillText("Upload a DXF to visualize", width / 2, height / 2);
     return;
   }
-  drawPolylineHints();
-  drawBuildings();
-  drawAreaCreationPreview();
-  const circles = getVisibleCircles();
-  const duplicateCircleIds = getDuplicateCircleIds();
-  if (state.showCircles) {
-    circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+  if (state.hasDataset && state.circles.length) {
+    drawPolylineHints();
+    drawBuildings();
+    drawAreaCreationPreview();
+    const circles = getVisibleCircles();
+    const duplicateCircleIds = getDuplicateCircleIds();
+    if (state.showCircles) {
+      circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+    }
+    if (state.showPoints) {
+      circles.forEach((circle) => drawCirclePoint(circle));
+    }
+    drawDuplicateLabels(circles, duplicateCircleIds);
+    if (state.showTextLabels) {
+      drawTextLabels();
+    }
+    if (state.showMatchLines) {
+      drawCircleToNumberMatchLines(circles);
+    }
+    drawRetainingWallVizLinks();
   }
-  if (state.showPoints) {
-    circles.forEach((circle) => drawCirclePoint(circle));
-  }
-  drawDuplicateLabels(circles, duplicateCircleIds);
-  if (state.showTextLabels) {
-    drawTextLabels();
-  }
-  if (state.showMatchLines) {
-    drawCircleToNumberMatchLines(circles);
-  }
+  drawParcelReviewViz();
   drawTooltip();
+}
+
+function pilexyParcelReviewVizHasGeometry(payload) {
+  if (!payload) return false;
+  const showCad = payload.showCadastralMap !== false;
+  const showLot = payload.showParcelLot !== false;
+  const nPts = (ring) => pilexyNormalizeParcelRingPoints(ring).length;
+  const hasLine = (ring) => nPts(ring) >= 2;
+  const hasPoly = (ring) => nPts(ring) >= 3;
+  const nearbyOk =
+    showLot &&
+    payload.showNearbyParcels !== false &&
+    (payload.nearbyParcelRings || []).some((n) => n && hasPoly(n.ring));
+  const bonbunOk =
+    showCad &&
+    Array.isArray(payload.cadastralBonbunRings) &&
+    (payload.cadastralBonbunRings || []).some((r) => hasLine(r));
+  const parcelOk = showLot && hasPoly(payload.parcelRing);
+  const base =
+    parcelOk ||
+    hasLine(payload.siteRing) ||
+    (payload.encroachmentRings || []).some(hasPoly) ||
+    nearbyOk ||
+    bonbunOk;
+  if (base) return true;
+  const sel = state.parcelReviewSelection;
+  if (showLot && sel && String(sel.pnu || "").trim()) {
+    const r = ringForParcelReviewSelection(payload, sel);
+    return Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2;
+  }
+  if (
+    payload.queryPoint
+    && Number.isFinite(Number(payload.queryPoint.x))
+    && Number.isFinite(Number(payload.queryPoint.y))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function pilexySetParcelReviewCanvasBadge(visible) {
+  const badge = document.getElementById("parcel-review-canvas-badge");
+  if (!badge) return;
+  badge.classList.toggle("hidden", !visible);
+}
+
+function pilexySetParcelReviewViz(payload) {
+  if (!payload) {
+    state.parcelReviewViz = null;
+    state.parcelReviewSelection = null;
+    state.parcelReviewCoordHover = null;
+    state.parcelReviewCoordPinned = null;
+    pilexySetParcelReviewCanvasBadge(false);
+    requestRedraw();
+    return;
+  }
+  state.parcelReviewSelection = null;
+  state.parcelReviewCoordHover = null;
+  state.parcelReviewCoordPinned = null;
+  state.parcelReviewViz = {
+    siteRing: pilexyParcelVizRingFromPayload(payload.siteRing, 2),
+    parcelRing: pilexyParcelVizRingFromPayload(payload.parcelRing, 3),
+    encroachmentRings: (Array.isArray(payload.encroachmentRings) ? payload.encroachmentRings : [])
+      .map((r) => pilexyParcelVizRingFromPayload(r, 3))
+      .filter((r) => r.length >= 3),
+    nearbyParcelRings: (Array.isArray(payload.nearbyParcelRings) ? payload.nearbyParcelRings : [])
+      .filter((n) => n)
+      .map((n) => ({ ...n, ring: pilexyParcelVizRingFromPayload(n.ring, 3) }))
+      .filter((n) => n.ring.length >= 3),
+    cadastralBonbunRings: (Array.isArray(payload.cadastralBonbunRings) ? payload.cadastralBonbunRings : [])
+      .map((r) => pilexyParcelVizRingFromPayload(r, 2))
+      .filter((r) => r.length >= 2),
+    winnerPnu: payload.winnerPnu != null ? String(payload.winnerPnu) : "",
+    showCadastralMap: payload.showCadastralMap !== false,
+    showParcelLot: payload.showParcelLot !== false,
+    showNearbyParcels: payload.showNearbyParcels !== false,
+    debugShowNearbyRingVertices: payload.debugShowNearbyRingVertices === true,
+    queryPoint:
+      payload.queryPoint &&
+      Number.isFinite(Number(payload.queryPoint.x)) &&
+      Number.isFinite(Number(payload.queryPoint.y))
+        ? { x: Number(payload.queryPoint.x), y: Number(payload.queryPoint.y) }
+        : null,
+  };
+  pilexySetParcelReviewCanvasBadge(pilexyParcelReviewVizHasGeometry(payload));
+  requestRedraw();
+}
+
+window.pilexySetParcelReviewViz = pilexySetParcelReviewViz;
+
+/**
+ * GeoJSON Polygon 등에서 링이 [[x,y],...] 형태로 한 겹 이상 더 감싸져 온 경우를 펼침.
+ * (한 요소만 있고 그 안이 꼭짓점 배열이면 그 안을 사용)
+ */
+function pilexyUnwrapParcelRingPointList(ring) {
+  if (!Array.isArray(ring) || ring.length === 0) return ring;
+  let r = ring;
+  for (let guard = 0; guard < 6; guard += 1) {
+    if (r.length !== 1 || !Array.isArray(r[0])) break;
+    const inner = r[0];
+    if (!Array.isArray(inner) || inner.length < 2) break;
+    const first = inner[0];
+    const arrPair =
+      Array.isArray(first) &&
+      first.length >= 2 &&
+      Number.isFinite(Number(first[0])) &&
+      Number.isFinite(Number(first[1]));
+    const objPt =
+      first &&
+      typeof first === "object" &&
+      !Array.isArray(first) &&
+      Number.isFinite(Number(first.x)) &&
+      Number.isFinite(Number(first.y));
+    if (!arrPair && !objPt) break;
+    r = inner;
+  }
+  return r;
+}
+
+/** 필지 링을 {x,y}[] 로 통일(배열 점·닫힘 중복 제거). 그리기·줌·히트 공통 */
+function pilexyNormalizeParcelRingPoints(ring) {
+  if (!Array.isArray(ring)) return [];
+  const r0 = pilexyUnwrapParcelRingPointList(ring);
+  const out = [];
+  for (let i = 0; i < r0.length; i += 1) {
+    const p = r0[i];
+    let x;
+    let y;
+    if (Array.isArray(p) && p.length >= 2) {
+      x = Number(p[0]);
+      y = Number(p[1]);
+    } else if (p && typeof p === "object") {
+      x = Number(p.x);
+      y = Number(p.y);
+    } else {
+      continue;
+    }
+    if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+  }
+  if (out.length >= 2) {
+    const a = out[0];
+    const b = out[out.length - 1];
+    if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-5) out.pop();
+  }
+  return out;
+}
+
+/** 오버레이 state에 넣을 링: 정규화 후 최소 꼭짓점 수 충족 시에만 반환 */
+function pilexyParcelVizRingFromPayload(ring, minPts) {
+  const pts = pilexyNormalizeParcelRingPoints(ring);
+  return pts.length >= minPts ? pts : [];
+}
+
+window.pilexyNormalizeParcelRingPoints = pilexyNormalizeParcelRingPoints;
+
+function worldVertsForParcelHit(ring) {
+  return pilexyNormalizeParcelRingPoints(ring);
+}
+
+function minCanvasDistanceToClosedRing(canvasX, canvasY, ring) {
+  const pts = pilexyNormalizeParcelRingPoints(ring);
+  if (pts.length < 2) return Infinity;
+  const n = pts.length;
+  const dupClose =
+    n >= 2 &&
+    Math.hypot(pts[0].x - pts[n - 1].x, pts[0].y - pts[n - 1].y) <
+      1e-4 * Math.max(1, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y));
+  const edgeCount = dupClose ? n - 1 : n;
+  const pt = { x: canvasX, y: canvasY };
+  let minD = Infinity;
+  for (let i = 0; i < edgeCount; i += 1) {
+    const j = (i + 1) % n;
+    const a = worldToCanvas(pts[i].x, pts[i].y);
+    const b = worldToCanvas(pts[j].x, pts[j].y);
+    const d = pointToSegmentDistance(pt, a, b);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
+/** 캔버스 좌표에서 필지 링(승자 링 우선, 그다음 인접 역순) 픽 */
+function pickParcelReviewRingAtCanvas(canvasX, canvasY) {
+  const viz = state.parcelReviewViz;
+  if (!viz) return null;
+  const wPt = canvasToWorld(canvasX, canvasY);
+  const tol = Math.max(12, 4 * (Number(view.scale) > 0 ? view.scale : 1));
+
+  if (viz.showParcelLot !== false && Array.isArray(viz.parcelRing) && viz.parcelRing.length >= 3) {
+    const verts = worldVertsForParcelHit(viz.parcelRing);
+    if (verts.length >= 3) {
+      const inside = pointInPolygon(wPt, verts);
+      const edge = minCanvasDistanceToClosedRing(canvasX, canvasY, viz.parcelRing);
+      if (inside || edge <= tol) {
+        return { pnu: String(viz.winnerPnu || ""), isWinner: true };
+      }
+    }
+  }
+
+  if (viz.showParcelLot === false || viz.showNearbyParcels === false) return null;
+  const list = [...(viz.nearbyParcelRings || [])].reverse();
+  for (let i = 0; i < list.length; i += 1) {
+    const it = list[i];
+    if (!it || it.isWinner === true) continue;
+    const r = it.ring;
+    if (!Array.isArray(r) || r.length < 3) continue;
+    const verts = worldVertsForParcelHit(r);
+    if (verts.length < 3) continue;
+    const inside = pointInPolygon(wPt, verts);
+    const edge = minCanvasDistanceToClosedRing(canvasX, canvasY, r);
+    if (inside || edge <= tol) {
+      return { pnu: String(it.pnu || ""), isWinner: false };
+    }
+  }
+  return null;
+}
+
+/* 쿼리점·꼭짓점만(선을 따라 연속 호버 없음) — 캔버스 px 허용 */
+const PARCEL_COORD_QUERY_PX = 18;
+const PARCEL_COORD_VERTEX_PX = 16;
+const PARCEL_COORD_VERTEX_SELECTED_PX = 22;
+
+function canvasLogicalToClient(canvasX, canvasY) {
+  const rect = canvas.getBoundingClientRect();
+  const { width, height } = getCanvasSize();
+  if (!(width > 0) || !(height > 0)) return { clientX: rect.left, clientY: rect.top };
+  return {
+    clientX: rect.left + (canvasX / width) * rect.width,
+    clientY: rect.top + (canvasY / height) * rect.height,
+  };
+}
+
+function pickParcelReviewQueryPointCanvas(canvasX, canvasY) {
+  const viz = state.parcelReviewViz;
+  if (!viz?.queryPoint) return false;
+  const qx = Number(viz.queryPoint.x);
+  const qy = Number(viz.queryPoint.y);
+  if (!Number.isFinite(qx) || !Number.isFinite(qy)) return false;
+  const c = worldToCanvas(qx, qy);
+  return Math.hypot(c.x - canvasX, c.y - canvasY) <= PARCEL_COORD_QUERY_PX;
+}
+
+function pilexyParcelReviewRingsForCoordProbe(viz) {
+  if (!viz) return [];
+  const rows = [];
+  if (Array.isArray(viz.siteRing) && pilexyNormalizeParcelRingPoints(viz.siteRing).length >= 2) {
+    rows.push({ ring: viz.siteRing, label: "대지 외곽" });
+  }
+  if (
+    viz.showParcelLot !== false &&
+    Array.isArray(viz.parcelRing) &&
+    viz.parcelRing.length >= 3
+  ) {
+    rows.push({ ring: viz.parcelRing, label: "연속지적(승자) 필지" });
+  }
+  if (viz.showParcelLot !== false && viz.showNearbyParcels !== false) {
+    (viz.nearbyParcelRings || []).forEach((n) => {
+      if (n && n.isWinner !== true && Array.isArray(n.ring) && n.ring.length >= 2) {
+        const pnu = String(n.pnu || "").trim();
+        rows.push({ ring: n.ring, label: pnu ? `인접 후보 PNU ${pnu}` : "인접 후보" });
+      }
+    });
+  }
+  (viz.encroachmentRings || []).forEach((r, idx) => {
+    if (Array.isArray(r) && r.length >= 2) rows.push({ ring: r, label: `필지 밖·침범 ${idx + 1}` });
+  });
+  if (viz.showCadastralMap !== false) {
+    (viz.cadastralBonbunRings || []).forEach((r, idx) => {
+      if (Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2) {
+        rows.push({ ring: r, label: `지적 본번 경계 ${idx + 1}` });
+      }
+    });
+  }
+  return rows;
+}
+
+/**
+ * 대지·필지·쿼리점: 꼭짓점(절곡점)과 쿼리점에만 도면 m 좌표(선분 위 연속 호버 없음).
+ * 우선순위: 거리 짧음 → 동거리면 쿼리 > 선택 링 꼭짓점 > 기타 꼭짓점
+ */
+function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
+  const viz = state.parcelReviewViz;
+  if (!viz) return null;
+  const sel = state.parcelReviewSelection;
+  const selRing = sel && String(sel.pnu || "").trim() !== "" ? ringForParcelReviewSelection(viz, sel) : null;
+  const isSelRing = (ring) => Boolean(selRing && ring === selRing);
+  const cands = [];
+
+  if (viz.queryPoint) {
+    const qx = Number(viz.queryPoint.x);
+    const qy = Number(viz.queryPoint.y);
+    if (Number.isFinite(qx) && Number.isFinite(qy)) {
+      const c = worldToCanvas(qx, qy);
+      const d = Math.hypot(c.x - canvasX, c.y - canvasY);
+      if (d <= PARCEL_COORD_QUERY_PX) {
+        cands.push({
+          d,
+          z: 0,
+          model: {
+            wx: qx,
+            wy: qy,
+            lines: ["검토 쿼리점 (도면 m)", `X ${formatNumber(qx)} · Y ${formatNumber(qy)}`],
+            clientX,
+            clientY,
+          },
+        });
+      }
+    }
+  }
+
+  const tryVertex = (wx, wy, edgeLabel, onSelectedRing) => {
+    const cc = worldToCanvas(wx, wy);
+    const d = Math.hypot(cc.x - canvasX, cc.y - canvasY);
+    const tol = onSelectedRing ? PARCEL_COORD_VERTEX_SELECTED_PX : PARCEL_COORD_VERTEX_PX;
+    if (d > tol) return;
+    const z = onSelectedRing ? 1 : 2;
+    const suffix = onSelectedRing ? " (선택·꼭짓점)" : " (꼭짓점)";
+    cands.push({
+      d,
+      z,
+      model: {
+        wx,
+        wy,
+        lines: [edgeLabel, `X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}`],
+        clientX,
+        clientY,
+      },
+    });
+  };
+
+  const tryRingVerticesOnly = (ring, edgeLabel) => {
+    const onSel = isSelRing(ring);
+    const pts = pilexyNormalizeParcelRingPoints(ring);
+    const n = pts.length;
+    if (n < 2) return;
+    for (let i = 0; i < n; i += 1) {
+      tryVertex(pts[i].x, pts[i].y, edgeLabel, onSel);
+    }
+  };
+
+  pilexyParcelReviewRingsForCoordProbe(viz).forEach((row) => tryRingVerticesOnly(row.ring, row.label));
+
+  if (!cands.length) return null;
+  cands.sort((u, v) => (u.d !== v.d ? u.d - v.d : u.z - v.z));
+  return cands[0].model;
+}
+
+function pilexyPinnedParcelQueryCoordModel() {
+  const viz = state.parcelReviewViz;
+  const pin = state.parcelReviewCoordPinned;
+  if (!viz || !pin || pin.kind !== "query" || !viz.queryPoint) return null;
+  const q = viz.queryPoint;
+  const wx = Number(q.x);
+  const wy = Number(q.y);
+  if (!Number.isFinite(wx) || !Number.isFinite(wy)) return null;
+  const c = worldToCanvas(wx, wy);
+  const cl = canvasLogicalToClient(c.x + 12, c.y - 18);
+  return {
+    wx,
+    wy,
+    lines: ["검토 쿼리점 (고정)", `X ${formatNumber(wx)} · Y ${formatNumber(wy)}`],
+    clientX: cl.clientX,
+    clientY: cl.clientY,
+  };
+}
+
+function pilexyParcelReviewCoordTooltipModel() {
+  if (!state.parcelReviewCoordProbe || !state.parcelReviewViz) return null;
+  const h = state.parcelReviewCoordHover;
+  if (h) return h;
+  return pilexyPinnedParcelQueryCoordModel();
+}
+
+function pilexySetParcelReviewCoordProbe(enabled) {
+  state.parcelReviewCoordProbe = Boolean(enabled);
+  if (!state.parcelReviewCoordProbe) {
+    state.parcelReviewCoordHover = null;
+    state.parcelReviewCoordPinned = null;
+  }
+  requestRedraw();
+}
+
+window.pilexySetParcelReviewCoordProbe = pilexySetParcelReviewCoordProbe;
+
+function pilexyClearParcelReviewSelection() {
+  state.parcelReviewSelection = null;
+  requestRedraw();
+}
+
+window.pilexyClearParcelReviewSelection = pilexyClearParcelReviewSelection;
+
+/** PNU 비교(공백·숫자만 추출 일치로 JSON 숫자 정밀도·표기 차이 완화) */
+function pilexyParcelPnuMatch(a, b) {
+  const sa = String(a ?? "").trim();
+  const sb = String(b ?? "").trim();
+  if (sa !== "" && sb !== "" && sa === sb) return true;
+  const da = sa.replace(/\D/g, "");
+  const db = sb.replace(/\D/g, "");
+  return da.length > 0 && da === db;
+}
+
+function ringForParcelReviewSelection(viz, sel) {
+  if (!sel || sel.pnu == null || String(sel.pnu).trim() === "") return null;
+  const want = String(sel.pnu).trim();
+  if (sel.isWinner === true && Array.isArray(viz.parcelRing) && viz.parcelRing.length >= 3) {
+    return viz.parcelRing;
+  }
+  if (pilexyParcelPnuMatch(viz.winnerPnu, want) && Array.isArray(viz.parcelRing) && viz.parcelRing.length >= 3) {
+    return viz.parcelRing;
+  }
+  const row = (viz.nearbyParcelRings || []).find((it) => it && pilexyParcelPnuMatch(it.pnu, want));
+  if (row && Array.isArray(row.ring) && row.ring.length >= 3) return row.ring;
+  return null;
+}
+
+/** 단일 링(필지)에 맞춰 도면 뷰 확대·이동 */
+function pilexyFocusParcelReviewRingOnCanvas(ring) {
+  const pts = pilexyNormalizeParcelRingPoints(ring);
+  if (pts.length < 2) return;
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  if (xs.length < 1) return;
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  if (minX === maxX) {
+    minX -= 38;
+    maxX += 38;
+  }
+  if (minY === maxY) {
+    minY -= 38;
+    maxY += 38;
+  }
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const padX = Math.max(spanX * 0.12, 10);
+  const padY = Math.max(spanY * 0.12, 10);
+  fitViewToBounds({ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY });
+  requestRedraw();
+}
+
+window.pilexyFocusParcelReviewRingOnCanvas = pilexyFocusParcelReviewRingOnCanvas;
+
+/** 필지 검토 패널 등에서 PNU로 선택(도면 하이라이트·이벤트 동일). opts.focus === true 이면 해당 링으로 줌. */
+function pilexySetParcelReviewSelection(opts) {
+  const pnuStr = String(opts && opts.pnu != null ? opts.pnu : "").trim();
+  if (!pnuStr) return;
+  const viz = state.parcelReviewViz;
+  if (!viz) return;
+  const isWinner = Boolean(opts && opts.isWinner);
+  const sel = { pnu: pnuStr, isWinner };
+  const ring = ringForParcelReviewSelection(viz, sel);
+  const ringNorm = pilexyNormalizeParcelRingPoints(ring);
+  if (!Array.isArray(ring) || ringNorm.length < 2) return;
+  state.parcelReviewSelection = sel;
+  setUploadStatus(`필지 선택: PNU ${pnuStr}${isWinner ? " (연속지적 승자)" : " (인접 후보)"}`);
+  try {
+    window.dispatchEvent(
+      new CustomEvent("pilexy-parcel-review-select", { detail: { pnu: pnuStr, isWinner } }),
+    );
+  } catch (_) {
+    /* ignore */
+  }
+  if (opts && opts.focus === true) {
+    pilexyFocusParcelReviewRingOnCanvas(ring);
+  } else {
+    requestRedraw();
+  }
+}
+
+window.pilexySetParcelReviewSelection = pilexySetParcelReviewSelection;
+
+/** 쿼리점 기준 maxM 이내에 링 꼭짓점이 하나라도 있으면 true(필터·디버그용). */
+function pilexyParcelRingHasVertexWithinM(ring, qx, qy, maxM) {
+  const pts = pilexyNormalizeParcelRingPoints(ring);
+  if (pts.length < 1) return false;
+  if (!Number.isFinite(qx) || !Number.isFinite(qy) || !(maxM > 0)) return true;
+  const r2 = maxM * maxM;
+  for (let i = 0; i < pts.length; i += 1) {
+    const x = pts[i].x;
+    const y = pts[i].y;
+    const dx = x - qx;
+    const dy = y - qy;
+    if (dx * dx + dy * dy <= r2) return true;
+  }
+  return false;
+}
+
+const PARCEL_NEARBY_FIT_RADIUS_M = 280;
+/** 인접 링이 많을 때 맞춤 bbox가 과대해지면 scale이 너무 작아져 오버레이가 안 보이는 것처럼 느껴짐 → 이 스팬 초과 시 대지·선택필지·쿼리만으로 재맞춤 */
+const PARCEL_OVERLAY_VIEW_MAX_SPAN_M = 3200;
+window.pilexyParcelNearFitRadiusM = PARCEL_NEARBY_FIT_RADIUS_M;
+window.pilexyParcelRingHasVertexWithinM = pilexyParcelRingHasVertexWithinM;
+
+/** 필지 검토 오버레이가 보이도록 도면 뷰(줌·팬)를 맞춤 */
+function pilexyFocusParcelReviewOnCanvas(payload) {
+  if (!pilexyParcelReviewVizHasGeometry(payload)) return;
+  const showLot = payload.showParcelLot !== false;
+  const showCad = payload.showCadastralMap !== false;
+  const xs = [];
+  const ys = [];
+  const addRing = (ring) => {
+    pilexyNormalizeParcelRingPoints(ring).forEach((p) => {
+      xs.push(p.x);
+      ys.push(p.y);
+    });
+  };
+  if (showLot) addRing(payload.parcelRing);
+  addRing(payload.siteRing);
+  (payload.encroachmentRings || []).forEach(addRing);
+  if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
+  if (showLot && payload.showNearbyParcels !== false) {
+    (payload.nearbyParcelRings || []).forEach((n) => {
+      if (!n || !Array.isArray(n.ring)) return;
+      addRing(n.ring);
+    });
+  }
+  if (payload.queryPoint && Number.isFinite(payload.queryPoint.x) && Number.isFinite(payload.queryPoint.y)) {
+    xs.push(payload.queryPoint.x);
+    ys.push(payload.queryPoint.y);
+  }
+  if (xs.length < 1) return;
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  if (minX === maxX) {
+    minX -= 28;
+    maxX += 28;
+  }
+  if (minY === maxY) {
+    minY -= 28;
+    maxY += 28;
+  }
+  let spanX = maxX - minX || 1;
+  let spanY = maxY - minY || 1;
+  let viewFitTightOnly = false;
+  if (spanX > PARCEL_OVERLAY_VIEW_MAX_SPAN_M || spanY > PARCEL_OVERLAY_VIEW_MAX_SPAN_M) {
+    viewFitTightOnly = true;
+    xs.length = 0;
+    ys.length = 0;
+    if (showLot) addRing(payload.parcelRing);
+    addRing(payload.siteRing);
+    (payload.encroachmentRings || []).forEach(addRing);
+    if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
+    if (payload.queryPoint && Number.isFinite(payload.queryPoint.x) && Number.isFinite(payload.queryPoint.y)) {
+      xs.push(payload.queryPoint.x);
+      ys.push(payload.queryPoint.y);
+    }
+    if (xs.length < 1) return;
+    minX = Math.min(...xs);
+    maxX = Math.max(...xs);
+    minY = Math.min(...ys);
+    maxY = Math.max(...ys);
+    if (minX === maxX) {
+      minX -= 28;
+      maxX += 28;
+    }
+    if (minY === maxY) {
+      minY -= 28;
+      maxY += 28;
+    }
+    spanX = maxX - minX || 1;
+    spanY = maxY - minY || 1;
+  }
+  const padX = Math.max(spanX * 0.14, 12);
+  const padY = Math.max(spanY * 0.14, 12);
+  fitViewToBounds({ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY });
+  requestRedraw();
+}
+
+window.pilexyFocusParcelReviewOnCanvas = pilexyFocusParcelReviewOnCanvas;
+
+/**
+ * 인접 링·대지·선택 필지·쿼리점으로 뷰를 맞춤.
+ * WFS 후보가 넓게 퍼지면 bbox 스팬이 수 km가 되어 scale이 극소 → 오버레이가 안 보이는 것처럼 보이므로,
+ * 스팬이 PARCEL_OVERLAY_VIEW_MAX_SPAN_M 을 넘으면 맞춤만 대지·선택 필지·쿼리로 좁힘(그리기는 전부 유지).
+ */
+function pilexyFocusParcelReviewNearbyOnCanvas(payload) {
+  if (!payload) return;
+  const showLot = payload.showParcelLot !== false;
+  const showCad = payload.showCadastralMap !== false;
+  const xs = [];
+  const ys = [];
+  const addRing = (ring) => {
+    pilexyNormalizeParcelRingPoints(ring).forEach((p) => {
+      xs.push(p.x);
+      ys.push(p.y);
+    });
+  };
+  const nearbyOn = showLot && payload.showNearbyParcels !== false;
+  const nearby = Array.isArray(payload.nearbyParcelRings) ? payload.nearbyParcelRings : [];
+  if (nearbyOn && nearby.length) {
+    nearby.forEach((n) => {
+      if (!n || !Array.isArray(n.ring) || n.ring.length < 2) return;
+      addRing(n.ring);
+    });
+  }
+  addRing(payload.siteRing);
+  if (showLot) addRing(payload.parcelRing);
+  if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
+  if (payload.queryPoint && Number.isFinite(Number(payload.queryPoint.x)) && Number.isFinite(Number(payload.queryPoint.y))) {
+    xs.push(Number(payload.queryPoint.x));
+    ys.push(Number(payload.queryPoint.y));
+  }
+  if (xs.length < 2) {
+    pilexyFocusParcelReviewOnCanvas(payload);
+    return;
+  }
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  if (minX === maxX) {
+    minX -= 42;
+    maxX += 42;
+  }
+  if (minY === maxY) {
+    minY -= 42;
+    maxY += 42;
+  }
+  let spanX = maxX - minX || 1;
+  let spanY = maxY - minY || 1;
+  let viewFitTightOnly = false;
+  if (spanX > PARCEL_OVERLAY_VIEW_MAX_SPAN_M || spanY > PARCEL_OVERLAY_VIEW_MAX_SPAN_M) {
+    viewFitTightOnly = true;
+    xs.length = 0;
+    ys.length = 0;
+    addRing(payload.siteRing);
+    if (showLot) addRing(payload.parcelRing);
+    if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
+    if (payload.queryPoint && Number.isFinite(Number(payload.queryPoint.x)) && Number.isFinite(Number(payload.queryPoint.y))) {
+      xs.push(Number(payload.queryPoint.x));
+      ys.push(Number(payload.queryPoint.y));
+    }
+    if (xs.length < 2) {
+      pilexyFocusParcelReviewOnCanvas(payload);
+      return;
+    }
+    minX = Math.min(...xs);
+    maxX = Math.max(...xs);
+    minY = Math.min(...ys);
+    maxY = Math.max(...ys);
+    if (minX === maxX) {
+      minX -= 42;
+      maxX += 42;
+    }
+    if (minY === maxY) {
+      minY -= 42;
+      maxY += 42;
+    }
+    spanX = maxX - minX || 1;
+    spanY = maxY - minY || 1;
+  }
+  const padFrac = 0.045;
+  const padX = Math.max(spanX * padFrac, 6);
+  const padY = Math.max(spanY * padFrac, 6);
+  fitViewToBounds({ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY });
+  requestRedraw();
+}
+
+window.pilexyFocusParcelReviewNearbyOnCanvas = pilexyFocusParcelReviewNearbyOnCanvas;
+
+function drawParcelReviewViz() {
+  const viz = state.parcelReviewViz;
+  if (!viz) return;
+  const hasNearby =
+    viz.showParcelLot !== false &&
+    viz.showNearbyParcels !== false &&
+    (viz.nearbyParcelRings || []).some((n) => n && pilexyNormalizeParcelRingPoints(n.ring).length >= 2);
+  const bonbunData = (viz.cadastralBonbunRings || []).some(
+    (r) => Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2,
+  );
+  const hasBonbun = bonbunData && viz.showCadastralMap !== false;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+
+  function ringAreaWorld(ring) {
+    const pts = pilexyNormalizeParcelRingPoints(ring);
+    if (pts.length < 3) return 0;
+    let a = 0;
+    for (let i = 0; i < pts.length; i += 1) {
+      const j = (i + 1) % pts.length;
+      const xi = pts[i].x;
+      const yi = pts[i].y;
+      const xj = pts[j].x;
+      const yj = pts[j].y;
+      if (![xi, yi, xj, yj].every((v) => Number.isFinite(v))) return 0;
+      a += xi * yj - xj * yi;
+    }
+    return Math.abs(a / 2);
+  }
+
+  /** drawBuildings 와 동일: 월드 꼭짓점 → worldToCanvas → path (중첩 save/캔버스 finite 필터 없음) */
+  function strokeParcelRingWorld(ring, strokeStyle, lineWidth, lineDash, globalAlpha) {
+    const pts = pilexyNormalizeParcelRingPoints(ring);
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    pts.forEach((p, index) => {
+      const c = worldToCanvas(p.x, p.y);
+      if (index === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.setLineDash(lineDash || []);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.globalAlpha = globalAlpha == null ? 1 : globalAlpha;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  function fillParcelRingWorld(ring, fillStyle, globalAlpha) {
+    const pts = pilexyNormalizeParcelRingPoints(ring);
+    if (pts.length < 3) return;
+    ctx.beginPath();
+    pts.forEach((p, index) => {
+      const c = worldToCanvas(p.x, p.y);
+      if (index === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.globalAlpha = globalAlpha == null ? 1 : globalAlpha;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /** 탭/캔버스 선택 링: 동 편집 꼭짓점처럼 보이도록 흰 외곽 + 노란 점선 + 꼭짓점 점 */
+  function drawParcelSelectionHighlightWorld(ring) {
+    const pts = pilexyNormalizeParcelRingPoints(ring);
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const c = worldToCanvas(p.x, p.y);
+      if (i === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const c = worldToCanvas(p.x, p.y);
+      if (i === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(250, 204, 21, 1)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    pts.forEach((p) => {
+      const c = worldToCanvas(p.x, p.y);
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(250, 204, 21, 0.98)";
+      ctx.strokeStyle = "rgba(120, 53, 15, 0.95)";
+      ctx.lineWidth = 1.2;
+      ctx.arc(c.x, c.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+
+  const encRings = (viz.encroachmentRings || []).filter((r) => Array.isArray(r) && r.length >= 3);
+  let mainEnc = null;
+  let mainEncArea = 0;
+  encRings.forEach((ring) => {
+    const ar = ringAreaWorld(ring);
+    if (ar > mainEncArea) {
+      mainEncArea = ar;
+      mainEnc = ring;
+    }
+  });
+
+  /* 0) 필지 밖(침범): 동 윤곽 해치(drawBuildings)처럼 낮은 알파 면 + 얇은 스트로크 */
+  if (mainEnc && mainEncArea > 0) {
+    fillParcelRingWorld(mainEnc, "rgba(239, 68, 68, 0.42)", 1);
+    strokeParcelRingWorld(mainEnc, "rgba(127, 29, 29, 0.95)", 1.8, [], 1);
+    encRings.forEach((ring) => {
+      if (ring === mainEnc) return;
+      const ar = ringAreaWorld(ring);
+      if (ar < mainEncArea * 0.08) return;
+      fillParcelRingWorld(ring, "rgba(248, 113, 113, 0.14)", 1);
+      strokeParcelRingWorld(ring, "rgba(220, 38, 38, 0.75)", 1.2, [6, 4], 0.9);
+    });
+  }
+
+  /* 1) 대지 외곽: 주차장 윤곽(drawBuildings dashed)과 유사 — 주황 점선 */
+  strokeParcelRingWorld(viz.siteRing, "rgba(253, 224, 71, 0.92)", 1.2, [10, 6], 0.88);
+
+  /* 2) WFS 인접: 실선만(면 없음), 동 팔레트처럼 고정 두께 + 다각형 겹침 완화 알파 — 「필지 표시」꺼지면 후보도 숨김 */
+  if (viz.showParcelLot !== false && viz.showNearbyParcels !== false) {
+    (viz.nearbyParcelRings || []).forEach((item) => {
+      if (!item || item.isWinner === true) return;
+      const r = item.ring;
+      if (!Array.isArray(r) || r.length < 3) return;
+      strokeParcelRingWorld(r, "rgba(232, 121, 249, 0.95)", 1.15, [], 0.58);
+    });
+    if (viz.debugShowNearbyRingVertices) {
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      (viz.nearbyParcelRings || []).forEach((item) => {
+        if (!item || item.isWinner === true) return;
+        const pts = pilexyNormalizeParcelRingPoints(item.ring);
+        pts.forEach((p) => {
+          const c = worldToCanvas(p.x, p.y);
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(232, 121, 249, 0.92)";
+          ctx.strokeStyle = "rgba(76, 29, 149, 0.55)";
+          ctx.lineWidth = 1;
+          ctx.arc(c.x, c.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+      });
+      ctx.restore();
+    }
+  }
+
+  /* 3) 선택 필지(연속지적): 동 건물 해치와 유사한 낮은 알파 면 + 윤곽선 */
+  if (viz.showParcelLot !== false && Array.isArray(viz.parcelRing) && viz.parcelRing.length >= 3) {
+    fillParcelRingWorld(viz.parcelRing, "rgba(34, 197, 94, 0.1)", 1);
+    strokeParcelRingWorld(viz.parcelRing, "rgba(74, 222, 128, 0.9)", 1.25, [], 0.82);
+    strokeParcelRingWorld(viz.parcelRing, "rgba(22, 163, 74, 0.98)", 1.65, [], 1);
+  }
+
+  /* 3b) 지적 본번 경계(VWorld WFS): 선택 필지 윤곽 위에도 보이게 하늘 점선 */
+  if (viz.showCadastralMap !== false) {
+    (viz.cadastralBonbunRings || []).forEach((ring) => {
+      if (!Array.isArray(ring) || pilexyNormalizeParcelRingPoints(ring).length < 2) return;
+      strokeParcelRingWorld(ring, "rgba(56, 189, 248, 0.92)", 1.2, [5, 4], 0.88);
+    });
+  }
+
+  /* 4) 쿼리점(말뚝 중앙값 등): 노란 점 */
+  if (viz.queryPoint && Number.isFinite(viz.queryPoint.x) && Number.isFinite(viz.queryPoint.y)) {
+    const { x, y } = worldToCanvas(viz.queryPoint.x, viz.queryPoint.y);
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(250, 204, 21, 0.95)";
+    ctx.strokeStyle = "rgba(120, 53, 15, 0.88)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* 5) 탭/캔버스에서 고른 필지: 초록 면 위에서도 보이게 흰 외곽 + 노란 점선 + 꼭짓점(필지·후보 레이어가 켜져 있을 때만) */
+  const sel = state.parcelReviewSelection;
+  if (viz.showParcelLot !== false && sel && String(sel.pnu || "").trim() !== "") {
+    const hiRing = ringForParcelReviewSelection(viz, sel);
+    if (hiRing && pilexyNormalizeParcelRingPoints(hiRing).length >= 2) {
+      drawParcelSelectionHighlightWorld(hiRing);
+    }
+  }
+
+  /* 좌하단 범례(우측 패널에 가리지 않음) */
+  const { width, height } = getCanvasSize();
+  const pad = 10;
+  const rowH = 18;
+  ctx.save();
+  ctx.font = "13px 'Segoe UI', 'Malgun Gothic', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const rows = [];
+  if (hasNearby) {
+    rows.push({
+      c: "rgba(232, 121, 249, 0.96)",
+      t: "자홍 실선 = WFS 인접 필지 후보(면 제거·겹침 시 가림 방지)",
+    });
+  }
+  if (hasBonbun) {
+    rows.push({
+      c: "rgba(56, 189, 248, 0.96)",
+      t: "하늘 점선 = 지적 본번 경계(WFS 본번)",
+    });
+  }
+  rows.push(
+    { c: "rgba(250, 204, 21, 1)", t: "노란 점 = 쿼리점(검토 기준)" },
+    { c: "rgba(74, 222, 128, 0.95)", t: "초록 = 선택 필지(가장 유리한 후보)" },
+    { c: "rgba(251, 191, 36, 1)", t: "주황 점선 = 대지 외곽" },
+    { c: "rgba(254, 202, 202, 1)", t: "붉은 영역 = 필지 밖" },
+  );
+  const boxW = 312;
+  const boxH = rowH * rows.length + pad * 2;
+  /* 우측 패널에 가리지 않도록 좌하단 */
+  const x0 = pad;
+  const y0 = height - boxH - pad;
+  ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x0, y0, boxW, boxH, 6);
+  } else {
+    ctx.rect(x0, y0, boxW, boxH);
+  }
+  ctx.fill();
+  ctx.stroke();
+  rows.forEach((row, i) => {
+    const cy = y0 + pad + rowH * i + rowH / 2;
+    ctx.fillStyle = row.c;
+    ctx.fillRect(x0 + pad, cy - 5, 12, 10);
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillText(row.t, x0 + pad + 18, cy);
+  });
+  ctx.restore();
+  ctx.restore();
 }
 
 function drawPolylineHints() {
@@ -7004,18 +9009,37 @@ function drawPolylineHints() {
   // 2) 클러스터(동) 폴리라인: 기존처럼 선만 표시 (실제 선택/편집은 drawBuildings의 동으로)
   drawPolylineList(cluster, "rgba(148, 163, 184, 0.9)", 1.5, [6, 4], 1);
 
-  if (state.buildingOutlinePickMode && raw.length) {
+  const rwIds = state.retainingWallPickMode?.selectedIds;
+  if (state.retainingWallPickMode) {
+    getRetainingWallPolylineRows().forEach((row) => {
+      const sel = rwIds && rwIds.has(row.id);
+      const stroke = sel ? "rgba(45, 212, 191, 0.98)" : "rgba(148, 163, 184, 0.55)";
+      if (row.closed) {
+        ctx.save();
+        ctx.strokeStyle = stroke;
+        ctx.setLineDash(sel ? [] : [6, 4]);
+        ctx.lineWidth = sel ? 2.4 : 1.1;
+        ctx.beginPath();
+        row.points.forEach((point, i) => {
+          const { x, y } = worldToCanvas(point.x, point.y);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        drawOpenPolylineStroke({ points: row.points }, stroke, sel ? 2.4 : 1.1, sel ? [] : [6, 4]);
+      }
+    });
+  } else if (state.buildingOutlinePickMode && raw.length) {
     raw.forEach((polyline, index) => {
       if (polyline.closed !== false) return;
       if (!Array.isArray(polyline.points) || polyline.points.length < 2) return;
       const id = String(polyline?.id ?? polyline?.cluster_id ?? `polyline-${index}`);
-      const sel = pickIds && pickIds.has(id);
-      drawOpenPolylineStroke(
-        polyline,
-        sel ? "rgba(250, 204, 21, 0.95)" : "rgba(148, 163, 184, 0.55)",
-        sel ? 2.4 : 1.1,
-        sel ? [] : [6, 4],
-      );
+      const selBuilding = pickIds && pickIds.has(id);
+      const stroke = selBuilding ? "rgba(250, 204, 21, 0.95)" : "rgba(148, 163, 184, 0.55)";
+      drawOpenPolylineStroke(polyline, stroke, selBuilding ? 2.4 : 1.1, selBuilding ? [] : [6, 4]);
     });
   }
 
@@ -7046,7 +9070,15 @@ function drawBuildings() {
   if (!state.buildings.length) return;
   state.buildings.forEach((building, index) => {
     if (!Array.isArray(building.vertices) || building.vertices.length < 3) return;
-    const kind = normalizeAreaKind(building?.kind);
+    const kind = resolveBuildingOutlineKind(building);
+    const hatchOn =
+      kind === AREA_KIND_BUILDING
+        ? state.showBuildingHatch
+        : kind === AREA_KIND_PARKING
+          ? state.showParkingHatch
+          : state.showTowerCraneHatch;
+    if (!hatchOn && !state.buildingEditMode) return;
+
     ctx.beginPath();
     const color = buildingPalette[index % buildingPalette.length];
     building.vertices.forEach((vertex, vertexIndex) => {
@@ -7060,13 +9092,7 @@ function drawBuildings() {
     ctx.lineWidth = state.buildingEditMode ? 2.4 : 1;
     ctx.globalAlpha = 0.8;
     ctx.stroke();
-    const shouldFill =
-      kind === AREA_KIND_BUILDING
-        ? state.showBuildingHatch
-        : kind === AREA_KIND_PARKING
-          ? state.showParkingHatch
-          : state.showTowerCraneHatch;
-    if (shouldFill) {
+    if (hatchOn) {
       ctx.globalAlpha = kind === AREA_KIND_BUILDING ? 0.08 : 0.05;
       ctx.fillStyle = color;
       ctx.fill();
@@ -7148,18 +9174,25 @@ function drawCircle(circle, duplicateCircleIds) {
   const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
   const radius = Math.max(0.5, circle.radius * view.scale);
   const isHighlighted = state.highlightedCircleIds.has(circle.id);
+  const isRwViz = isRetainingWallVizHighlightCircle(circle.id);
   const isManualSelected = state.manualSelection.circleId === circle.id;
   const isDuplicate = duplicateCircleIds && duplicateCircleIds.has(circle.id);
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   if (isDuplicate && !circle.has_error) {
     ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = isHighlighted ? "#facc15" : "#fb923c";
+    ctx.strokeStyle = isRwViz ? "#2dd4bf" : isHighlighted ? "#facc15" : "#fb923c";
   } else {
     ctx.setLineDash([]);
-    ctx.strokeStyle = circle.has_error ? "#f97316" : isHighlighted ? "#facc15" : "#38bdf8";
+    ctx.strokeStyle = circle.has_error
+      ? "#f97316"
+      : isRwViz
+        ? "#2dd4bf"
+        : isHighlighted
+          ? "#facc15"
+          : "#38bdf8";
   }
-  ctx.lineWidth = isManualSelected ? 4 : isHighlighted ? 2 : 1;
+  ctx.lineWidth = isManualSelected ? 4 : isRwViz ? 3 : isHighlighted ? 2 : 1;
   ctx.stroke();
   ctx.setLineDash([]);
   if (isManualSelected) {
@@ -7173,7 +9206,9 @@ function drawCircle(circle, duplicateCircleIds) {
 
 function drawCirclePoint(circle) {
   const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
-  const isHighlighted = state.highlightedCircleIds.has(circle.id) || hoveredCircleId === circle.id;
+  const isRwViz = isRetainingWallVizHighlightCircle(circle.id);
+  const isHighlighted =
+    state.highlightedCircleIds.has(circle.id) || hoveredCircleId === circle.id || isRwViz;
   const isManualSelected = state.manualSelection.circleId === circle.id;
   const pointRadius = isManualSelected ? 5 : 3;
   ctx.beginPath();
@@ -7256,12 +9291,27 @@ function drawTextLabels() {
   });
 }
 function drawTooltip() {
+  const parcelCoord = pilexyParcelReviewCoordTooltipModel();
   if (!hoveredCircleId) {
+    if (parcelCoord && Array.isArray(parcelCoord.lines) && parcelCoord.lines.length) {
+      tooltip.style.left = `${parcelCoord.clientX + 6}px`;
+      tooltip.style.top = `${parcelCoord.clientY + 6}px`;
+      tooltip.innerHTML = parcelCoord.lines.map((ln) => `<span>${escapeHtml(String(ln))}</span>`).join("<br/>");
+      tooltip.classList.remove("hidden");
+      return;
+    }
     hideTooltip();
     return;
   }
   const circle = state.circleMap.get(hoveredCircleId);
   if (!circle) {
+    if (parcelCoord && Array.isArray(parcelCoord.lines) && parcelCoord.lines.length) {
+      tooltip.style.left = `${parcelCoord.clientX + 6}px`;
+      tooltip.style.top = `${parcelCoord.clientY + 6}px`;
+      tooltip.innerHTML = parcelCoord.lines.map((ln) => `<span>${escapeHtml(String(ln))}</span>`).join("<br/>");
+      tooltip.classList.remove("hidden");
+      return;
+    }
     hideTooltip();
     return;
   }
@@ -7271,11 +9321,13 @@ function drawTooltip() {
   const areaInfo = getCircleAreaClassification(circle);
   const numberLabel = displayNumber ? `번호 ${displayNumber}` : "번호 미확인";
   const areaStr = circle.area != null ? formatNumber(circle.area) : (circle.radius != null ? formatNumber(Math.PI * circle.radius * circle.radius) : "");
-  tooltip.innerHTML = `
-    <strong>${numberLabel}</strong> · ${areaInfo.label}<br />
-    Φ ${formatNumber(circle.diameter)} / R ${formatNumber(circle.radius)}${areaStr ? ` / 면적 ${areaStr}` : ""}<br />
-    좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}
-  `;
+  const compact = pilexyMobileCompactUi();
+  if (compact) {
+    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}`;
+  } else {
+    const geomLine = `Φ ${formatNumber(circle.diameter)} / R ${formatNumber(circle.radius)}${areaStr ? ` / 면적 ${areaStr}` : ""}`;
+    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />${geomLine}<br />좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}`;
+  }
   tooltip.classList.remove("hidden");
 }
 
@@ -7339,8 +9391,9 @@ function getCircleDisplayNumber(circle) {
 }
 
 function updateTooltipPosition() {
-  if (!hoveredCircleId) return;
-  drawTooltip();
+  if (hoveredCircleId || pilexyParcelReviewCoordTooltipModel()) {
+    drawTooltip();
+  }
 }
 
 function hideTooltip() {
@@ -7369,6 +9422,10 @@ function handleCanvasMouseDown(event) {
     updateCanvasModeHint();
     setUploadStatus(`${name} 네모를 생성했습니다. 편집 모드에서 절점을 추가로 조정할 수 있습니다.`);
     requestRedraw();
+    return;
+  }
+  if (state.retainingWallPickMode && (button === 0 || button === undefined)) {
+    state.retainingWallPickClick = { x: offsetX, y: offsetY, moved: false };
     return;
   }
   if (state.buildingOutlinePickMode && (button === 0 || button === undefined)) {
@@ -7414,6 +9471,12 @@ function handleCanvasMouseMove(event) {
     const dy = offsetY - s.y;
     if (dx * dx + dy * dy > 25) s.moved = true;
   }
+  if (state.retainingWallPickClick) {
+    const s = state.retainingWallPickClick;
+    const dx = offsetX - s.x;
+    const dy = offsetY - s.y;
+    if (dx * dx + dy * dy > 25) s.moved = true;
+  }
   if (state.areaRectCreate?.startWorld) {
     state.areaRectCreate.currentWorld = canvasToWorld(offsetX, offsetY);
     requestRedraw();
@@ -7440,10 +9503,19 @@ function handleCanvasMouseMove(event) {
   const circle = pickCircle(offsetX, offsetY);
   hoveredCircleId = circle?.id || null;
   if (hoveredCircleId) {
+    state.parcelReviewCoordHover = null;
     tooltipMouseClientX = event.clientX;
     tooltipMouseClientY = event.clientY;
-    drawTooltip();
-  } else hideTooltip();
+  } else if (state.parcelReviewCoordProbe && state.parcelReviewViz) {
+    state.parcelReviewCoordHover = pickParcelReviewCoordHoverModel(
+      offsetX,
+      offsetY,
+      event.clientX,
+      event.clientY,
+    );
+  } else {
+    state.parcelReviewCoordHover = null;
+  }
   requestRedraw();
 }
 
@@ -7452,6 +9524,33 @@ function handleCanvasMouseUp(event) {
   isPanning = false;
   state.draggingVertex = null;
   if (state.areaRectCreate) {
+    mouseDownPos = null;
+    return;
+  }
+  if (
+    state.retainingWallPickMode
+    && state.retainingWallPickClick
+    && (event?.button === 0 || event?.button === undefined)
+  ) {
+    const start = state.retainingWallPickClick;
+    state.retainingWallPickClick = null;
+    if (!start.moved) {
+      const { x: upX, y: upY } = getCanvasCoordsFromEvent(event);
+      const id = pickRetainingWallPolylineIdAtCanvas(upX, upY);
+      if (id && state.retainingWallPickMode) {
+        if (state.retainingWallPickMode.selectedIds.has(id)) {
+          state.retainingWallPickMode.selectedIds.delete(id);
+        } else {
+          state.retainingWallPickMode.selectedIds.add(id);
+        }
+        const n = state.retainingWallPickMode.selectedIds.size;
+        setUploadStatus(n ? `흙막이 후보 라인 ${n}개 선택됨.` : "선택을 모두 해제했습니다.");
+        updateCanvasModeHint();
+      } else {
+        setUploadStatus("폴리라인 선에 가깝게 클릭하세요.", true);
+      }
+      requestRedraw();
+    }
     mouseDownPos = null;
     return;
   }
@@ -7483,6 +9582,60 @@ function handleCanvasMouseUp(event) {
     }
     mouseDownPos = null;
     return;
+  }
+  if (
+    event
+    && mouseDownPos
+    && (event?.button === 0 || event?.button === undefined)
+    && !state.buildingEditMode
+    && !state.retainingWallPickMode
+    && !state.buildingOutlinePickMode
+    && state.manualPickMode !== "circle"
+    && state.manualPickMode !== "text"
+    && state.parcelReviewViz != null
+  ) {
+    const { x: upX, y: upY } = getCanvasCoordsFromEvent(event);
+    const dx = upX - mouseDownPos.x;
+    const dy = upY - mouseDownPos.y;
+    if (dx * dx + dy * dy < 25) {
+      if (state.parcelReviewCoordProbe && pickParcelReviewQueryPointCanvas(upX, upY)) {
+        state.parcelReviewCoordPinned =
+          state.parcelReviewCoordPinned?.kind === "query" ? null : { kind: "query" };
+        setUploadStatus(
+          state.parcelReviewCoordPinned
+            ? "검토 쿼리점 좌표를 툴팁에 고정했습니다. 노란 점을 다시 클릭하면 해제합니다."
+            : "쿼리점 좌표 고정을 해제했습니다.",
+        );
+        requestRedraw();
+        mouseDownPos = null;
+        return;
+      }
+      const hit = pickParcelReviewRingAtCanvas(upX, upY);
+      if (hit && String(hit.pnu || "").trim() !== "") {
+        state.parcelReviewSelection = { pnu: String(hit.pnu), isWinner: Boolean(hit.isWinner) };
+        setUploadStatus(`필지 선택: PNU ${hit.pnu}${hit.isWinner ? " (연속지적 승자)" : " (인접 후보)"}`);
+        try {
+          window.dispatchEvent(
+            new CustomEvent("pilexy-parcel-review-select", { detail: { pnu: hit.pnu, isWinner: hit.isWinner } }),
+          );
+        } catch (_) {
+          /* ignore */
+        }
+        requestRedraw();
+        mouseDownPos = null;
+        return;
+      }
+      const hadSel = state.parcelReviewSelection != null;
+      state.parcelReviewSelection = null;
+      if (hadSel) {
+        try {
+          window.dispatchEvent(new CustomEvent("pilexy-parcel-review-select", { detail: { cleared: true } }));
+        } catch (_) {
+          /* ignore */
+        }
+        requestRedraw();
+      }
+    }
   }
   if (event && mouseDownPos && !state.buildingEditMode && state.buildings.length > 0) {
     const { x: upX, y: upY } = getCanvasCoordsFromEvent(event);
@@ -7574,6 +9727,7 @@ function handleCanvasWheel(event) {
 function handleCanvasDoubleClick(event) {
   if (state.areaRectCreate) return;
   if (state.buildingOutlinePickMode) return;
+  if (state.retainingWallPickMode) return;
   if (!state.buildingEditMode) return;
   const { x: offsetX, y: offsetY } = getCanvasCoordsFromEvent(event);
   const hit = hitTestVertex(offsetX, offsetY);
@@ -7651,7 +9805,7 @@ function findClosestBuildingEdge(worldPoint, pixelThreshold) {
   return best ? { buildingIndex: best.buildingIndex, insertIndex: best.insertIndex } : null;
 }
 
-function pointToSegmentDistance(point, start, end) {
+function closestPointOnSegment(point, start, end) {
   const ax = start.x;
   const ay = start.y;
   const bx = end.x;
@@ -7664,9 +9818,12 @@ function pointToSegmentDistance(point, start, end) {
   const apy = py - ay;
   const magnitude = abx * abx + aby * aby || 1;
   const t = Math.min(1, Math.max(0, (apx * abx + apy * aby) / magnitude));
-  const closestX = ax + abx * t;
-  const closestY = ay + aby * t;
-  return Math.hypot(px - closestX, py - closestY);
+  return { x: ax + abx * t, y: ay + aby * t, t };
+}
+
+function pointToSegmentDistance(point, start, end) {
+  const q = closestPointOnSegment(point, start, end);
+  return Math.hypot(point.x - q.x, point.y - q.y);
 }
 
 function pickCircle(offsetX, offsetY, pixelTolerance = 20) {
@@ -11850,14 +14007,24 @@ function handleLoadProject(projectName, versionId) {
     persistSettingsContext(projectData.contextProject || previousLoadedWorkProject, projectData.contextProjectId || "");
     updateProjectButtonState();
 
-    // 동 윤곽선(클러스터 폴리라인) 복원
+    // 동 윤곽선(클러스터 폴리라인) 복원 — 비어 있으면 이전 프로젝트 잔상 제거
     if (projectData.clusterPolylines && Array.isArray(projectData.clusterPolylines) && projectData.clusterPolylines.length > 0) {
-      state.clusterPolylines = projectData.clusterPolylines.map((p) => ({
+      state.clusterPolylines = projectData.clusterPolylines.map((p, i) => ({
+        id: p.id != null ? String(p.id) : `poly_${i}`,
         closed: p.closed !== false,
         points: (p.points || []).map((pt) => ({ x: Number(pt.x), y: Number(pt.y) })),
+        layer: p.layer != null && String(p.layer).trim() ? String(p.layer) : "building",
+        cluster_type:
+          p.cluster_type != null && String(p.cluster_type).trim()
+            ? String(p.cluster_type)
+            : p.clusterType != null && String(p.clusterType).trim()
+              ? String(p.clusterType)
+              : "building",
       }));
-      state.polylines = state.clusterPolylines;
+    } else {
+      state.clusterPolylines = [];
     }
+    state.polylines = state.clusterPolylines.length ? state.clusterPolylines : state.rawPolylines;
 
     // 건물 정보 복원
     if (projectData.buildings && Array.isArray(projectData.buildings)) {

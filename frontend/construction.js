@@ -24,6 +24,7 @@
       <button type="button" class="construction-tab" data-tab="settings">설정</button>
       <button type="button" class="construction-tab is-active" data-tab="status">시공현황</button>
       <button type="button" class="construction-tab" data-tab="settlement">기성정리</button>
+      <button type="button" class="construction-tab" data-tab="parcel-review">필지 검토</button>
     </div>
     <div class="construction-drawer-body">
       <section class="construction-section construction-tab-panel" data-panel="settings">
@@ -385,6 +386,138 @@
           <div id="construction-foundation-pile-list" class="construction-foundation-list"></div>
         </div>
       </section>
+      <section class="construction-section construction-tab-panel" data-panel="parcel-review">
+        <div class="construction-section-title">
+          <div class="construction-section-title-row">
+            <span>필지 대비 자동 검토</span>
+            <small class="soft-liability-note soft-liability-note--compact"><span aria-hidden="true">※</span>참고용이며 법적·행정 판단을 대체하지 않습니다.</small>
+          </div>
+          <small>현재 화면의 말뚝·동·주차장 윤곽으로 쿼리점과 대지 외곽을 자동 산출합니다. 서버에 <code>VWORLD_API_KEY</code>가 있으면 연속지적 경계를 조회해 침범 여부를 계산합니다.</small>
+        </div>
+        <div class="construction-sync-actions">
+          <button type="button" id="construction-parcel-run-btn" class="header-construction-btn">자동 검토 실행</button>
+          <button type="button" id="construction-parcel-focus-nearby-btn" class="ghost" disabled title="먼저 「자동 검토 실행」을 하세요.">인접 필지 구역으로 이동·확대</button>
+          <button type="button" id="construction-parcel-clear-viz-btn" class="ghost">지도 오버레이 지우기</button>
+        </div>
+        <div id="construction-parcel-canvas-selection" class="construction-parcel-canvas-selection" aria-live="polite"></div>
+        <label class="construction-parcel-nearby-viz-label">
+          <input type="checkbox" id="construction-parcel-show-cadastral" checked />
+          도면에 <strong>지적도</strong> 표시(WFS 지적 본번 경계·하늘 점선)
+        </label>
+        <label class="construction-parcel-nearby-viz-label">
+          <input type="checkbox" id="construction-parcel-show-parcel-lot" checked />
+          도면에 <strong>필지</strong> 표시(연속지적 승자·<strong>인접 후보 자홍선</strong> 포함 — 끄면 후보도 숨김)
+        </label>
+        <label class="construction-parcel-nearby-viz-label" id="construction-parcel-show-nearby-rings-label">
+          <input type="checkbox" id="construction-parcel-show-nearby-rings" checked />
+          위가 켜져 있을 때만: WFS 인접 필지 후보(자홍 외곽선·겹침 가림 방지)<span id="construction-parcel-nearby-count" class="construction-parcel-nearby-count" aria-live="polite"></span>
+        </label>
+        <label class="construction-parcel-nearby-viz-label">
+          <input type="checkbox" id="construction-parcel-coord-probe" checked />
+          대지·필지·검토 쿼리점의 꼭짓점(절곡점)에만 좌표 표시(선 위는 표시 안 함) · 쿼리점 클릭 시 고정/해제
+        </label>
+        <label class="construction-parcel-nearby-viz-label construction-parcel-debug-vertices-cb" id="construction-parcel-debug-nearby-vertices-label">
+          <input type="checkbox" id="construction-parcel-debug-nearby-vertices" />
+          도면에 인접 링 꼭짓점 찍기(자홍 작은 점, 필지·인접 표시가 켜져 있을 때만)
+        </label>
+        <details class="construction-parcel-vertex-debug-details" style="margin-top: 0.35rem;">
+          <summary>디버그: 인접 링 꼭짓점(도면 m)</summary>
+          <p class="construction-foundation-viewer-guide" style="margin: 0.35rem 0 0.25rem;">
+            아래는 오버레이에 쓰는 <strong>정규화된 링</strong>(JSON <code>nearby_parcel_rings</code> 등과 동일 파이프라인)입니다.
+            <strong>캐드뷰어</strong>는 이 웹앱 왼쪽의 <strong>말뚝 캔버스(HTML Canvas)</strong>를 말하며, AutoCAD·DWG 뷰어로 오버레이가 넘어가지는 않습니다.
+            목록은 <strong>실제로 캔버스에 자홍으로 그리는 링</strong> 기준 상위 8개, 링당 최대 24점입니다.
+          </p>
+          <pre id="construction-parcel-nearby-vertices-pre" class="construction-manual-debug-pre construction-parcel-json-pre" spellcheck="false">(검토 실행 후 표시)</pre>
+        </details>
+        <details class="construction-report-advanced" style="margin-top: 0.5rem;">
+          <summary>고급: 도면 평면좌표(EPSG) 가정</summary>
+          <div class="construction-sync-grid">
+            <label>assumed_epsg
+              <select id="construction-parcel-epsg" class="save-work-select" aria-label="도면 좌표계 가정">
+                <option value="5186" selected>5186 (Korea 2000 / Central belt)</option>
+                <option value="5174">5174 (Bessel / YO-K)</option>
+                <option value="5179">5179 (Korea 2000 / Unified)</option>
+              </select>
+            </label>
+            <label>허용 오차 (m)<input type="number" id="construction-parcel-tolerance" class="save-work-input" step="0.05" min="0" max="5" value="0.35" /></label>
+            <label class="construction-parcel-swap-xy-label">
+              <input type="checkbox" id="construction-parcel-swap-xy" />
+              XY 바꿔 투영 (도면 X=N·Y=E처럼 GIS 동·북과 축이 반대일 때)
+            </label>
+          </div>
+        </details>
+        <div id="construction-parcel-summary" class="construction-parcel-summary" aria-live="polite">
+          <div class="construction-parcel-note">「자동 검토 실행」 후 이곳에 판정·PNU·면적 요약이 표시됩니다.</div>
+        </div>
+        <details class="construction-parcel-json-details">
+          <summary>원본 JSON (디버그)</summary>
+          <div class="construction-parcel-json-toolbar">
+            <button type="button" id="construction-parcel-copy-debug-btn" class="ghost">디버그 전체 복사 (JSON)</button>
+            <span id="construction-parcel-copy-feedback" class="construction-parcel-copy-feedback" aria-live="polite"></span>
+          </div>
+          <pre id="construction-parcel-json" class="construction-manual-debug-pre construction-parcel-json-pre" spellcheck="false">(실행 전)</pre>
+        </details>
+      </section>
+      <section class="construction-section construction-tab-panel" data-panel="manual">
+        <div class="construction-section-title">
+          <span>매뉴얼</span>
+          <small>기초골조 두께처럼 시공 탭과 분리된 화면입니다. 아이디·비밀번호만 입력한 뒤 「한 번에 가져오기」로 본문과 기본 질문 답을 순서대로 받습니다.</small>
+        </div>
+        <div class="construction-sync-grid">
+          <label>아이디<input type="text" id="header-brds-user-id" class="save-work-input" placeholder="아이디" autocomplete="username" maxlength="200" /></label>
+          <label>비밀번호<input type="password" id="header-brds-password" class="save-work-input" autocomplete="current-password" /></label>
+        </div>
+        <div class="construction-manual-login-block">
+          <button type="button" id="construction-manual-login-btn" class="header-construction-btn">로그인</button>
+          <p id="header-brds-login-feedback" class="construction-login-feedback" aria-live="polite"></p>
+        </div>
+        <div class="construction-section-title construction-section-title--compact">
+          <span>자주 쓰는 질문</span>
+        </div>
+        <div class="construction-brds-preset-row" role="group" aria-label="질문 프리셋">
+          <button type="button" class="ghost construction-brds-preset-btn" data-brds-preset="1">① 오시공 보강·절차</button>
+          <button type="button" class="ghost construction-brds-preset-btn" data-brds-preset="2">② 항타 이격·오시공 정의</button>
+        </div>
+        <label class="construction-brds-block-label">추가 질문
+          <textarea id="header-brds-extra-question" class="save-work-input construction-brds-textarea" rows="3" placeholder="추가 질문을 입력하세요..."></textarea>
+        </label>
+        <div class="construction-sync-actions">
+          <button type="button" id="construction-brds-fetch-manual-btn" class="header-construction-btn">한 번에 가져오기</button>
+          <button type="button" id="header-brds-submit-btn" class="header-construction-btn">질문 보내기</button>
+          <a class="ghost construction-brds-external-link" href="https://baronet.daewooenc.com/login.do" target="_blank" rel="noopener noreferrer">웹에서 열기</a>
+        </div>
+        <div id="header-brds-status" class="construction-sync-status" aria-live="polite"></div>
+        <div class="construction-section-title construction-section-title--compact">
+          <span>웹 매뉴얼 (BRDS)</span>
+          <small>「로그인」은 서버에서 Playwright 로 사내 BRDS 에 로그인한 뒤, <strong>역프록시(동일 출처)</strong>로 iframe 을 엽니다. 프론트와 API 가 같은 호스트일 때 쿠키가 가장 잘 붙습니다. 실패 시 바로넷 폼 자동 제출·직접 로그인 화면으로 이어집니다.</small>
+        </div>
+        <div class="construction-manual-iframe-wrap">
+          <iframe
+            id="construction-brds-manual-iframe"
+            name="pilexy-brds-manual-embed"
+            class="construction-manual-iframe"
+            src="https://aissvp01.daewooenc.com/brds/prugio/"
+            title="BRDS 푸르지오 매뉴얼"
+            loading="lazy"
+            allow="fullscreen"
+          ></iframe>
+          <div class="construction-manual-iframe-footer" role="toolbar" aria-label="BRDS 열기">
+            <button type="button" id="construction-brds-btn-newwin-manual" class="ghost construction-brds-embed-nav-btn" title="푸르지오 매뉴얼을 새 탭에서 엽니다">매뉴얼 새 창</button>
+            <button type="button" id="construction-brds-btn-iframe-baronet" class="ghost construction-brds-embed-nav-btn construction-brds-embed-nav-btn--primary" title="바로넷 로그인 화면을 아래 iframe에 불러옵니다">바로넷</button>
+            <button type="button" id="construction-brds-btn-iframe-manual" class="ghost construction-brds-embed-nav-btn" title="아래 iframe에 푸르지오 매뉴얼 주소를 다시 불러옵니다">매뉴얼 iframe</button>
+          </div>
+        </div>
+        <div class="construction-section-title construction-section-title--compact">
+          <span>가져온 내용</span>
+          <small>매뉴얼 본문·기본 질문 답·「질문 보내기」 결과가 모두 이 한 칸에 이어집니다.</small>
+        </div>
+        <textarea id="header-brds-manual-content" class="save-work-input construction-brds-textarea construction-brds-textarea--tall" rows="14" placeholder="한 번에 가져오기 또는 질문 보내기 결과" spellcheck="false"></textarea>
+        <details id="header-brds-debug-details" class="construction-manual-debug-details">
+          <summary>서버 단계 로그 (디버그)</summary>
+          <label class="construction-manual-debug-toggle"><input type="checkbox" id="header-brds-debug-steps" checked /> 요청 시 단계 수집 (debugTrace)</label>
+          <pre id="header-brds-debug-trace" class="construction-manual-debug-pre" spellcheck="false">(아직 요청 없음)</pre>
+        </details>
+      </section>
     </div>
   `;
 
@@ -623,6 +756,8 @@
     foundationClickStart: null,
     foundationDidDrag: false,
     foundationStandaloneMode: false,
+    manualStandaloneMode: false,
+    parcelStandaloneMode: false,
     foundationGroupsInitialized: false,
     foundationSelectablePolylineCacheKey: "",
     foundationSelectablePolylineCache: [],
@@ -1865,95 +2000,112 @@
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, width, height);
-    if (!state.hasDataset || !(state.circles || []).length) {
+    /* app.js drawCanvas 과 동일: 필지 검토 오버레이만 있어도 빈 화면이 아니게 */
+    const parcelOverlay =
+      state.parcelReviewViz != null ||
+      (typeof pilexyParcelReviewVizHasGeometry === "function" &&
+        pilexyParcelReviewVizHasGeometry(state.parcelReviewViz));
+    if ((!state.hasDataset || !(state.circles || []).length) && !parcelOverlay) {
       ctx.fillStyle = "#9ca3af";
       ctx.font = "16px 'Segoe UI'";
       ctx.textAlign = "center";
       ctx.fillText("Upload a DXF to visualize", width / 2, height / 2);
       return;
     }
-    constructionState.renderFrameToken += 1;
-    constructionState.playbackPathFrameToken = -1;
-    constructionState.foundationOverlayWorldPosGuard = new Set();
-    const prevGetVisibleCircles = typeof getVisibleCircles === "function" ? getVisibleCircles : null;
-    if (prevGetVisibleCircles) {
-      getVisibleCircles = function getVisibleCirclesFoundationOverlayOrder() {
-        return sortCirclesForFoundationOverlay(prevGetVisibleCircles());
-      };
-    }
-    try {
-      drawPolylineHints();
-      drawBuildings();
-      drawFoundationAreaHatches();
-      drawAreaCreationPreview();
-      const circles = getVisibleCircles();
-      const duplicateCircleIds = typeof getDuplicateCircleIds === "function" ? getDuplicateCircleIds() : new Set();
-      if (state.showCircles) {
-        circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+    const hasCircleLayer = Boolean(state.hasDataset && (state.circles || []).length);
+    if (hasCircleLayer) {
+      constructionState.renderFrameToken += 1;
+      constructionState.playbackPathFrameToken = -1;
+      constructionState.foundationOverlayWorldPosGuard = new Set();
+      const prevGetVisibleCircles = typeof getVisibleCircles === "function" ? getVisibleCircles : null;
+      if (prevGetVisibleCircles) {
+        getVisibleCircles = function getVisibleCirclesFoundationOverlayOrder() {
+          return sortCirclesForFoundationOverlay(prevGetVisibleCircles());
+        };
       }
-      if (state.showPoints) {
-        circles.forEach((circle) => drawCirclePoint(circle));
+      try {
+        drawPolylineHints();
+        drawBuildings();
+        drawFoundationAreaHatches();
+        drawAreaCreationPreview();
+        const circles = getVisibleCircles();
+        const duplicateCircleIds = typeof getDuplicateCircleIds === "function" ? getDuplicateCircleIds() : new Set();
+        if (state.showCircles) {
+          circles.forEach((circle) => drawCircle(circle, duplicateCircleIds));
+        }
+        if (state.showPoints) {
+          circles.forEach((circle) => drawCirclePoint(circle));
+        }
+        if (typeof drawDuplicateLabels === "function") {
+          drawDuplicateLabels(circles, duplicateCircleIds);
+        }
+        if (state.showTextLabels) {
+          drawTextLabels();
+        }
+        if (state.showMatchLines) {
+          drawCircleToNumberMatchLines(circles);
+        }
+        if (typeof drawRetainingWallVizLinks === "function") {
+          drawRetainingWallVizLinks();
+        }
+      } finally {
+        if (prevGetVisibleCircles) getVisibleCircles = prevGetVisibleCircles;
       }
-      if (typeof drawDuplicateLabels === "function") {
-        drawDuplicateLabels(circles, duplicateCircleIds);
-      }
-      if (state.showTextLabels) {
-        drawTextLabels();
-      }
-      if (state.showMatchLines) {
-        drawCircleToNumberMatchLines(circles);
-      }
-      drawTooltip();
-    } finally {
-      if (prevGetVisibleCircles) getVisibleCircles = prevGetVisibleCircles;
-    }
-    drawPfPolyAndFileLinkLines();
-    if (isFoundationTabActive()) {
-      const manualPolylineIds = constructionState.foundationSelectedPolylineIds || new Set();
-      const filteredPolylineIds = constructionState.foundationFilteredPolylineIds || new Set();
-      const highlightPolylineIds = new Set([
-        ...Array.from(manualPolylineIds),
-        ...Array.from(filteredPolylineIds),
-      ]);
-      if (highlightPolylineIds.size) {
-        const lookup = getFoundationPolylineIdLookup();
-        ctx.save();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "#22d3ee";
-        ctx.setLineDash([]);
-        Array.from(highlightPolylineIds).forEach((polylineId) => {
-          const polyline = lookup.get(polylineId);
-          if (!polyline || !Array.isArray(polyline.vertices) || polyline.vertices.length < 3) return;
-          ctx.beginPath();
-          polyline.vertices.forEach((vertex, index) => {
-            const p = worldToCanvas(vertex.x, vertex.y);
-            if (index === 0) ctx.moveTo(p.x, p.y);
-            else ctx.lineTo(p.x, p.y);
+      drawPfPolyAndFileLinkLines();
+      if (isFoundationTabActive()) {
+        const manualPolylineIds = constructionState.foundationSelectedPolylineIds || new Set();
+        const filteredPolylineIds = constructionState.foundationFilteredPolylineIds || new Set();
+        const highlightPolylineIds = new Set([
+          ...Array.from(manualPolylineIds),
+          ...Array.from(filteredPolylineIds),
+        ]);
+        if (highlightPolylineIds.size) {
+          const lookup = getFoundationPolylineIdLookup();
+          ctx.save();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#22d3ee";
+          ctx.setLineDash([]);
+          Array.from(highlightPolylineIds).forEach((polylineId) => {
+            const polyline = lookup.get(polylineId);
+            if (!polyline || !Array.isArray(polyline.vertices) || polyline.vertices.length < 3) return;
+            ctx.beginPath();
+            polyline.vertices.forEach((vertex, index) => {
+              const p = worldToCanvas(vertex.x, vertex.y);
+              if (index === 0) ctx.moveTo(p.x, p.y);
+              else ctx.lineTo(p.x, p.y);
+            });
+            ctx.closePath();
+            ctx.stroke();
           });
-          ctx.closePath();
-          ctx.stroke();
-        });
+          ctx.restore();
+        }
+      }
+      if (
+        constructionState.foundationWindowSelect
+        && constructionState.foundationWindowRect
+        && isFoundationTabActive()
+      ) {
+        const rect = constructionState.foundationWindowRect;
+        const minX = Math.min(rect.startX, rect.endX);
+        const minY = Math.min(rect.startY, rect.endY);
+        const rw = Math.abs(rect.endX - rect.startX);
+        const rh = Math.abs(rect.endY - rect.startY);
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = "#2563eb";
+        ctx.fillStyle = "rgba(37, 99, 235, 0.12)";
+        ctx.lineWidth = 1.4;
+        ctx.fillRect(minX, minY, rw, rh);
+        ctx.strokeRect(minX, minY, rw, rh);
         ctx.restore();
       }
     }
-    if (
-      constructionState.foundationWindowSelect
-      && constructionState.foundationWindowRect
-      && isFoundationTabActive()
-    ) {
-      const rect = constructionState.foundationWindowRect;
-      const minX = Math.min(rect.startX, rect.endX);
-      const minY = Math.min(rect.startY, rect.endY);
-      const width = Math.abs(rect.endX - rect.startX);
-      const height = Math.abs(rect.endY - rect.startY);
-      ctx.save();
-      ctx.setLineDash([6, 4]);
-      ctx.strokeStyle = "#2563eb";
-      ctx.fillStyle = "rgba(37, 99, 235, 0.12)";
-      ctx.lineWidth = 1.4;
-      ctx.fillRect(minX, minY, width, height);
-      ctx.strokeRect(minX, minY, width, height);
-      ctx.restore();
+    /* 시공이 drawCanvas를 갈아끼우면서 빠져 있었음 — 메인 캔버스(캐드뷰어)에 필지 링 표시 */
+    if (typeof drawParcelReviewViz === "function") {
+      drawParcelReviewViz();
+    }
+    if (typeof drawTooltip === "function") {
+      drawTooltip();
     }
   };
 
@@ -2053,6 +2205,14 @@
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+    if (typeof isRetainingWallVizHighlightCircle === "function" && isRetainingWallVizHighlightCircle(circle.id)) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(45, 212, 191, 0.95)";
+      ctx.lineWidth = 2.8;
+      ctx.setLineDash([]);
+      ctx.stroke();
+    }
   };
 
   const originalDrawCirclePoint = drawCirclePoint;
@@ -2074,10 +2234,13 @@
       return;
     }
     const { x, y } = worldToCanvas(circle.center_x, circle.center_y);
-    const isHighlighted = state.highlightedCircleIds.has(circle.id) || hoveredCircleId === circle.id;
+    const isRwViz =
+      typeof isRetainingWallVizHighlightCircle === "function" && isRetainingWallVizHighlightCircle(circle.id);
+    const isHighlighted =
+      state.highlightedCircleIds.has(circle.id) || hoveredCircleId === circle.id || isRwViz;
     const isManualSelected = state.manualSelection.circleId === circle.id;
     const playbackStage = getPlaybackOverlayStage(overlay);
-    const pointRadius = isManualSelected ? 5 : playbackStage === "current" ? 4.4 : 3;
+    const pointRadius = isManualSelected ? 5 : playbackStage === "current" ? 4.4 : isRwViz ? 4.2 : 3;
     ctx.beginPath();
     ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
     ctx.fillStyle = circle.has_error
@@ -2762,12 +2925,21 @@
   }
 
   function setDrawerTitle(tab) {
-    const titles = { settings: "설정", status: "시공현황", settlement: "기성정리", "foundation-thickness": "기초골조 두께" };
+    const titles = {
+      settings: "설정",
+      status: "시공현황",
+      settlement: "기성정리",
+      "foundation-thickness": "기초골조 두께",
+      manual: "매뉴얼",
+      "parcel-review": "필지 검토",
+    };
     const subtitles = {
       settings: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
       status: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
       settlement: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
       "foundation-thickness": "기초 골조 두께를 지정해서 기성에 연동합니다.",
+      manual: "로그인·매뉴얼 본문·질문을 한 화면에서 사용합니다.",
+      "parcel-review": "파일 마스터 좌표로 필지 경계를 조회하고 대지 침범을 자동 판정합니다.",
     };
     constructionDrawerTitle.textContent = titles[tab] || "시공현황";
     if (constructionDrawerSubtitle) {
@@ -2776,11 +2948,25 @@
   }
 
   function applyDrawerLayoutMode() {
-    const foundationOnly = Boolean(constructionState.foundationStandaloneMode);
+    const hideTabStrip =
+      Boolean(constructionState.foundationStandaloneMode)
+      || Boolean(constructionState.manualStandaloneMode)
+      || Boolean(constructionState.parcelStandaloneMode);
     if (constructionTabStrip) {
-      constructionTabStrip.style.display = foundationOnly ? "none" : "";
+      constructionTabStrip.style.display = hideTabStrip ? "none" : "";
     }
-    constructionDrawer.classList.toggle("construction-drawer--foundation-only", foundationOnly);
+    constructionDrawer.classList.toggle(
+      "construction-drawer--foundation-only",
+      Boolean(constructionState.foundationStandaloneMode),
+    );
+    constructionDrawer.classList.toggle(
+      "construction-drawer--manual-only",
+      Boolean(constructionState.manualStandaloneMode) || Boolean(constructionState.parcelStandaloneMode),
+    );
+    constructionDrawer.classList.toggle(
+      "construction-drawer--parcel-only",
+      Boolean(constructionState.parcelStandaloneMode),
+    );
   }
 
   function disableViewerOverlay(message) {
@@ -2838,6 +3024,8 @@
         status: ["/pilexy/construction/status", "시공 · 시공현황"],
         settlement: ["/pilexy/construction/settlement", "시공 · 기성정리"],
         "foundation-thickness": ["/pilexy/construction/foundation-thickness", "시공 · 기초골조 두께"],
+        manual: ["/pilexy/construction/manual", "시공 · 매뉴얼"],
+        "parcel-review": ["/pilexy/construction/parcel-review", "시공 · 필지 검토"],
       }[tab];
       if (vp) window.pilexySendVirtualPageView(vp[0], vp[1]);
     }
@@ -2846,8 +3034,10 @@
   function openConstructionDrawer(tab, options = {}) {
     constructionState.isOpen = true;
     constructionState.foundationStandaloneMode = Boolean(
-      options?.foundationStandaloneMode && (tab === "foundation-thickness"),
+      options?.foundationStandaloneMode && tab === "foundation-thickness",
     );
+    constructionState.manualStandaloneMode = Boolean(options?.manualStandaloneMode && tab === "manual");
+    constructionState.parcelStandaloneMode = Boolean(options?.parcelStandaloneMode && tab === "parcel-review");
     applyDrawerLayoutMode();
     constructionDrawer.classList.add("open");
     constructionDrawer.setAttribute("aria-hidden", "false");
@@ -7625,8 +7815,23 @@ function inferOpenRectangleVertices(vertices) {
       button.disabled = !enabled;
       button.title = enabled ? "" : "프로젝트/작업 불러오기 + 파일 좌표가 필요합니다.";
     });
+    const constructionParcelReviewBtn = document.getElementById("construction-parcel-review-btn");
+    if (constructionParcelReviewBtn) {
+      const parcelOk = Array.isArray(state.circles) && state.circles.length > 0;
+      constructionParcelReviewBtn.disabled = !parcelOk;
+      constructionParcelReviewBtn.title = parcelOk ? "" : "DXF 업로드 또는 작업 불러오기 후 사용할 수 있습니다.";
+    }
     if (!enabled && constructionState.isOpen) {
-      closeConstructionDrawer();
+      const keepDrawerOpen =
+        constructionState.manualStandaloneMode
+        || constructionState.foundationStandaloneMode
+        || constructionState.parcelStandaloneMode
+        || constructionState.activeTab === "manual"
+        || constructionState.activeTab === "parcel-review"
+        || constructionState.activeTab === "foundation-thickness";
+      if (!keepDrawerOpen) {
+        closeConstructionDrawer();
+      }
     }
     renderProjectContext();
   }
@@ -8214,10 +8419,588 @@ function inferOpenRectangleVertices(vertices) {
     }
   });
 
+  const constructionManualBtn = document.getElementById("construction-manual-btn");
+  if (constructionManualBtn) {
+    constructionManualBtn.addEventListener("click", () => {
+      openConstructionDrawer("manual", { manualStandaloneMode: true });
+    });
+  }
+
+  const constructionParcelReviewHeaderBtn = document.getElementById("construction-parcel-review-btn");
+  if (constructionParcelReviewHeaderBtn) {
+    constructionParcelReviewHeaderBtn.addEventListener("click", () => {
+      openConstructionDrawer("parcel-review", { parcelStandaloneMode: true });
+    });
+  }
+
+  let lastParcelReviewResponse = null;
+
+  function syncParcelFocusNearbyButton() {
+    const btn = q("#construction-parcel-focus-nearby-btn");
+    if (!btn) return;
+    const ok = lastParcelReviewResponse != null;
+    btn.disabled = !ok;
+    btn.title = ok
+      ? "왼쪽 도면을 인접 필지·선택 필지·쿼리점이 보이도록 더 촘촘히 확대합니다."
+      : "먼저 「자동 검토 실행」을 하세요.";
+  }
+
+  /** 「필지 표시」가 꺼지면 인접·꼭짓점 디버그는 도면에 반영되지 않으므로 입력만 비활성화 */
+  function syncParcelLayerDependentControls() {
+    const lot = q("#construction-parcel-show-parcel-lot");
+    const nearby = q("#construction-parcel-show-nearby-rings");
+    const dbg = q("#construction-parcel-debug-nearby-vertices");
+    const nearbyLab = q("#construction-parcel-show-nearby-rings-label");
+    const dbgLab = q("#construction-parcel-debug-nearby-vertices-label");
+    if (!lot) return;
+    const on = lot.checked;
+    if (nearby) nearby.disabled = !on;
+    if (dbg) dbg.disabled = !on;
+    if (nearbyLab) {
+      nearbyLab.title = on ? "" : "「필지 표시」가 꺼져 있으면 인접 후보는 도면에 그리지 않습니다. 필지를 켠 뒤 이 옵션을 조절하세요.";
+    }
+    if (dbgLab) {
+      dbgLab.title = on ? "" : "필지·인접 표시가 꺼져 있으면 인접 꼭짓점 디버그는 적용되지 않습니다.";
+    }
+  }
+
+  function buildParcelReviewDebugSummaryHtml(data) {
+    const dbg = data.debug;
+    if (!dbg || typeof dbg !== "object") return "";
+    const wfs = dbg.wfs || {};
+    const pp = dbg.parcel_pick || {};
+    const tm = dbg.tm_inputs_for_pyproj || {};
+    const cq = dbg.computed_query_lonlat;
+    const ranked = Array.isArray(pp.candidates_ranked) ? pp.candidates_ranked : [];
+    const topItems = ranked.slice(0, 5).map((c, i) => {
+      const pnu = c.pnu != null ? String(c.pnu) : "—";
+      const dor = c.inside_projected_draw ? "도면 포함" : "도면 비포함";
+      const ll = c.inside_wgs84_planar ? "4326포함" : "4326비포함";
+      const dm = c.distance_query_to_ring_m_projected != null ? `${c.distance_query_to_ring_m_projected} m` : "—";
+      const ro = c.ring_orient != null ? String(c.ring_orient) : "—";
+      return `<li><span class="construction-parcel-debug-li-title">#${i + 1}</span> PNU <code>${escape(pnu)}</code> · ${escape(dor)} · ${escape(ll)} · 거리≈${escape(dm)} · <code>${escape(ro)}</code></li>`;
+    });
+    const wfsLine = wfs.skipped
+      ? `생략: ${escape(String(wfs.reason || ""))}`
+      : `bbox=${escape(String(wfs.bbox_param || "—"))} · posList다각형 ${escape(String(wfs.poslist_polygon_count ?? "—"))}개 · HTTP ${escape(String(wfs.http_status ?? "—"))} · 응답 ${escape(String(wfs.response_chars ?? "—"))}자`;
+    const chain = typeof dbg.coordinate_chain === "string" ? dbg.coordinate_chain : "";
+    const ol =
+      topItems.length > 0
+        ? `<ol class="construction-parcel-debug-ol">${topItems.join("")}</ol>`
+        : `<p class="construction-parcel-debug-empty">(필지 후보 없음)</p>`;
+    return `
+      <details class="construction-parcel-debug-details">
+        <summary>외부(WFS)·내부(도면) 매칭 절차 요약</summary>
+        <p class="construction-parcel-debug-chain">${escape(chain)}</p>
+        <p class="construction-parcel-debug-line"><strong>WFS</strong>: ${wfsLine}</p>
+        <p class="construction-parcel-debug-line"><strong>도면→TM(pyproj 입력)</strong>: E=${escape(String(tm.easting_m))}, N=${escape(String(tm.northing_m))}, swap_xy=${escape(String(tm.swap_xy))}, EPSG:${escape(String(tm.assumed_epsg))}</p>
+        <p class="construction-parcel-debug-line"><strong>역산 쿼리 WGS84</strong>: ${
+          cq && Number.isFinite(Number(cq.lon)) && Number.isFinite(Number(cq.lat))
+            ? escape(`${Number(cq.lon).toFixed(6)}, ${Number(cq.lat).toFixed(6)}`)
+            : "—"
+        }</p>
+        <p class="construction-parcel-debug-line"><strong>필지 후보(정렬 상위, 표시 최대 5)</strong> — 우선: 도면포함 → 4326포함 → 도면거리 짧음 → 투영면적 작음 (도면에는 상위 150개까지 자홍 폴리곤)</p>
+        ${ol}
+        <p class="construction-parcel-debug-hint">WFS는 쿼리점 기준 약 280m(사방)·<strong>대지(볼록) 바운딩</strong>에 약 170m 여유를 더한 BBOX를 합쳐 조회합니다(최대 500건, <code>nearby_parcel_rings</code>). 도로 전용 레이어는 아직 없습니다. 왼쪽 도면: 자홍=인접 외곽선, 노란=쿼리, 초록=선택 필지. 「디버그 전체 복사」로 JSON을 볼 수 있습니다.</p>
+      </details>
+    `;
+  }
+
+  function normalizeParcelDrawRing(ring) {
+    if (typeof window !== "undefined" && typeof window.pilexyNormalizeParcelRingPoints === "function") {
+      const pts = window.pilexyNormalizeParcelRingPoints(ring);
+      return pts.length >= 3 ? pts : [];
+    }
+    if (!Array.isArray(ring)) return [];
+    const out = [];
+    for (let i = 0; i < ring.length; i += 1) {
+      const p = ring[i];
+      let x;
+      let y;
+      if (Array.isArray(p) && p.length >= 2) {
+        x = Number(p[0]);
+        y = Number(p[1]);
+      } else if (p && typeof p === "object") {
+        x = Number(p.x);
+        y = Number(p.y);
+      } else {
+        continue;
+      }
+      if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+    }
+    return out.length >= 3 ? out : [];
+  }
+
+  /** 폴리곤이 아닌 폐곡선·개구(꼭짓점 2개 이상) — 지적 본번 경계 등 */
+  function normalizeParcelLineRing(ring) {
+    if (typeof window !== "undefined" && typeof window.pilexyNormalizeParcelRingPoints === "function") {
+      const pts = window.pilexyNormalizeParcelRingPoints(ring);
+      return pts.length >= 2 ? pts : [];
+    }
+    if (!Array.isArray(ring)) return [];
+    const out = [];
+    for (let i = 0; i < ring.length; i += 1) {
+      const p = ring[i];
+      let x;
+      let y;
+      if (Array.isArray(p) && p.length >= 2) {
+        x = Number(p[0]);
+        y = Number(p[1]);
+      } else if (p && typeof p === "object") {
+        x = Number(p.x);
+        y = Number(p.y);
+      } else {
+        continue;
+      }
+      if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+    }
+    return out.length >= 2 ? out : [];
+  }
+
+  function buildParcelVizPayload(data) {
+    const showNearbyEl = q("#construction-parcel-show-nearby-rings");
+    const showNearby = showNearbyEl ? showNearbyEl.checked : true;
+    const winnerPnu = data?.parcel_pnu != null ? String(data.parcel_pnu) : "";
+    let nearby = [];
+    const direct = data?.nearby_parcel_rings;
+    if (Array.isArray(direct) && direct.length > 0) {
+      nearby = direct
+        .map((row) => ({
+          pnu: row.pnu != null ? String(row.pnu) : "",
+          ring: normalizeParcelDrawRing(row.ring),
+          distance_m: row.distance_m,
+          isWinner: row != null && row.is_winner === true,
+        }))
+        .filter((n) => n.ring.length >= 3);
+    }
+    if (nearby.length === 0 && showNearby) {
+      const ranked = data?.debug?.parcel_pick?.candidates_ranked;
+      if (Array.isArray(ranked) && ranked.length) {
+        nearby = ranked
+          .map((c) => ({
+            pnu: c.pnu != null ? String(c.pnu) : "",
+            ring: normalizeParcelDrawRing(Array.isArray(c.ring_draw_xy) ? c.ring_draw_xy : []),
+            distance_m: c.distance_query_to_ring_m_projected,
+            isWinner: Boolean(winnerPnu && c.pnu != null && String(c.pnu) === winnerPnu),
+          }))
+          .filter((n) => n.ring.length >= 3);
+      }
+    }
+    if (!showNearby) {
+      nearby = [];
+    }
+    const cntEl = q("#construction-parcel-nearby-count");
+    if (cntEl) {
+      if (!showNearby) {
+        cntEl.textContent = "";
+      } else {
+        const nGray = nearby.filter((n) => !n.isWinner).length;
+        const nAll = nearby.length;
+        if (nGray > 0) cntEl.textContent = ` (자홍 폴리곤 ${nGray}개 / 후보 ${nAll}개)`;
+        else if (nAll > 0) cntEl.textContent = " (자홍 폴리곤 0개 — 후보가 선택 필지와 동일 PNU뿐이거나 1건)";
+        else cntEl.textContent = " (인접 링 없음)";
+      }
+    }
+    const dbgVtxEl = q("#construction-parcel-debug-nearby-vertices");
+    const showCadEl = q("#construction-parcel-show-cadastral");
+    const showLotEl = q("#construction-parcel-show-parcel-lot");
+    const showCadastralMap = showCadEl ? showCadEl.checked : true;
+    const showParcelLot = showLotEl ? showLotEl.checked : true;
+    const qp = data?.query_point;
+    const bonbunRings = Array.isArray(data?.cadastral_bonbun_rings)
+      ? data.cadastral_bonbun_rings.map(normalizeParcelLineRing).filter((r) => r.length >= 2)
+      : [];
+    return {
+      siteRing: data.site_polygon || [],
+      parcelRing: data.parcel_ring || [],
+      encroachmentRings: data.encroachment_rings || [],
+      nearbyParcelRings: nearby,
+      cadastralBonbunRings: bonbunRings,
+      winnerPnu,
+      showCadastralMap,
+      showParcelLot,
+      showNearbyParcels: showNearby,
+      debugShowNearbyRingVertices: Boolean(dbgVtxEl && dbgVtxEl.checked),
+      queryPoint:
+        qp && Number.isFinite(Number(qp.x)) && Number.isFinite(Number(qp.y))
+          ? { x: Number(qp.x), y: Number(qp.y) }
+          : null,
+    };
+  }
+
+  /** 인접 링 꼭짓점(도면 m) — buildParcelVizPayload와 동일 데이터로 패널 pre 갱신 */
+  function updateParcelNearbyVerticesDebugPre() {
+    const pre = q("#construction-parcel-nearby-vertices-pre");
+    if (!pre) return;
+    if (!lastParcelReviewResponse) {
+      pre.textContent = "(검토 실행 후 표시)";
+      return;
+    }
+    const payload = buildParcelVizPayload(lastParcelReviewResponse);
+    const nearby = (payload.nearbyParcelRings || []).filter((n) => n && !n.isWinner);
+    const maxRings = 8;
+    const maxPts = 24;
+    const qpt = payload.queryPoint;
+    const lines = [];
+    lines.push(
+      `쿼리점(도면 m): ${
+        qpt && Number.isFinite(Number(qpt.x)) && Number.isFinite(Number(qpt.y))
+          ? `${Number(qpt.x).toFixed(4)}, ${Number(qpt.y).toFixed(4)}`
+          : "—"
+      }`,
+    );
+    lines.push(`비승자 후보 링 전체 ${nearby.length}개 — 캔버스에 자홍 외곽선으로 전부 그림(상위 ${maxRings}개만 텍스트)`);
+    lines.push("");
+    nearby.slice(0, maxRings).forEach((n, idx) => {
+      const ring = Array.isArray(n.ring) ? n.ring : [];
+      lines.push(`--- #${idx + 1} PNU=${n.pnu != null && String(n.pnu) !== "" ? String(n.pnu) : "—"}  점 ${ring.length}개 ---`);
+      ring.slice(0, maxPts).forEach((p, i) => {
+        const x = Number(p.x);
+        const y = Number(p.y);
+        lines.push(
+          `  [${i}] ${Number.isFinite(x) ? x.toFixed(4) : "?"} , ${Number.isFinite(y) ? y.toFixed(4) : "?"}`,
+        );
+      });
+      if (ring.length > maxPts) lines.push(`  … 이 링에서 ${ring.length - maxPts}점 생략`);
+      lines.push("");
+    });
+    if (nearby.length > maxRings) {
+      lines.push(`(나머지 ${nearby.length - maxRings}개 링은 생략 — 전체는 「원본 JSON」)`);
+    }
+    pre.textContent = lines.join("\n");
+  }
+
+  function buildParcelReviewPayload() {
+    const circles = (state.circles || []).map((c) => {
+      const o = { center_x: Number(c.center_x), center_y: Number(c.center_y) };
+      const r = Number(c.radius);
+      if (Number.isFinite(r) && r > 0) o.radius = r;
+      return o;
+    });
+    const buildings = (state.buildings || []).map((b) => ({
+      name: String(b.name || ""),
+      kind: b.kind || "building",
+      vertices: (b.vertices || []).map((v) => ({ x: Number(v.x), y: Number(v.y) })),
+    }));
+    const pile_clusters = (state.pileClusters || []).map((cl) => ({
+      hull: (cl.hull || []).map((v) => ({ x: Number(v.x), y: Number(v.y) })),
+    }));
+    const epsgEl = q("#construction-parcel-epsg");
+    const tolEl = q("#construction-parcel-tolerance");
+    const swapEl = q("#construction-parcel-swap-xy");
+    return {
+      circles,
+      buildings,
+      pile_clusters,
+      assumed_epsg: epsgEl ? Number(epsgEl.value) || 5186 : 5186,
+      tolerance_m: tolEl && tolEl.value !== "" ? Number(tolEl.value) : 0.35,
+      swap_xy: Boolean(swapEl && swapEl.checked),
+    };
+  }
+
+  function buildParcelTabPickerHtml(data) {
+    if (!data || typeof data !== "object") return "";
+    const payload = buildParcelVizPayload(data);
+    const winnerPnu = String(payload.winnerPnu || "").trim();
+    const hasWinnerRing = Array.isArray(payload.parcelRing) && payload.parcelRing.length >= 3;
+    const rows = [];
+    if (hasWinnerRing && winnerPnu) {
+      const pw = escape(winnerPnu);
+      rows.push(
+        `<li><button type="button" class="construction-parcel-pick-btn ghost" data-parcel-review-pnu="${pw}" data-parcel-review-winner="1">연속지적(승자) · PNU <code>${pw}</code></button></li>`,
+      );
+    }
+    const nearby = (payload.nearbyParcelRings || []).filter(
+      (n) => n && Array.isArray(n.ring) && n.ring.length >= 3 && String(n.pnu || "").trim() !== "" && n.isWinner !== true,
+    );
+    nearby.forEach((n) => {
+      const p = escape(String(n.pnu));
+      const dm =
+        n.distance_m != null && Number.isFinite(Number(n.distance_m))
+          ? ` · 쿼리~외곽선 ≈ ${Number(n.distance_m).toFixed(2)} m`
+          : "";
+      rows.push(
+        `<li><button type="button" class="construction-parcel-pick-btn ghost" data-parcel-review-pnu="${p}" data-parcel-review-winner="0">인접 후보 · PNU <code>${p}</code>${escape(dm)}</button></li>`,
+      );
+    });
+    if (rows.length === 0) return "";
+    return `
+      <div class="construction-parcel-picker">
+        <div class="construction-parcel-picker-title">탭에서 필지 선택</div>
+        <p class="construction-parcel-picker-hint">항목을 누르면 왼쪽 도면에 노란 점선으로 강조됩니다.</p>
+        <ul class="construction-parcel-picker-list">${rows.join("")}</ul>
+      </div>`;
+  }
+
+  function renderParcelReviewSummary(data, { loading = false, errorText = "" } = {}) {
+    const el = q("#construction-parcel-summary");
+    if (!el) return;
+    if (loading) {
+      el.innerHTML = `<div class="construction-parcel-loading">검토 중…</div>`;
+      return;
+    }
+    if (errorText) {
+      el.innerHTML = `<div class="construction-parcel-error">${escape(errorText)}</div>`;
+      return;
+    }
+    const qp = data.query_point || {};
+    const qx = qp.x;
+    const qy = qp.y;
+    const qxs = typeof qx === "number" && Number.isFinite(qx) ? qx.toFixed(2) : escape(String(qx ?? "—"));
+    const qys = typeof qy === "number" && Number.isFinite(qy) ? qy.toFixed(2) : escape(String(qy ?? "—"));
+    const ll = data.query_lonlat;
+    const lonStr = ll && Number.isFinite(Number(ll.lon)) ? Number(ll.lon).toFixed(5) : "—";
+    const latStr = ll && Number.isFinite(Number(ll.lat)) ? Number(ll.lat).toFixed(5) : "—";
+    let verdictLabel = "";
+    let verdictClass = "construction-parcel-verdict--muted";
+    const llIn = Boolean(data.parcel_contains_query_lonlat);
+    const drawIn = Boolean(data.query_inside_parcel_drawing);
+    if (data.parcel_available) {
+      if (!drawIn && !llIn) {
+        verdictLabel = "쿼리점이 연속지적 링 안에 없음(참고 연직만 표시)";
+        verdictClass = "construction-parcel-verdict--bad";
+      } else if (!drawIn && llIn) {
+        verdictLabel = "도면 투영이 연속지적과 어긋남(EPSG·원점·XY 확인)";
+        verdictClass = "construction-parcel-verdict--bad";
+      } else if (drawIn && !llIn) {
+        verdictLabel = "도면 투영은 링 안, WGS84 평면 근사는 밖 — 좌표계·링 순서 참고";
+        verdictClass = "construction-parcel-verdict--muted";
+      } else {
+        verdictLabel = "연속지적·대지(볼록) 오버레이 표시(면적 침범 비교 없음)";
+        verdictClass = "construction-parcel-verdict--ok";
+      }
+    } else {
+      verdictLabel = "필지 경계 미조회";
+      verdictClass = "construction-parcel-verdict--muted";
+    }
+    const pnu = data.parcel_pnu ? escape(String(data.parcel_pnu)) : "—";
+    const areaSqm = "— (미사용)";
+    const warn =
+      Array.isArray(data.warnings) && data.warnings.length
+        ? `<div class="construction-parcel-warn">${escape(data.warnings.join(" "))}</div>`
+        : "";
+    const msg = data.message ? `<div class="construction-parcel-note">${escape(data.message)}</div>` : "";
+    const debugBlock = buildParcelReviewDebugSummaryHtml(data);
+    const tabPickerBlock = buildParcelTabPickerHtml(data);
+    el.innerHTML = `
+      <div class="construction-parcel-verdict ${verdictClass}">${escape(String(verdictLabel))}</div>
+      <dl class="construction-parcel-dl">
+        <div class="construction-parcel-dl-row"><dt>쿼리점(도면)</dt><dd>(${qxs}, ${qys})</dd></div>
+        <div class="construction-parcel-dl-row"><dt>추정 위치</dt><dd>${escape(lonStr)}, ${escape(latStr)} <span class="construction-parcel-dl-sub">WGS84</span></dd></div>
+        <div class="construction-parcel-dl-row"><dt>PNU</dt><dd>${pnu}</dd></div>
+        <div class="construction-parcel-dl-row"><dt>대지−필지 면적차</dt><dd>${escape(areaSqm)}</dd></div>
+        <div class="construction-parcel-dl-row"><dt>좌표계 가정</dt><dd>EPSG:${escape(String(data.assumed_epsg ?? ""))}</dd></div>
+        <div class="construction-parcel-dl-row"><dt>XY 바꿔 투영</dt><dd>${data.swap_xy ? "켜짐" : "끔"}</dd></div>
+        <div class="construction-parcel-dl-row"><dt>쿼리점∈필지(WGS84)</dt><dd>${data.parcel_available ? (llIn ? "예" : "아니오") : "—"}</dd></div>
+        <div class="construction-parcel-dl-row"><dt>쿼리점∈필지(도면)</dt><dd>${data.parcel_available ? (drawIn ? "예" : "아니오") : "—"}</dd></div>
+      </dl>
+      ${tabPickerBlock}
+      ${debugBlock}
+      ${warn}
+      ${msg}
+    `;
+  }
+
+  async function runParcelReview() {
+    const jsonEl = q("#construction-parcel-json");
+    const base = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "";
+    if (!Array.isArray(state.circles) || !state.circles.length) {
+      renderParcelReviewSummary({}, { errorText: "말뚝 좌표가 없습니다. DXF를 업로드하거나 작업을 불러오세요." });
+      return;
+    }
+    renderParcelReviewSummary({}, { loading: true });
+    try {
+      const r = await fetch(`${base}/api/parcel-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildParcelReviewPayload()),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const detail = typeof data?.detail === "string" ? data.detail : Array.isArray(data?.detail) ? JSON.stringify(data.detail) : "";
+        throw new Error(detail || r.statusText || "요청 실패");
+      }
+      lastParcelReviewResponse = data;
+      if (jsonEl) jsonEl.textContent = JSON.stringify(data, null, 2);
+      renderParcelReviewSummary(data, {});
+      const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+      const vizPayload = buildParcelVizPayload(data);
+      if (typeof setViz === "function") {
+        setViz(vizPayload);
+      }
+      const selEl = q("#construction-parcel-canvas-selection");
+      if (selEl) selEl.textContent = "";
+      const focusNear =
+        typeof window !== "undefined" ? window.pilexyFocusParcelReviewNearbyOnCanvas : null;
+      if (typeof focusNear === "function") focusNear(vizPayload);
+      syncParcelFocusNearbyButton();
+      syncParcelLayerDependentControls();
+      updateParcelNearbyVerticesDebugPre();
+      if (typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new Event("resize"));
+        window.requestAnimationFrame(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+      }
+    } catch (err) {
+      lastParcelReviewResponse = null;
+      const msg = errorMessage(err);
+      renderParcelReviewSummary({}, { errorText: msg });
+      if (jsonEl) jsonEl.textContent = `(오류) ${msg}`;
+      const clr = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+      if (typeof clr === "function") clr(null);
+      const selElErr = q("#construction-parcel-canvas-selection");
+      if (selElErr) selElErr.textContent = "";
+      syncParcelFocusNearbyButton();
+      syncParcelLayerDependentControls();
+      updateParcelNearbyVerticesDebugPre();
+    }
+  }
+
+  document.addEventListener("change", (ev) => {
+    const t = ev.target;
+    if (!t) return;
+    if (t.id === "construction-parcel-coord-probe") {
+      const fn = typeof window !== "undefined" ? window.pilexySetParcelReviewCoordProbe : null;
+      if (typeof fn === "function") fn(Boolean(t.checked));
+      return;
+    }
+    if (
+      t.id === "construction-parcel-show-nearby-rings"
+      || t.id === "construction-parcel-debug-nearby-vertices"
+      || t.id === "construction-parcel-show-cadastral"
+      || t.id === "construction-parcel-show-parcel-lot"
+    ) {
+      syncParcelLayerDependentControls();
+      if (!lastParcelReviewResponse) return;
+      const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+      if (typeof setViz !== "function") return;
+      setViz(buildParcelVizPayload(lastParcelReviewResponse));
+      const selEl = q("#construction-parcel-canvas-selection");
+      if (selEl) selEl.textContent = "";
+      if (t.id === "construction-parcel-show-nearby-rings") {
+        renderParcelReviewSummary(lastParcelReviewResponse, {});
+      }
+      updateParcelNearbyVerticesDebugPre();
+    }
+  });
+
+  document.addEventListener("click", (ev) => {
+    const btn = ev.target && typeof ev.target.closest === "function" ? ev.target.closest(".construction-parcel-pick-btn") : null;
+    if (!btn || !btn.closest("#construction-drawer")) return;
+    const pnu = btn.getAttribute("data-parcel-review-pnu") || "";
+    const isWinner = btn.getAttribute("data-parcel-review-winner") === "1";
+    const fn = typeof window !== "undefined" ? window.pilexySetParcelReviewSelection : null;
+    if (typeof fn === "function") fn({ pnu, isWinner, focus: true });
+  });
+
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target;
+    if (!t || t.id !== "construction-parcel-copy-debug-btn") return;
+    const fb = q("#construction-parcel-copy-feedback");
+    if (!lastParcelReviewResponse) {
+      if (fb) fb.textContent = "먼저 「자동 검토 실행」을 하세요.";
+      if (fb) setTimeout(() => { fb.textContent = ""; }, 3500);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(lastParcelReviewResponse, null, 2));
+      if (fb) fb.textContent = "클립보드에 복사했습니다.";
+    } catch {
+      if (fb) fb.textContent = "복사 실패(HTTPS·브라우저 권한).";
+    }
+    if (fb) setTimeout(() => { fb.textContent = ""; }, 3500);
+  });
+
+  const constructionParcelRunBtn = q("#construction-parcel-run-btn");
+  if (constructionParcelRunBtn) {
+    constructionParcelRunBtn.addEventListener("click", () => void runParcelReview());
+  }
+  const constructionParcelFocusNearbyBtn = q("#construction-parcel-focus-nearby-btn");
+  if (constructionParcelFocusNearbyBtn) {
+    constructionParcelFocusNearbyBtn.addEventListener("click", () => {
+      if (!lastParcelReviewResponse) return;
+      const vizPayload = buildParcelVizPayload(lastParcelReviewResponse);
+      const fn = typeof window !== "undefined" ? window.pilexyFocusParcelReviewNearbyOnCanvas : null;
+      if (typeof fn === "function") fn(vizPayload);
+    });
+  }
+  syncParcelFocusNearbyButton();
+  syncParcelLayerDependentControls();
+
+  const constructionParcelClearVizBtn = q("#construction-parcel-clear-viz-btn");
+  if (constructionParcelClearVizBtn) {
+    constructionParcelClearVizBtn.addEventListener("click", () => {
+      const clr = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+      if (typeof clr === "function") clr(null);
+      const selEl = q("#construction-parcel-canvas-selection");
+      if (selEl) selEl.textContent = "";
+      const sum = q("#construction-parcel-summary");
+      if (sum) {
+        sum.innerHTML = `<div class="construction-parcel-note">도면 위 표시를 지웠습니다.</div>`;
+      }
+    });
+  }
+
+  window.addEventListener("pilexy-parcel-review-select", (ev) => {
+    const el = q("#construction-parcel-canvas-selection");
+    if (!el) return;
+    const d = ev.detail || {};
+    if (d.cleared || !d.pnu) {
+      el.textContent = "";
+      return;
+    }
+    el.textContent = `캔버스에서 선택: PNU ${String(d.pnu)}${d.isWinner ? " (연속지적 승자)" : " (인접 후보)"}`;
+  });
+
+  const constructionManualLoginBtn = q("#construction-manual-login-btn");
+  if (constructionManualLoginBtn) {
+    constructionManualLoginBtn.addEventListener("click", (ev) => {
+      const fn = typeof window !== "undefined" ? window.pilexyFetchBrdsManualLogin : null;
+      if (typeof fn === "function") void fn(ev.currentTarget);
+      else setSyncStatus("로그인 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
+    });
+  }
+
+  const constructionBrdsBtnNewwinManual = q("#construction-brds-btn-newwin-manual");
+  const constructionBrdsBtnIframeBaronet = q("#construction-brds-btn-iframe-baronet");
+  const constructionBrdsBtnIframeManual = q("#construction-brds-btn-iframe-manual");
+  const openBrdsWin = typeof window !== "undefined" ? window.pilexyOpenBrdsUrlInNewWindow : null;
+  const navBrdsEmbed = typeof window !== "undefined" ? window.pilexyNavigateBrdsManualEmbed : null;
+  if (constructionBrdsBtnNewwinManual) {
+    constructionBrdsBtnNewwinManual.addEventListener("click", () => {
+      if (typeof openBrdsWin === "function") openBrdsWin("prugio");
+      else setSyncStatus("새 창 열기 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
+    });
+  }
+  if (constructionBrdsBtnIframeBaronet) {
+    constructionBrdsBtnIframeBaronet.addEventListener("click", () => {
+      if (typeof navBrdsEmbed === "function") navBrdsEmbed("sso");
+      else setSyncStatus("iframe 이동 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
+    });
+  }
+  if (constructionBrdsBtnIframeManual) {
+    constructionBrdsBtnIframeManual.addEventListener("click", () => {
+      if (typeof navBrdsEmbed === "function") navBrdsEmbed("prugio");
+      else setSyncStatus("iframe 이동 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
+    });
+  }
+
+  const constructionBrdsFetchManualBtn = q("#construction-brds-fetch-manual-btn");
+  if (constructionBrdsFetchManualBtn) {
+    constructionBrdsFetchManualBtn.addEventListener("click", (ev) => {
+      const fn = typeof window !== "undefined" ? window.pilexyRunBrdsManualAutoPipeline : null;
+      if (typeof fn === "function") void fn(ev.currentTarget);
+      else setSyncStatus("매뉴얼 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
+    });
+  }
+
   constructionDrawerClose.addEventListener("click", closeConstructionDrawer);
   constructionTabButtons.forEach((button) => {
     button.addEventListener("click", () => {
       constructionState.foundationStandaloneMode = false;
+      constructionState.manualStandaloneMode = false;
+      constructionState.parcelStandaloneMode = false;
       applyDrawerLayoutMode();
       setConstructionTab(button.dataset.tab);
       renderProjectContext();
@@ -8945,4 +9728,5 @@ function inferOpenRectangleVertices(vertices) {
   renderLegend();
   applyDrawerLayoutMode();
   refreshFoundationPanel();
+  window.pilexyUpdateConstructionButtonsState = updateConstructionButtonsState;
 })();

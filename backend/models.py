@@ -389,6 +389,61 @@ class ConstructionDashboardRequest(BaseModel):
     )
 
 
+class BrdsPrugioManualRequest(BaseModel):
+    """매뉴얼(사내 페이지) — 서버 세션으로 로그인 후 본문 텍스트를 반환하거나 loginOnly 시 로그인 확인만."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(..., alias="userId")
+    password: str = Field(..., description="비밀번호(저장·로그에 남기지 않음)")
+    sso_entry_url: Optional[str] = Field(None, alias="ssoEntryUrl")
+    target_page_url: Optional[str] = Field(None, alias="targetPageUrl")
+    login_only: bool = Field(False, alias="loginOnly", description="True면 페이지 본문 없이 로그인 성공 여부만")
+    debug_steps: bool = Field(False, alias="debugSteps", description="True면 응답에 서버 단계 로그 debugTrace 포함")
+
+
+class BrdsSsoIframeAutopostRequest(BaseModel):
+    """바로넷 등 SSO 로그인 폼을 서버가 파싱해 iframe target POST 용 action/fields 를 반환."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(..., alias="userId")
+    password: str = Field(..., description="비밀번호(로그에 값 저장 안 함)")
+    sso_entry_url: Optional[str] = Field(None, alias="ssoEntryUrl")
+    debug_steps: bool = Field(False, alias="debugSteps")
+
+
+class BrdsSurfSessionRequest(BaseModel):
+    """Playwright 로 사내 BRDS 쿠키를 수집해 역프록시 세션을 만든다."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(..., alias="userId")
+    password: str = Field(..., description="비밀번호(서버 메모리에만 잠시 사용)")
+    sso_entry_url: Optional[str] = Field(None, alias="ssoEntryUrl")
+    target_page_url: Optional[str] = Field(None, alias="targetPageUrl")
+
+
+class BrdsPrugioAskRequest(BaseModel):
+    """매뉴얼 챗 질문 — 실제 챗봇 호출은 선택적 릴레이(PILEXY_BRDS_RELAY_URL)로 위임."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(..., alias="userId", description="로그인 아이디")
+    password: str = Field(..., description="비밀번호(서버 로그에 남기지 않음, 릴레이 전달용)")
+    question: str = Field(..., description="질문 본문")
+    sso_entry_url: Optional[str] = Field(
+        None,
+        alias="ssoEntryUrl",
+        description="SSO 진입 URL(릴레이 또는 클라이언트 안내용)",
+    )
+    target_page_url: Optional[str] = Field(
+        None,
+        alias="targetPageUrl",
+        description="PRUGio 챗 페이지 URL(Playwright 질의 시, 기본은 서버 설정)",
+    )
+
+
 class MeissaLoginRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

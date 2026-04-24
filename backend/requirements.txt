@@ -1,3 +1,4 @@
+python-dotenv==1.0.1
 fastapi==0.115.2
 uvicorn[standard]==0.31.1
 python-multipart==0.0.9
@@ -7,6 +8,10 @@ openpyxl==3.1.5
 numpy==2.1.1
 scikit-learn==1.5.2
 requests==2.32.3
+pyproj==3.7.0
+shapely==2.0.6
+# BRDS 매뉴얼: requests 실패 시 브라우저 자동 로그인 폴백 — 설치 후 `playwright install chromium` 필요
+playwright>=1.49.0
 pycryptodome==3.21.0
 xlrd==2.0.1
 laspy[lazrs]

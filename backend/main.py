@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+
+# Windows: SelectorEventLoop는 subprocess 미지원 → Playwright 드라이버 기동 실패(NotImplementedError).
+# 루프 생성 전에 Proactor 정책을 고정한다.
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except (AttributeError, OSError):
+        pass
+
 import copy
 import hashlib
 import threading
@@ -16,6 +26,9 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
+
+import requests
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -23,9 +36,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import ezdxf
 import pandas as pd
-from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -57,6 +70,20 @@ from .meissa_api import (
     meissa_nearest_z_xy_combined,
     meissa_dsm_z_batch_from_carta_export,
 )
+from .brds_prugio import (
+    BrdsManualDeferredPlaywright,
+    BrdsManualUserError,
+    DEFAULT_BRDS_PRUGIO_PAGE,
+    _manual_debug_attach,
+    _manual_debug_resume_on_main_thread,
+    _playwright_ask_enabled,
+    _playwright_brds_login_and_fetch,
+    _playwright_enabled,
+    _ssl_verify as brds_ssl_verify,
+    build_brds_sso_iframe_autopost,
+    export_brds_cookies_via_playwright,
+    fetch_brds_prugio_manual,
+)
 from .construction_reports import (
     build_dashboard as build_construction_dashboard,
     delete_dataset as delete_construction_dataset,
@@ -68,6 +95,10 @@ from .dxf_parser import foundation_pf_only_flag, parse_dxf_entities
 from .excel_compare import compare_excel_workbook, inspect_excel_workbook
 from .models import (
     ApplyFilterRequest,
+    BrdsPrugioAskRequest,
+    BrdsPrugioManualRequest,
+    BrdsSsoIframeAutopostRequest,
+    BrdsSurfSessionRequest,
     BuildingApplyRequest,
     BuildingDefinition,
     BuildingVertex,
@@ -96,6 +127,7 @@ from .pile_clustering import (
     PilePoint,
     cluster_piles,
 )
+from .parcel_review_api import router as parcel_review_router
 from .pile_dataset_api import router as pile_dataset_router
 from .work_context import (
     DEFAULT_PROJECT_NAME,
@@ -117,6 +149,25 @@ _PILEXY_OPENAPI = str(os.environ.get("PILEXY_OPENAPI", "")).strip().lower() in (
     "on",
 )
 
+
+@asynccontextmanager
+async def _pilexy_app_lifespan(app: FastAPI):
+    _log = logging.getLogger(__name__)
+    if str(os.environ.get("PILEXY_BRDS_AUTO_INSTALL_PLAYWRIGHT", "1")).strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        try:
+            from .brds_prugio import ensure_playwright_chromium_installed
+
+            await run_in_threadpool(ensure_playwright_chromium_installed)
+        except Exception as exc:
+            _log.warning("서버 기동 시 Playwright Chromium 자동 설치 실패(매뉴얼 요청 시 재시도): %s", exc)
+    yield
+
+
 app = FastAPI(
     title="DXF Circle/Text Service",
     version="0.3.1",
@@ -124,6 +175,7 @@ app = FastAPI(
     docs_url="/docs" if _PILEXY_OPENAPI else None,
     redoc_url="/redoc" if _PILEXY_OPENAPI else None,
     openapi_url="/openapi.json" if _PILEXY_OPENAPI else None,
+    lifespan=_pilexy_app_lifespan,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +226,13 @@ ODA_CONVERTER_TIMEOUT_SECONDS = 180
 
 # 프로젝트 루트: 실행 경로(cwd)와 무관하게 main.py 위치 기준으로 고정 (저장 데이터 경로 일관성)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+except ImportError:
+    pass
 
 # 중앙 저장: DXF 처리 결과 저장 디렉터리
 SAVED_WORKS_DIR = os.path.join(_PROJECT_ROOT, "data", "saved_works")
@@ -489,7 +548,7 @@ async def pilexy_bind_circle_workspace(request: Request, call_next):
 async def add_no_cache_headers(request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith("/frontend/"):
+    if path == "/" or path.startswith("/frontend/") or path.startswith("/api/brds/surf/t"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -502,6 +561,7 @@ app.mount(
 )
 
 app.include_router(pile_dataset_router)
+app.include_router(parcel_review_router)
 
 FRONTEND_INDEX_PATH = os.path.join(_PROJECT_ROOT, "frontend", "index.html")
 
@@ -4562,6 +4622,229 @@ async def delete_construction_dataset_item(dataset_id: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.exception("Construction dataset delete failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to delete construction dataset.") from exc
+
+
+_BRDS_DEFAULT_SSO = "https://baronet.daewooenc.com/login.do"
+
+
+@app.post("/api/brds/sso-iframe-autopost")
+async def brds_sso_iframe_autopost(payload: BrdsSsoIframeAutopostRequest) -> Dict[str, Any]:
+    """SSO 로그인 페이지 HTML을 파싱해 iframe target 폼 POST 에 필요한 action/method/fields 반환."""
+    try:
+        return await run_in_threadpool(
+            lambda: build_brds_sso_iframe_autopost(
+                user_id=payload.user_id,
+                password=payload.password,
+                sso_entry_url=payload.sso_entry_url,
+                debug_steps=bool(payload.debug_steps),
+            )
+        )
+    except BrdsManualUserError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "debugTrace": exc.debug_trace},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("BRDS SSO iframe autopost build failed: %s", exc)
+        raise HTTPException(status_code=500, detail="SSO 폼 생성 중 오류가 발생했습니다.") from exc
+
+
+@app.post("/api/brds/surf-session")
+async def brds_surf_session_create(
+    payload: BrdsSurfSessionRequest,
+    response: Response,
+    request: Request,
+) -> Dict[str, Any]:
+    """Playwright 로 BRDS 쿠키를 수집·메모리에 보관하고 HttpOnly 쿠키로 터널 세션을 연다."""
+    from .brds_surf_proxy import surf_session_put
+
+    try:
+        cookies_list = await run_in_threadpool(
+            lambda: export_brds_cookies_via_playwright(
+                payload.user_id,
+                payload.password,
+                payload.sso_entry_url,
+                payload.target_page_url,
+            )
+        )
+    except Exception as exc:
+        logger.exception("BRDS surf-session Playwright failed: %s", exc)
+        raise HTTPException(status_code=500, detail="서버 브라우저 로그인 중 오류가 발생했습니다.") from exc
+    if not cookies_list:
+        raise HTTPException(
+            status_code=400,
+            detail="Playwright 로 로그인 후 쿠키를 받지 못했습니다. VPN·계정·Playwright 설치를 확인하세요.",
+        )
+    token = surf_session_put(cookies_list)
+    secure = str(request.url.scheme).lower() == "https"
+    response.set_cookie(
+        key="pilexy_brds_surf",
+        value=token,
+        max_age=28800,
+        httponly=True,
+        samesite="lax",
+        path="/api/brds/surf/t",
+        secure=secure,
+    )
+    return {
+        "ok": True,
+        "iframePath": "/api/brds/surf/t/aissvp01/brds/prugio/",
+    }
+
+
+@app.api_route(
+    "/api/brds/surf/t/{origin_key}/{full_path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+async def brds_surf_tunnel(origin_key: str, full_path: str, request: Request):
+    from .brds_surf_proxy import handle_tunnel
+
+    return await handle_tunnel(origin_key, full_path, request)
+
+
+@app.post("/api/brds/prugio-manual")
+async def brds_prugio_manual(payload: BrdsPrugioManualRequest) -> Dict[str, Any]:
+    """아이디·비밀번호로 로그인 확인(loginOnly) 또는 매뉴얼 페이지 본문을 텍스트로 반환."""
+    try:
+        # requests 는 스레드풀; Playwright 는 Deferred 후 asyncio.to_thread(동기 API) — Windows 루프의 subprocess 미구현 회피
+        return await run_in_threadpool(
+            lambda: fetch_brds_prugio_manual(
+                user_id=payload.user_id,
+                password=payload.password,
+                sso_entry_url=payload.sso_entry_url,
+                target_page_url=payload.target_page_url,
+                login_only=bool(payload.login_only),
+                debug_steps=bool(payload.debug_steps),
+            )
+        )
+    except BrdsManualDeferredPlaywright as d:
+        # 동일 try의 형제 except BrdsManualUserError 는 여기서 발생한 BrdsManualUserError 를 잡지 못함 → 반드시 내부 처리
+        _manual_debug_resume_on_main_thread(bool(payload.debug_steps), d.trace_copy)
+        try:
+            pw_res = await asyncio.to_thread(
+                _playwright_brds_login_and_fetch,
+                d.uid,
+                d.pw,
+                d.sso,
+                d.target,
+                d.login_only,
+                d.verify,
+            )
+            if pw_res is None:
+                raise BrdsManualUserError(d.fail_if_none_message)
+            return _manual_debug_attach(dict(pw_res))
+        except BrdsManualUserError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": str(exc), "debugTrace": exc.debug_trace},
+            ) from exc
+        except Exception as pw_exc:
+            logger.exception("BRDS manual Playwright(to_thread) failed: %s", pw_exc)
+            err = BrdsManualUserError(
+                "브라우저 자동 로그인 실행 중 서버 오류가 발생했습니다. "
+                f"({type(pw_exc).__name__}: {pw_exc})"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={"message": str(err), "debugTrace": err.debug_trace},
+            ) from pw_exc
+    except BrdsManualUserError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "debugTrace": exc.debug_trace},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("BRDS manual fetch failed: %s", exc)
+        raise HTTPException(status_code=500, detail="매뉴얼 요청 처리 중 오류가 발생했습니다.") from exc
+
+
+@app.post("/api/brds/prugio-ask")
+async def brds_prugio_ask(payload: BrdsPrugioAskRequest) -> Dict[str, Any]:
+    """
+    BRDS 챗봇 연동: 환경변수 PILEXY_BRDS_RELAY_URL 이 있으면 동일 JSON을 POST하여
+    릴레이가 Playwright 등으로 BRDS에 질의하고 { \"answer\": \"...\" } 형태로 돌려주도록 기대한다.
+    없으면 안내 메시지만 반환한다(비밀번호는 로그에 남기지 않음).
+    """
+    question = (payload.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="질문 내용을 입력하세요.")
+    uid = (payload.user_id or "").strip()
+    if not uid or not (payload.password or ""):
+        raise HTTPException(status_code=400, detail="아이디와 비밀번호를 입력하세요.")
+
+    relay = str(os.environ.get("PILEXY_BRDS_RELAY_URL", "")).strip()
+    sso_url = (payload.sso_entry_url or "").strip() or _BRDS_DEFAULT_SSO
+    timeout_sec = 120
+    try:
+        timeout_sec = max(15, min(300, int(str(os.environ.get("PILEXY_BRDS_RELAY_TIMEOUT_SEC", "120")).strip())))
+    except ValueError:
+        timeout_sec = 120
+
+    if relay:
+        body = payload.model_dump(by_alias=True)
+        body["ssoEntryUrl"] = sso_url
+        try:
+            resp = requests.post(relay, json=body, timeout=timeout_sec)
+        except requests.RequestException as exc:
+            logger.warning("BRDS relay request failed: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail="질문 전달 서버에 연결하지 못했습니다. 네트워크를 확인하세요.",
+            ) from exc
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {"raw": resp.text[:2000]}
+        if resp.status_code >= 400:
+            detail = data.get("detail") if isinstance(data, dict) else None
+            msg = detail if isinstance(detail, str) else resp.text[:500] or f"HTTP {resp.status_code}"
+            raise HTTPException(status_code=502, detail=msg)
+        if isinstance(data, dict) and data.get("answer") is not None:
+            return {"ok": True, "answer": str(data.get("answer") or ""), "relay": True}
+        return {"ok": True, "answer": "", "relay": True, "raw": data}
+
+    if _playwright_ask_enabled() and _playwright_enabled():
+        target_pg = (payload.target_page_url or "").strip() or DEFAULT_BRDS_PRUGIO_PAGE
+        try:
+            out = await asyncio.to_thread(
+                _playwright_brds_login_and_fetch,
+                uid,
+                payload.password,
+                sso_url,
+                target_pg,
+                False,
+                brds_ssl_verify(),
+                question,
+            )
+        except Exception as exc:
+            logger.exception("BRDS Playwright 질의 실패: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"브라우저 자동 질의 중 오류: {type(exc).__name__}",
+            ) from exc
+        if isinstance(out, dict) and out.get("answer") is not None:
+            return {
+                "ok": True,
+                "answer": str(out.get("answer") or ""),
+                "relay": False,
+                "source": str(out.get("source") or "playwright"),
+            }
+
+    return {
+        "ok": False,
+        "answer": None,
+        "relay": False,
+        "message": (
+            "이 환경에서는 질문을 자동으로 전달할 수 없습니다. "
+            "Playwright 질의가 비활성화(PILEXY_BRDS_USE_PLAYWRIGHT_ASK=0)이거나 로그인·채팅 UI를 열지 못했습니다. "
+            "사내 릴레이(PILEXY_BRDS_RELAY_URL)가 있으면 그쪽으로 전달할 수 있습니다."
+        ),
+        "ssologin_url": sso_url,
+    }
 
 
 @app.post("/api/construction/import-workbook")
