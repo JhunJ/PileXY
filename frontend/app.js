@@ -507,6 +507,15 @@ const state = {
   retainingWallVizAllEnabled: false,
   /** 필지 검토 오버레이: { siteRing, parcelRing, encroachmentRings } — 좌표는 도면 월드 */
   parcelReviewViz: null,
+  /** 경계점 좌표등록부 등 사용자 입력 링(도면 m) + 표시 옵션 */
+  parcelReviewLxRegister: {
+    ring: null,
+    showOutline: true,
+    showFill: false,
+    showVertices: true,
+    showEncroachment: true,
+    useAsReference: false,
+  },
   /** 캔버스 클릭으로 고른 필지: { pnu, isWinner } | null */
   parcelReviewSelection: null,
   /** 대지·필지 꼭짓점·쿼리점 호버 시 도면 좌표(선분 위 연속 호버 없음) — 시공 패널 체크박스와 동기 */
@@ -8008,7 +8017,9 @@ function drawCanvas() {
   ctx.fillStyle = "#0f172a";
   ctx.fillRect(0, 0, width, height);
   const parcelOverlay =
-    state.parcelReviewViz != null || pilexyParcelReviewVizHasGeometry(state.parcelReviewViz);
+    state.parcelReviewViz != null
+    || pilexyParcelReviewVizHasGeometry(state.parcelReviewViz)
+    || pilexyParcelReviewLxUserHasGeometry();
   if ((!state.hasDataset || !state.circles.length) && !parcelOverlay) {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "16px 'Segoe UI'";
@@ -8040,6 +8051,13 @@ function drawCanvas() {
   drawParcelReviewViz();
   drawTooltip();
 }
+
+function pilexyParcelReviewLxUserHasGeometry() {
+  const r = state.parcelReviewLxRegister?.ring;
+  return pilexyNormalizeParcelRingPoints(r).length >= 2;
+}
+
+window.pilexyParcelReviewLxUserHasGeometry = pilexyParcelReviewLxUserHasGeometry;
 
 function pilexyParcelReviewVizHasGeometry(payload) {
   if (!payload) return false;
@@ -8076,6 +8094,13 @@ function pilexyParcelReviewVizHasGeometry(payload) {
   ) {
     return true;
   }
+  if (
+    Array.isArray(payload.lxRegisterEncroachmentRings)
+    && payload.lxRegisterEncroachmentRings.some((r) => hasPoly(r))
+    && state.parcelReviewLxRegister?.showEncroachment !== false
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -8091,7 +8116,7 @@ function pilexySetParcelReviewViz(payload) {
     state.parcelReviewSelection = null;
     state.parcelReviewCoordHover = null;
     state.parcelReviewCoordPinned = null;
-    pilexySetParcelReviewCanvasBadge(false);
+    pilexySetParcelReviewCanvasBadge(pilexyParcelReviewLxUserHasGeometry());
     requestRedraw();
     return;
   }
@@ -8122,8 +8147,16 @@ function pilexySetParcelReviewViz(payload) {
       Number.isFinite(Number(payload.queryPoint.y))
         ? { x: Number(payload.queryPoint.x), y: Number(payload.queryPoint.y) }
         : null,
+    lxRegisterEncroachmentRings: (Array.isArray(payload.lxRegisterEncroachmentRings)
+      ? payload.lxRegisterEncroachmentRings
+      : []
+    )
+      .map((r) => pilexyParcelVizRingFromPayload(r, 3))
+      .filter((r) => r.length >= 3),
   };
-  pilexySetParcelReviewCanvasBadge(pilexyParcelReviewVizHasGeometry(payload));
+  pilexySetParcelReviewCanvasBadge(
+    pilexyParcelReviewVizHasGeometry(payload) || pilexyParcelReviewLxUserHasGeometry(),
+  );
   requestRedraw();
 }
 
@@ -8281,8 +8314,14 @@ function pickParcelReviewQueryPointCanvas(canvasX, canvasY) {
 }
 
 function pilexyParcelReviewRingsForCoordProbe(viz) {
-  if (!viz) return [];
   const rows = [];
+  if (!viz) {
+    const lxOnly = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+    if (lxOnly.length >= 3) {
+      rows.push({ ring: lxOnly, label: "경계점 좌표등록부(입력)" });
+    }
+    return rows;
+  }
   if (Array.isArray(viz.siteRing) && pilexyNormalizeParcelRingPoints(viz.siteRing).length >= 2) {
     rows.push({ ring: viz.siteRing, label: "대지 외곽" });
   }
@@ -8304,6 +8343,15 @@ function pilexyParcelReviewRingsForCoordProbe(viz) {
   (viz.encroachmentRings || []).forEach((r, idx) => {
     if (Array.isArray(r) && r.length >= 2) rows.push({ ring: r, label: `필지 밖·침범 ${idx + 1}` });
   });
+  const lxUserRing = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (lxUserRing.length >= 3) {
+    rows.push({ ring: lxUserRing, label: "경계점 좌표등록부(입력)" });
+  }
+  (viz.lxRegisterEncroachmentRings || []).forEach((r, idx) => {
+    if (Array.isArray(r) && r.length >= 2) {
+      rows.push({ ring: r, label: `등록부 기준 대지 초과 ${idx + 1}` });
+    }
+  });
   if (viz.showCadastralMap !== false) {
     (viz.cadastralBonbunRings || []).forEach((r, idx) => {
       if (Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2) {
@@ -8320,13 +8368,14 @@ function pilexyParcelReviewRingsForCoordProbe(viz) {
  */
 function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
   const viz = state.parcelReviewViz;
-  if (!viz) return null;
+  if (!viz && !pilexyParcelReviewLxUserHasGeometry()) return null;
   const sel = state.parcelReviewSelection;
-  const selRing = sel && String(sel.pnu || "").trim() !== "" ? ringForParcelReviewSelection(viz, sel) : null;
+  const selRing =
+    viz && sel && String(sel.pnu || "").trim() !== "" ? ringForParcelReviewSelection(viz, sel) : null;
   const isSelRing = (ring) => Boolean(selRing && ring === selRing);
   const cands = [];
 
-  if (viz.queryPoint) {
+  if (viz && viz.queryPoint) {
     const qx = Number(viz.queryPoint.x);
     const qy = Number(viz.queryPoint.y);
     if (Number.isFinite(qx) && Number.isFinite(qy)) {
@@ -8405,7 +8454,12 @@ function pilexyPinnedParcelQueryCoordModel() {
 }
 
 function pilexyParcelReviewCoordTooltipModel() {
-  if (!state.parcelReviewCoordProbe || !state.parcelReviewViz) return null;
+  if (
+    !state.parcelReviewCoordProbe
+    || (!state.parcelReviewViz && !pilexyParcelReviewLxUserHasGeometry())
+  ) {
+    return null;
+  }
   const h = state.parcelReviewCoordHover;
   if (h) return h;
   return pilexyPinnedParcelQueryCoordModel();
@@ -8421,6 +8475,51 @@ function pilexySetParcelReviewCoordProbe(enabled) {
 }
 
 window.pilexySetParcelReviewCoordProbe = pilexySetParcelReviewCoordProbe;
+
+function pilexyParcelReviewLxRegisterApplyParsedRing(points) {
+  const pts = pilexyNormalizeParcelRingPoints(points);
+  if (!state.parcelReviewLxRegister) return false;
+  state.parcelReviewLxRegister.ring = pts.length >= 3 ? pts : null;
+  pilexySetParcelReviewCanvasBadge(
+    (state.parcelReviewViz && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
+      || pilexyParcelReviewLxUserHasGeometry(),
+  );
+  requestRedraw();
+  return pts.length >= 3;
+}
+
+function pilexyParcelReviewLxRegisterClearRing() {
+  if (!state.parcelReviewLxRegister) return;
+  state.parcelReviewLxRegister.ring = null;
+  if (state.parcelReviewViz) state.parcelReviewViz.lxRegisterEncroachmentRings = [];
+  pilexySetParcelReviewCanvasBadge(
+    state.parcelReviewViz != null && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz),
+  );
+  requestRedraw();
+}
+
+function pilexyParcelReviewLxRegisterSetOptions(partial) {
+  if (!state.parcelReviewLxRegister || !partial || typeof partial !== "object") return;
+  Object.assign(state.parcelReviewLxRegister, partial);
+  requestRedraw();
+}
+
+function pilexyGetParcelReviewLxRegisterVerticesForApi() {
+  const pts = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (pts.length < 3) return [];
+  return pts.map((p) => ({ x: p.x, y: p.y }));
+}
+
+window.pilexyParcelReviewLxRegisterApplyParsedRing = pilexyParcelReviewLxRegisterApplyParsedRing;
+window.pilexyParcelReviewLxRegisterClearRing = pilexyParcelReviewLxRegisterClearRing;
+window.pilexyParcelReviewLxRegisterSetOptions = pilexyParcelReviewLxRegisterSetOptions;
+window.pilexyGetParcelReviewLxRegisterVerticesForApi = pilexyGetParcelReviewLxRegisterVerticesForApi;
+
+function pilexyGetParcelReviewLxRegisterUseReference() {
+  return Boolean(state.parcelReviewLxRegister?.useAsReference);
+}
+
+window.pilexyGetParcelReviewLxRegisterUseReference = pilexyGetParcelReviewLxRegisterUseReference;
 
 function pilexyClearParcelReviewSelection() {
   state.parcelReviewSelection = null;
@@ -8535,9 +8634,10 @@ window.pilexyParcelRingHasVertexWithinM = pilexyParcelRingHasVertexWithinM;
 
 /** 필지 검토 오버레이가 보이도록 도면 뷰(줌·팬)를 맞춤 */
 function pilexyFocusParcelReviewOnCanvas(payload) {
-  if (!pilexyParcelReviewVizHasGeometry(payload)) return;
-  const showLot = payload.showParcelLot !== false;
-  const showCad = payload.showCadastralMap !== false;
+  const pay = payload || {};
+  if (!pilexyParcelReviewVizHasGeometry(pay) && !pilexyParcelReviewLxUserHasGeometry()) return;
+  const showLot = pay.showParcelLot !== false;
+  const showCad = pay.showCadastralMap !== false;
   const xs = [];
   const ys = [];
   const addRing = (ring) => {
@@ -8546,20 +8646,23 @@ function pilexyFocusParcelReviewOnCanvas(payload) {
       ys.push(p.y);
     });
   };
-  if (showLot) addRing(payload.parcelRing);
-  addRing(payload.siteRing);
-  (payload.encroachmentRings || []).forEach(addRing);
-  if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
-  if (showLot && payload.showNearbyParcels !== false) {
-    (payload.nearbyParcelRings || []).forEach((n) => {
+  if (showLot) addRing(pay.parcelRing);
+  addRing(pay.siteRing);
+  (pay.encroachmentRings || []).forEach(addRing);
+  if (showCad) (pay.cadastralBonbunRings || []).forEach(addRing);
+  if (showLot && pay.showNearbyParcels !== false) {
+    (pay.nearbyParcelRings || []).forEach((n) => {
       if (!n || !Array.isArray(n.ring)) return;
       addRing(n.ring);
     });
   }
-  if (payload.queryPoint && Number.isFinite(payload.queryPoint.x) && Number.isFinite(payload.queryPoint.y)) {
-    xs.push(payload.queryPoint.x);
-    ys.push(payload.queryPoint.y);
+  if (pay.queryPoint && Number.isFinite(pay.queryPoint.x) && Number.isFinite(pay.queryPoint.y)) {
+    xs.push(pay.queryPoint.x);
+    ys.push(pay.queryPoint.y);
   }
+  const lxUserFocus = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (lxUserFocus.length >= 2) addRing(lxUserFocus);
+  (pay.lxRegisterEncroachmentRings || []).forEach(addRing);
   if (xs.length < 1) return;
   let minX = Math.min(...xs);
   let maxX = Math.max(...xs);
@@ -8580,14 +8683,16 @@ function pilexyFocusParcelReviewOnCanvas(payload) {
     viewFitTightOnly = true;
     xs.length = 0;
     ys.length = 0;
-    if (showLot) addRing(payload.parcelRing);
-    addRing(payload.siteRing);
-    (payload.encroachmentRings || []).forEach(addRing);
-    if (showCad) (payload.cadastralBonbunRings || []).forEach(addRing);
-    if (payload.queryPoint && Number.isFinite(payload.queryPoint.x) && Number.isFinite(payload.queryPoint.y)) {
-      xs.push(payload.queryPoint.x);
-      ys.push(payload.queryPoint.y);
+    if (showLot) addRing(pay.parcelRing);
+    addRing(pay.siteRing);
+    (pay.encroachmentRings || []).forEach(addRing);
+    if (showCad) (pay.cadastralBonbunRings || []).forEach(addRing);
+    if (pay.queryPoint && Number.isFinite(pay.queryPoint.x) && Number.isFinite(pay.queryPoint.y)) {
+      xs.push(pay.queryPoint.x);
+      ys.push(pay.queryPoint.y);
     }
+    if (lxUserFocus.length >= 2) addRing(lxUserFocus);
+    (pay.lxRegisterEncroachmentRings || []).forEach(addRing);
     if (xs.length < 1) return;
     minX = Math.min(...xs);
     maxX = Math.max(...xs);
@@ -8644,6 +8749,9 @@ function pilexyFocusParcelReviewNearbyOnCanvas(payload) {
     xs.push(Number(payload.queryPoint.x));
     ys.push(Number(payload.queryPoint.y));
   }
+  const lxUserNearby = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (lxUserNearby.length >= 2) addRing(lxUserNearby);
+  (payload.lxRegisterEncroachmentRings || []).forEach(addRing);
   if (xs.length < 2) {
     pilexyFocusParcelReviewOnCanvas(payload);
     return;
@@ -8674,6 +8782,8 @@ function pilexyFocusParcelReviewNearbyOnCanvas(payload) {
       xs.push(Number(payload.queryPoint.x));
       ys.push(Number(payload.queryPoint.y));
     }
+    if (lxUserNearby.length >= 2) addRing(lxUserNearby);
+    (payload.lxRegisterEncroachmentRings || []).forEach(addRing);
     if (xs.length < 2) {
       pilexyFocusParcelReviewOnCanvas(payload);
       return;
@@ -8703,8 +8813,23 @@ function pilexyFocusParcelReviewNearbyOnCanvas(payload) {
 window.pilexyFocusParcelReviewNearbyOnCanvas = pilexyFocusParcelReviewNearbyOnCanvas;
 
 function drawParcelReviewViz() {
-  const viz = state.parcelReviewViz;
-  if (!viz) return;
+  const lxOpt = state.parcelReviewLxRegister;
+  const rawViz = state.parcelReviewViz;
+  if (!rawViz && !pilexyParcelReviewLxUserHasGeometry()) return;
+  const viz = rawViz || {
+    siteRing: [],
+    parcelRing: [],
+    encroachmentRings: [],
+    nearbyParcelRings: [],
+    cadastralBonbunRings: [],
+    winnerPnu: "",
+    showCadastralMap: false,
+    showParcelLot: false,
+    showNearbyParcels: false,
+    debugShowNearbyRingVertices: false,
+    queryPoint: null,
+    lxRegisterEncroachmentRings: [],
+  };
   const hasNearby =
     viz.showParcelLot !== false &&
     viz.showNearbyParcels !== false &&
@@ -8838,6 +8963,20 @@ function drawParcelReviewViz() {
   /* 1) 대지 외곽: 주차장 윤곽(drawBuildings dashed)과 유사 — 주황 점선 */
   strokeParcelRingWorld(viz.siteRing, "rgba(253, 224, 71, 0.92)", 1.2, [10, 6], 0.88);
 
+  /* 1b) 등록부 기준: 대지에서 등록부를 뺀 초과 영역(서버 Shapely) */
+  if (
+    lxOpt
+    && lxOpt.showEncroachment !== false
+    && Array.isArray(viz.lxRegisterEncroachmentRings)
+    && viz.lxRegisterEncroachmentRings.length
+  ) {
+    viz.lxRegisterEncroachmentRings.forEach((ring) => {
+      if (!Array.isArray(ring) || ring.length < 3) return;
+      fillParcelRingWorld(ring, "rgba(234, 88, 12, 0.26)", 1);
+      strokeParcelRingWorld(ring, "rgba(180, 52, 6, 0.92)", 1.55, [7, 5], 0.95);
+    });
+  }
+
   /* 2) WFS 인접: 실선만(면 없음), 동 팔레트처럼 고정 두께 + 다각형 겹침 완화 알파 — 「필지 표시」꺼지면 후보도 숨김 */
   if (viz.showParcelLot !== false && viz.showNearbyParcels !== false) {
     (viz.nearbyParcelRings || []).forEach((item) => {
@@ -8883,6 +9022,29 @@ function drawParcelReviewViz() {
     });
   }
 
+  /* 3c) 경계점 좌표등록부(사용자 입력, 도면 m) — 청록 */
+  const lxUserPts = pilexyNormalizeParcelRingPoints(lxOpt?.ring);
+  if (lxOpt && lxUserPts.length >= 3) {
+    if (lxOpt.showFill) {
+      fillParcelRingWorld(lxUserPts, "rgba(6, 182, 212, 0.1)", 1);
+    }
+    if (lxOpt.showOutline !== false) {
+      strokeParcelRingWorld(lxUserPts, "rgba(8, 145, 178, 0.98)", 2.1, [4, 3], 0.92);
+    }
+    if (lxOpt.showVertices !== false) {
+      lxUserPts.forEach((p) => {
+        const c = worldToCanvas(p.x, p.y);
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(165, 243, 252, 0.95)";
+        ctx.strokeStyle = "rgba(21, 94, 117, 0.9)";
+        ctx.lineWidth = 1.1;
+        ctx.arc(c.x, c.y, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+  }
+
   /* 4) 쿼리점(말뚝 중앙값 등): 노란 점 */
   if (viz.queryPoint && Number.isFinite(viz.queryPoint.x) && Number.isFinite(viz.queryPoint.y)) {
     const { x, y } = worldToCanvas(viz.queryPoint.x, viz.queryPoint.y);
@@ -8926,6 +9088,22 @@ function drawParcelReviewViz() {
     rows.push({
       c: "rgba(56, 189, 248, 0.96)",
       t: "하늘 점선 = 지적 본번 경계(WFS 본번)",
+    });
+  }
+  const lxU = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (lxU.length >= 3 && state.parcelReviewLxRegister?.showOutline !== false) {
+    rows.push({
+      c: "rgba(8, 145, 178, 0.96)",
+      t: "청록 점선 = 경계점 좌표등록부(입력)",
+    });
+  }
+  if (
+    (viz.lxRegisterEncroachmentRings || []).some((r) => pilexyNormalizeParcelRingPoints(r).length >= 3)
+    && state.parcelReviewLxRegister?.showEncroachment !== false
+  ) {
+    rows.push({
+      c: "rgba(234, 88, 12, 0.96)",
+      t: "주황 영역 = 등록부 기준 대지 초과(대지−등록부)",
     });
   }
   rows.push(
@@ -9506,7 +9684,10 @@ function handleCanvasMouseMove(event) {
     state.parcelReviewCoordHover = null;
     tooltipMouseClientX = event.clientX;
     tooltipMouseClientY = event.clientY;
-  } else if (state.parcelReviewCoordProbe && state.parcelReviewViz) {
+  } else if (
+    state.parcelReviewCoordProbe
+    && (state.parcelReviewViz || pilexyParcelReviewLxUserHasGeometry())
+  ) {
     state.parcelReviewCoordHover = pickParcelReviewCoordHoverModel(
       offsetX,
       offsetY,

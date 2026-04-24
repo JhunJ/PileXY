@@ -74,6 +74,26 @@ class ParcelReviewRequest(BaseModel):
             "일부 CAD는 축 라벨이 GIS와 반대로 저장됩니다."
         ),
     )
+    lx_register_vertices: List[ParcelReviewVertex] = Field(
+        default_factory=list,
+        description="경계점 좌표등록부 등에서 입력한 도면 평면좌표(미터) 닫힌 링. 최대 2500점.",
+    )
+    use_lx_register_as_reference: bool = Field(
+        default=False,
+        description=(
+            "True이고 lx_register_vertices가 삼각형 이상이면, 대지(site 볼록)에서 등록부 폴리곤을 뺀 "
+            "영역을 lx_register_encroachment_rings 로 반환합니다."
+        ),
+    )
+
+
+class CoordinateAddressRequest(BaseModel):
+    """도면 평면좌표(미터) 한 점 → WGS84 → 브이월드 역지오코딩(주소)."""
+
+    x: float
+    y: float
+    assumed_epsg: int = Field(default=5186, ge=3857, le=5188)
+    swap_xy: bool = Field(default=False)
 
 
 def _median(xs: List[float]) -> Optional[float]:
@@ -149,6 +169,52 @@ def _square_around_segment(p0: Tuple[float, float], p1: Tuple[float, float], pad
         (x1 + px, y1 + py),
         (x0 + px, y0 + py),
     ]
+
+
+def _shapely_site_minus_lx_draw_rings(
+    site_pts: List[Tuple[float, float]],
+    lx_pts: List[Tuple[float, float]],
+) -> Tuple[List[List[Dict[str, float]]], Optional[float], Optional[str]]:
+    """대지(site) − 경계점 등록부(lx) — 등록부 밖으로 나간 대지 조각만 Shapely로 계산."""
+    if not _HAS_SHAPELY or len(site_pts) < 3 or len(lx_pts) < 3:
+        return [], None, None
+    try:
+        s_poly = Polygon(site_pts).buffer(0)
+        lx_poly = Polygon(lx_pts).buffer(0)
+        if s_poly.is_empty or lx_poly.is_empty or not s_poly.is_valid or not lx_poly.is_valid:
+            return [], None, "empty_or_invalid_polygon"
+        diff = s_poly.difference(lx_poly)
+        if diff.is_empty:
+            return [], 0.0, None
+        area = float(diff.area)
+        rings_out: List[List[Dict[str, float]]] = []
+
+        def add_poly_exterior(poly: Polygon) -> None:
+            if poly.is_empty:
+                return
+            ext = list(poly.exterior.coords)
+            if len(ext) >= 4 and ext[0] == ext[-1]:
+                ext = ext[:-1]
+            if len(ext) >= 3:
+                rings_out.append([{"x": float(a), "y": float(b)} for a, b in ext])
+
+        def walk_geom(g: Any) -> None:
+            if g is None or g.is_empty:
+                return
+            gt = g.geom_type
+            if gt == "Polygon":
+                add_poly_exterior(g)
+            elif gt == "MultiPolygon":
+                for p in g.geoms:
+                    walk_geom(p)
+            elif gt == "GeometryCollection":
+                for p in g.geoms:
+                    walk_geom(p)
+
+        walk_geom(diff)
+        return rings_out, area, None
+    except Exception as e:  # pragma: no cover - defensive
+        return [], None, str(e)
 
 
 def _site_polygon_points(req: ParcelReviewRequest) -> List[Tuple[float, float]]:
@@ -642,6 +708,41 @@ def parcel_review(body: ParcelReviewRequest = Body(...)) -> Dict[str, Any]:
     site_pts = _site_polygon_points(body)
     site_ring_draw = [{"x": px, "y": py} for px, py in site_pts]
 
+    lx_register_ring_draw: List[Dict[str, float]] = []
+    lx_register_encroachment_rings_draw: List[List[Dict[str, float]]] = []
+    lx_register_encroachment_area_sqm: Optional[float] = None
+    lx_register_geom_error: Optional[str] = None
+    lx_raw_pts: List[Tuple[float, float]] = []
+    for v in body.lx_register_vertices:
+        if math.isfinite(v.x) and math.isfinite(v.y):
+            lx_raw_pts.append((float(v.x), float(v.y)))
+    lx_raw_pts = lx_raw_pts[:2500]
+    lx_dedup: List[Tuple[float, float]] = []
+    for px, py in lx_raw_pts:
+        if (
+            not lx_dedup
+            or abs(px - lx_dedup[-1][0]) > 1e-9
+            or abs(py - lx_dedup[-1][1]) > 1e-9
+        ):
+            lx_dedup.append((px, py))
+    if len(lx_dedup) >= 2 and lx_dedup[0] == lx_dedup[-1]:
+        lx_dedup.pop()
+    if len(lx_dedup) >= 3:
+        lx_register_ring_draw = [{"x": a, "y": b} for a, b in lx_dedup]
+        if body.use_lx_register_as_reference:
+            enc_rings, enc_area, enc_err = _shapely_site_minus_lx_draw_rings(site_pts, lx_dedup)
+            lx_register_encroachment_rings_draw = enc_rings
+            lx_register_encroachment_area_sqm = enc_area
+            lx_register_geom_error = enc_err
+            if enc_err and enc_err not in ("empty_or_invalid_polygon",):
+                warnings.append(f"등록부 기준 대지 차집합 계산: {enc_err}")
+            elif enc_err == "empty_or_invalid_polygon":
+                warnings.append("등록부 기준: 대지 또는 등록부 폴리곤이 비었거나 유효하지 않습니다.")
+    elif body.use_lx_register_as_reference and len(lx_raw_pts) > 0 and len(lx_register_ring_draw) < 3:
+        warnings.append("등록부 기준: 유효한 좌표가 3점 미만이라 폴리곤을 만들 수 없습니다.")
+    elif body.use_lx_register_as_reference and not lx_raw_pts:
+        warnings.append("등록부 기준: 요청에 등록부 좌표(lx_register_vertices)가 없습니다.")
+
     e0, n0 = (0.0, 0.0)
     lonlat: Optional[Tuple[float, float]] = None
     if _HAS_PYPROJ:
@@ -836,6 +937,14 @@ def parcel_review(body: ParcelReviewRequest = Body(...)) -> Dict[str, Any]:
         "assumed_epsg": body.assumed_epsg,
         "swap_xy": bool(body.swap_xy),
         "tolerance_m": body.tolerance_m,
+        "lx_register_vertex_count": len(lx_raw_pts),
+        "use_lx_register_as_reference": bool(body.use_lx_register_as_reference),
+    }
+    debug["lx_register"] = {
+        "ring_vertex_count": len(lx_register_ring_draw),
+        "encroachment_ring_count": len(lx_register_encroachment_rings_draw),
+        "encroachment_area_sqm": lx_register_encroachment_area_sqm,
+        "geom_error": lx_register_geom_error,
     }
 
     return {
@@ -854,9 +963,182 @@ def parcel_review(body: ParcelReviewRequest = Body(...)) -> Dict[str, Any]:
         "encroachment": encroachment,
         "encroachment_area_sqm": encroachment_area_sqm,
         "encroachment_rings": encroachment_rings_draw,
+        "lx_register_ring": lx_register_ring_draw,
+        "lx_register_encroachment_rings": lx_register_encroachment_rings_draw,
+        "lx_register_encroachment_area_sqm": lx_register_encroachment_area_sqm,
         "warnings": warnings,
         "message": message,
         "nearby_parcel_rings": nearby_parcel_rings_draw,
         "cadastral_bonbun_rings": cadastral_bonbun_rings_draw,
         "debug": debug,
+    }
+
+
+def _vworld_reverse_address_request(
+    lon: float,
+    lat: float,
+    api_key: str,
+    domain: str,
+) -> Tuple[Dict[str, Any], str]:
+    """브이월드 주소 API 2.0 getaddress. (lon, lat) WGS84."""
+    url = "https://api.vworld.kr/req/address"
+    params = {
+        "service": "address",
+        "request": "getaddress",
+        "version": "2.0",
+        "crs": "epsg:4326",
+        "type": "both",
+        "point": f"{lon},{lat}",
+        "format": "json",
+        "zipcode": "true",
+        "key": api_key,
+        "domain": domain or "localhost",
+    }
+    try:
+        r = requests.get(url, params=params, timeout=22)
+        body = (r.text or "").strip()
+        if r.status_code != 200:
+            return {}, f"HTTP {r.status_code}: {body[:400]}"
+        try:
+            return json.loads(body), ""
+        except json.JSONDecodeError:
+            return {}, "JSON 파싱 실패"
+    except requests.RequestException as e:
+        return {}, str(e)
+
+
+def _parse_vworld_address_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """응답에서 지번·도로명·요약 문자열 추출."""
+    out: Dict[str, Any] = {
+        "ok": False,
+        "status": "",
+        "parcel_address": "",
+        "road_address": "",
+        "zipcode": "",
+        "summary": "",
+        "detail_lines": [],
+    }
+    if not isinstance(data, dict):
+        out["summary"] = "응답이 JSON 객체가 아닙니다."
+        return out
+    resp = data.get("response")
+    if not isinstance(resp, dict):
+        out["summary"] = "response 필드가 없습니다."
+        return out
+    status = str(resp.get("status") or "").upper()
+    out["status"] = status
+    if status and status not in ("OK", "0", "SUCCESS"):
+        out["summary"] = str(resp.get("text") or resp.get("message") or status or "요청 실패")
+        return out
+
+    raw_res = resp.get("result")
+    rows: List[Dict[str, Any]] = []
+    if isinstance(raw_res, list):
+        rows = [x for x in raw_res if isinstance(x, dict)]
+    elif isinstance(raw_res, dict):
+        if isinstance(raw_res.get("items"), list):
+            rows = [x for x in raw_res["items"] if isinstance(x, dict)]
+        else:
+            rows = [raw_res]
+
+    if not rows:
+        out["summary"] = str(resp.get("text") or "(주소 결과 없음)")
+        return out
+
+    first = rows[0]
+    z = str(first.get("zipcode") or "").strip()
+    parcel = str(first.get("parceladdr") or first.get("parcelAddr") or first.get("addr") or "").strip()
+    road = str(first.get("roadaddr") or first.get("roadAddr") or "").strip()
+    text = str(first.get("text") or "").strip()
+    structure = first.get("structure")
+    if isinstance(structure, dict) and not parcel and not road:
+        vals = [str(v).strip() for _k, v in sorted(structure.items()) if str(v).strip()]
+        if vals:
+            text = text or " ".join(vals)
+
+    lines: List[str] = []
+    if z:
+        lines.append(f"우편번호: {z}")
+    if parcel:
+        lines.append(f"지번: {parcel}")
+    if road:
+        lines.append(f"도로명: {road}")
+    out["zipcode"] = z
+    out["parcel_address"] = parcel
+    out["road_address"] = road
+    out["detail_lines"] = lines
+    summary = " · ".join([p for p in (road, parcel) if p]) or text
+    if not summary:
+        summary = "(주소 없음)"
+    out["summary"] = summary
+    out["ok"] = summary != "(주소 없음)"
+    return out
+
+
+@router.post("/coordinate-address")
+def coordinate_address(body: CoordinateAddressRequest = Body(...)) -> Dict[str, Any]:
+    """도면 (X,Y) → EPSG 투영 → WGS84 → 브이월드 역지오코딩."""
+    if not _HAS_PYPROJ:
+        return {
+            "ok": False,
+            "error": "pyproj 미설치로 경위도 변환을 할 수 없습니다.",
+            "drawing": {"x": body.x, "y": body.y},
+        }
+    if not math.isfinite(body.x) or not math.isfinite(body.y):
+        return {"ok": False, "error": "좌표가 유효하지 않습니다.", "drawing": {"x": body.x, "y": body.y}}
+
+    dx, dy = float(body.x), float(body.y)
+    e0, n0 = _gis_en_from_drawing(dx, dy, body.swap_xy)
+    lonlat = _to_lonlat(e0, n0, body.assumed_epsg)
+    if not lonlat:
+        return {
+            "ok": False,
+            "error": "EPSG 변환 결과가 유효하지 않습니다. assumed_epsg·XY 바꿔 투영을 확인하세요.",
+            "drawing": {"x": dx, "y": dy},
+            "tm_projection_inputs": {
+                "easting_m": round(e0, 6),
+                "northing_m": round(n0, 6),
+                "swap_xy": bool(body.swap_xy),
+                "epsg": body.assumed_epsg,
+            },
+        }
+
+    lon, lat = lonlat
+    api_key = (os.environ.get("VWORLD_API_KEY") or os.environ.get("VWORLD_KEY") or "").strip()
+    domain = (os.environ.get("VWORLD_DOMAIN") or "localhost").strip()
+    if not api_key:
+        return {
+            "ok": False,
+            "error": "VWORLD_API_KEY 가 없어 브이월드 주소 API를 호출할 수 없습니다.",
+            "drawing": {"x": dx, "y": dy},
+            "wgs84": {"lon": lon, "lat": lat},
+            "assumed_epsg": body.assumed_epsg,
+            "swap_xy": bool(body.swap_xy),
+        }
+
+    raw, http_err = _vworld_reverse_address_request(lon, lat, api_key, domain)
+    if http_err:
+        return {
+            "ok": False,
+            "error": http_err,
+            "drawing": {"x": dx, "y": dy},
+            "wgs84": {"lon": lon, "lat": lat},
+            "assumed_epsg": body.assumed_epsg,
+            "swap_xy": bool(body.swap_xy),
+        }
+
+    parsed = _parse_vworld_address_payload(raw)
+    return {
+        "ok": bool(parsed.get("ok")),
+        "drawing": {"x": dx, "y": dy},
+        "wgs84": {"lon": lon, "lat": lat},
+        "assumed_epsg": body.assumed_epsg,
+        "swap_xy": bool(body.swap_xy),
+        "parcel_address": parsed.get("parcel_address", ""),
+        "road_address": parsed.get("road_address", ""),
+        "zipcode": parsed.get("zipcode", ""),
+        "summary": parsed.get("summary", ""),
+        "detail_lines": parsed.get("detail_lines", []),
+        "vworld_status": parsed.get("status", ""),
+        "vworld_error": "" if parsed.get("ok") else parsed.get("summary", ""),
     }

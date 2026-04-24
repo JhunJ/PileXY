@@ -387,46 +387,138 @@
         </div>
       </section>
       <section class="construction-section construction-tab-panel" data-panel="parcel-review">
-        <div class="construction-section-title">
+        <div class="construction-section-title construction-parcel-section-head">
           <div class="construction-section-title-row">
             <span>필지 대비 자동 검토</span>
-            <small class="soft-liability-note soft-liability-note--compact"><span aria-hidden="true">※</span>참고용이며 법적·행정 판단을 대체하지 않습니다.</small>
           </div>
-          <small>현재 화면의 말뚝·동·주차장 윤곽으로 쿼리점과 대지 외곽을 자동 산출합니다. 서버에 <code>VWORLD_API_KEY</code>가 있으면 연속지적 경계를 조회해 침범 여부를 계산합니다.</small>
+          <div class="construction-parcel-intro-box" role="note">
+            <ul class="construction-parcel-intro-list">
+              <li><span class="construction-parcel-intro-kicker">참고</span> 참고용이며 법적·행정 판단을 대체하지 않습니다.</li>
+              <li><span class="construction-parcel-intro-kicker">공식 자료</span> LX(한국국토정보공사) 경계점 좌표등록부 등 공식 등본·자료와 실제로 차이가 있을 수 있습니다.</li>
+              <li><span class="construction-parcel-intro-kicker">민원</span> 정부24 <a href="https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13100000028&amp;tp_seq=01" target="_blank" rel="noopener noreferrer">경계점좌표등록부 열람·등본발급</a></li>
+            </ul>
+            <div class="construction-parcel-intro-url-block">
+              <span class="construction-parcel-intro-url-label">신청 페이지 주소</span>
+              <code class="construction-parcel-intro-url-code">https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13100000028&amp;tp_seq=01</code>
+            </div>
+          </div>
+          <ul class="construction-parcel-feature-list">
+            <li>말뚝·동·주차장 윤곽으로 쿼리점과 대지 외곽을 자동 산출합니다.</li>
+            <li>서버에 <code>VWORLD_API_KEY</code>가 있으면 연속지적 경계를 조회해 침범 여부를 계산합니다.</li>
+          </ul>
+        </div>
+        <div class="construction-parcel-lx-card">
+          <p class="construction-parcel-viz-group-title">경계점 좌표등록부 (도면 m)</p>
+          <p class="construction-parcel-lx-paste-hint">Excel에서 <strong>X</strong>·<strong>Y</strong> 열만 복사해 붙여넣기 (탭 또는 쉼표). 숫자가 아닌 첫 열은 자동으로 건너뜁니다.</p>
+          <textarea id="construction-parcel-lx-textarea" class="construction-parcel-lx-textarea" rows="5" spellcheck="false" placeholder="예) X	Y&#10;210.12	451880.5&#10;211.05	451881.2&#10;…"></textarea>
+          <div class="construction-parcel-lx-actions">
+            <button type="button" id="construction-parcel-lx-apply-btn" class="header-construction-btn">적용 · 메인 캔버스에 폴리라인</button>
+            <button type="button" id="construction-parcel-lx-clear-btn" class="ghost">등록부 지우기</button>
+          </div>
+          <p id="construction-parcel-lx-feedback" class="construction-parcel-lx-feedback" aria-live="polite"></p>
+          <div class="construction-parcel-viz-group construction-parcel-lx-opts">
+            <p class="construction-parcel-viz-group-title">등록부 표시</p>
+            <label class="construction-parcel-nearby-viz-label">
+              <input type="checkbox" id="construction-parcel-lx-show-outline" checked />
+              <span class="construction-parcel-option-text">
+                <span class="construction-parcel-option-primary">청록 <strong>윤곽선</strong></span>
+                <span class="construction-parcel-option-detail">등록부 경계(닫힌 폴리라인)</span>
+              </span>
+            </label>
+            <label class="construction-parcel-nearby-viz-label">
+              <input type="checkbox" id="construction-parcel-lx-show-fill" />
+              <span class="construction-parcel-option-text">
+                <span class="construction-parcel-option-primary">내부 <strong>연한 면</strong></span>
+                <span class="construction-parcel-option-detail">비교용 반투명 채우기</span>
+              </span>
+            </label>
+            <label class="construction-parcel-nearby-viz-label">
+              <input type="checkbox" id="construction-parcel-lx-show-vertices" checked />
+              <span class="construction-parcel-option-text">
+                <span class="construction-parcel-option-primary"><strong>꼭짓점</strong> 표시</span>
+                <span class="construction-parcel-option-detail">좌표 확인용 작은 점</span>
+              </span>
+            </label>
+            <label class="construction-parcel-nearby-viz-label">
+              <input type="checkbox" id="construction-parcel-lx-show-encroach" checked />
+              <span class="construction-parcel-option-text">
+                <span class="construction-parcel-option-primary"><strong>대지 초과</strong> 영역</span>
+                <span class="construction-parcel-option-detail">자동 검토 시 「기준으로 사용」을 켠 경우 서버가 계산한 대지−등록부</span>
+              </span>
+            </label>
+            <label class="construction-parcel-nearby-viz-label">
+              <input type="checkbox" id="construction-parcel-lx-use-reference" />
+              <span class="construction-parcel-option-text">
+                <span class="construction-parcel-option-primary">자동 검토 시 등록부를 <strong>기준</strong>으로 사용</span>
+                <span class="construction-parcel-option-detail">대지(볼록)에서 등록부를 빼 초과 면적·윤곽을 서버에서 계산합니다. 적용 후 「자동 검토 실행」을 다시 하세요.</span>
+              </span>
+            </label>
+          </div>
         </div>
         <div class="construction-sync-actions">
           <button type="button" id="construction-parcel-run-btn" class="header-construction-btn">자동 검토 실행</button>
           <button type="button" id="construction-parcel-focus-nearby-btn" class="ghost" disabled title="먼저 「자동 검토 실행」을 하세요.">인접 필지 구역으로 이동·확대</button>
           <button type="button" id="construction-parcel-clear-viz-btn" class="ghost">지도 오버레이 지우기</button>
         </div>
+        <div class="construction-parcel-address-card">
+          <p class="construction-parcel-viz-group-title">도면 좌표 → 주소 (역지오코딩)</p>
+          <p class="construction-parcel-lx-paste-hint">파일(도면)과 같은 <strong>X·Y (m)</strong>를 입력합니다. 「고급: 도면 평면좌표」의 EPSG·XY 바꿔 투영과 동일하게 서버에서 경위도로 바꾼 뒤 브이월드 주소 API를 호출합니다.</p>
+          <div class="construction-parcel-address-row">
+            <label>X (도면 m)<input type="number" step="any" id="construction-parcel-addr-x" class="save-work-input" placeholder="예: 210.12" /></label>
+            <label>Y (도면 m)<input type="number" step="any" id="construction-parcel-addr-y" class="save-work-input" placeholder="예: 451880" /></label>
+          </div>
+          <div class="construction-parcel-lx-actions">
+            <button type="button" id="construction-parcel-address-btn" class="header-construction-btn">이 좌표의 주소 조회</button>
+            <button type="button" id="construction-parcel-address-fill-query-btn" class="ghost" title="마지막으로 실행한 필지 검토의 쿼리점 좌표를 채웁니다.">마지막 검토 쿼리점 넣기</button>
+          </div>
+          <div id="construction-parcel-address-result" class="construction-parcel-address-result" aria-live="polite"></div>
+        </div>
         <div id="construction-parcel-canvas-selection" class="construction-parcel-canvas-selection" aria-live="polite"></div>
-        <label class="construction-parcel-nearby-viz-label">
-          <input type="checkbox" id="construction-parcel-show-cadastral" checked />
-          도면에 <strong>지적도</strong> 표시(WFS 지적 본번 경계·하늘 점선)
-        </label>
-        <label class="construction-parcel-nearby-viz-label">
-          <input type="checkbox" id="construction-parcel-show-parcel-lot" checked />
-          도면에 <strong>필지</strong> 표시(연속지적 승자·<strong>인접 후보 자홍선</strong> 포함 — 끄면 후보도 숨김)
-        </label>
-        <label class="construction-parcel-nearby-viz-label" id="construction-parcel-show-nearby-rings-label">
-          <input type="checkbox" id="construction-parcel-show-nearby-rings" checked />
-          위가 켜져 있을 때만: WFS 인접 필지 후보(자홍 외곽선·겹침 가림 방지)<span id="construction-parcel-nearby-count" class="construction-parcel-nearby-count" aria-live="polite"></span>
-        </label>
-        <label class="construction-parcel-nearby-viz-label">
-          <input type="checkbox" id="construction-parcel-coord-probe" checked />
-          대지·필지·검토 쿼리점의 꼭짓점(절곡점)에만 좌표 표시(선 위는 표시 안 함) · 쿼리점 클릭 시 고정/해제
-        </label>
-        <label class="construction-parcel-nearby-viz-label construction-parcel-debug-vertices-cb" id="construction-parcel-debug-nearby-vertices-label">
-          <input type="checkbox" id="construction-parcel-debug-nearby-vertices" />
-          도면에 인접 링 꼭짓점 찍기(자홍 작은 점, 필지·인접 표시가 켜져 있을 때만)
-        </label>
+        <div class="construction-parcel-viz-group">
+          <p class="construction-parcel-viz-group-title">도면 오버레이</p>
+          <label class="construction-parcel-nearby-viz-label">
+            <input type="checkbox" id="construction-parcel-show-cadastral" checked />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">도면에 <strong>지적도</strong> 표시</span>
+              <span class="construction-parcel-option-detail">WFS 지적 본번 경계 · 하늘 점선</span>
+            </span>
+          </label>
+          <label class="construction-parcel-nearby-viz-label">
+            <input type="checkbox" id="construction-parcel-show-parcel-lot" checked />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">도면에 <strong>필지</strong> 표시</span>
+              <span class="construction-parcel-option-detail">연속지적 승자, <strong>인접 후보 자홍선</strong> 포함. 끄면 후보도 숨김.</span>
+            </span>
+          </label>
+          <label class="construction-parcel-nearby-viz-label" id="construction-parcel-show-nearby-rings-label">
+            <input type="checkbox" id="construction-parcel-show-nearby-rings" checked />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">WFS <strong>인접 필지 후보</strong> <span class="construction-parcel-option-badge">위 항목이 켜져 있을 때만</span></span>
+              <span class="construction-parcel-option-detail">자홍 외곽선 · 겹침 가림 방지<span id="construction-parcel-nearby-count" class="construction-parcel-nearby-count" aria-live="polite"></span></span>
+            </span>
+          </label>
+          <label class="construction-parcel-nearby-viz-label">
+            <input type="checkbox" id="construction-parcel-coord-probe" checked />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">대지·필지·검토 쿼리점 — 꼭짓점(절곡점)에만 좌표</span>
+              <span class="construction-parcel-option-detail">선 위에는 표시하지 않음. 쿼리점 클릭 시 좌표 고정·해제.</span>
+            </span>
+          </label>
+          <label class="construction-parcel-nearby-viz-label construction-parcel-debug-vertices-cb" id="construction-parcel-debug-nearby-vertices-label">
+            <input type="checkbox" id="construction-parcel-debug-nearby-vertices" />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">인접 링 꼭짓점 찍기 <span class="construction-parcel-option-badge construction-parcel-option-badge--muted">디버그</span></span>
+              <span class="construction-parcel-option-detail">자홍 작은 점. 필지·인접 표시가 켜져 있을 때만.</span>
+            </span>
+          </label>
+        </div>
         <details class="construction-parcel-vertex-debug-details" style="margin-top: 0.35rem;">
           <summary>디버그: 인접 링 꼭짓점(도면 m)</summary>
-          <p class="construction-foundation-viewer-guide" style="margin: 0.35rem 0 0.25rem;">
-            아래는 오버레이에 쓰는 <strong>정규화된 링</strong>(JSON <code>nearby_parcel_rings</code> 등과 동일 파이프라인)입니다.
-            <strong>캐드뷰어</strong>는 이 웹앱 왼쪽의 <strong>말뚝 캔버스(HTML Canvas)</strong>를 말하며, AutoCAD·DWG 뷰어로 오버레이가 넘어가지는 않습니다.
-            목록은 <strong>실제로 캔버스에 자홍으로 그리는 링</strong> 기준 상위 8개, 링당 최대 24점입니다.
-          </p>
+          <ul class="construction-parcel-details-list">
+            <li>오버레이에 쓰는 <strong>정규화된 링</strong> (JSON <code>nearby_parcel_rings</code> 등과 동일 파이프라인)</li>
+            <li><strong>캐드뷰어</strong> = 이 앱 왼쪽 <strong>말뚝 캔버스(HTML Canvas)</strong> · AutoCAD·DWG 뷰어로는 넘어가지 않음</li>
+            <li>캔버스에 자홍으로 그리는 링 기준 <strong>상위 8개</strong>, 링당 최대 <strong>24점</strong></li>
+          </ul>
           <pre id="construction-parcel-nearby-vertices-pre" class="construction-manual-debug-pre construction-parcel-json-pre" spellcheck="false">(검토 실행 후 표시)</pre>
         </details>
         <details class="construction-report-advanced" style="margin-top: 0.5rem;">
@@ -2002,9 +2094,11 @@
     ctx.fillRect(0, 0, width, height);
     /* app.js drawCanvas 과 동일: 필지 검토 오버레이만 있어도 빈 화면이 아니게 */
     const parcelOverlay =
-      state.parcelReviewViz != null ||
-      (typeof pilexyParcelReviewVizHasGeometry === "function" &&
-        pilexyParcelReviewVizHasGeometry(state.parcelReviewViz));
+      state.parcelReviewViz != null
+      || (typeof pilexyParcelReviewVizHasGeometry === "function"
+        && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
+      || (typeof pilexyParcelReviewLxUserHasGeometry === "function"
+        && pilexyParcelReviewLxUserHasGeometry());
     if ((!state.hasDataset || !(state.circles || []).length) && !parcelOverlay) {
       ctx.fillStyle = "#9ca3af";
       ctx.font = "16px 'Segoe UI'";
@@ -8596,9 +8690,10 @@ function inferOpenRectangleVertices(vertices) {
       } else {
         const nGray = nearby.filter((n) => !n.isWinner).length;
         const nAll = nearby.length;
-        if (nGray > 0) cntEl.textContent = ` (자홍 폴리곤 ${nGray}개 / 후보 ${nAll}개)`;
-        else if (nAll > 0) cntEl.textContent = " (자홍 폴리곤 0개 — 후보가 선택 필지와 동일 PNU뿐이거나 1건)";
-        else cntEl.textContent = " (인접 링 없음)";
+        if (nGray > 0) cntEl.textContent = ` · 자홍 폴리곤 ${nGray}개 / 후보 ${nAll}개`;
+        else if (nAll > 0)
+          cntEl.textContent = " · 자홍 폴리곤 0개(후보가 선택 필지와 동일 PNU뿐이거나 1건)";
+        else cntEl.textContent = " · 인접 링 없음";
       }
     }
     const dbgVtxEl = q("#construction-parcel-debug-nearby-vertices");
@@ -8625,6 +8720,11 @@ function inferOpenRectangleVertices(vertices) {
         qp && Number.isFinite(Number(qp.x)) && Number.isFinite(Number(qp.y))
           ? { x: Number(qp.x), y: Number(qp.y) }
           : null,
+      lxRegisterEncroachmentRings: Array.isArray(data?.lx_register_encroachment_rings)
+        ? data.lx_register_encroachment_rings
+            .map((r) => normalizeParcelDrawRing(r))
+            .filter((r) => r.length >= 3)
+        : [],
     };
   }
 
@@ -8688,6 +8788,10 @@ function inferOpenRectangleVertices(vertices) {
     const epsgEl = q("#construction-parcel-epsg");
     const tolEl = q("#construction-parcel-tolerance");
     const swapEl = q("#construction-parcel-swap-xy");
+    const getLx = typeof window !== "undefined" ? window.pilexyGetParcelReviewLxRegisterVerticesForApi : null;
+    const getUseLx = typeof window !== "undefined" ? window.pilexyGetParcelReviewLxRegisterUseReference : null;
+    const lxVerts = typeof getLx === "function" ? getLx() : [];
+    const useLxRef = typeof getUseLx === "function" ? getUseLx() : false;
     return {
       circles,
       buildings,
@@ -8695,6 +8799,8 @@ function inferOpenRectangleVertices(vertices) {
       assumed_epsg: epsgEl ? Number(epsgEl.value) || 5186 : 5186,
       tolerance_m: tolEl && tolEl.value !== "" ? Number(tolEl.value) : 0.35,
       swap_xy: Boolean(swapEl && swapEl.checked),
+      lx_register_vertices: lxVerts,
+      use_lx_register_as_reference: Boolean(useLxRef && lxVerts.length >= 3),
     };
   }
 
@@ -8775,6 +8881,13 @@ function inferOpenRectangleVertices(vertices) {
     }
     const pnu = data.parcel_pnu ? escape(String(data.parcel_pnu)) : "—";
     const areaSqm = "— (미사용)";
+    const lxEncA = data.lx_register_encroachment_area_sqm;
+    const lxEncRow =
+      lxEncA != null && Number.isFinite(Number(lxEncA))
+        ? `<div class="construction-parcel-dl-row"><dt>등록부 기준 대지 초과</dt><dd>${escape(
+            Number(lxEncA).toFixed(2),
+          )} m²</dd></div>`
+        : "";
     const warn =
       Array.isArray(data.warnings) && data.warnings.length
         ? `<div class="construction-parcel-warn">${escape(data.warnings.join(" "))}</div>`
@@ -8789,6 +8902,7 @@ function inferOpenRectangleVertices(vertices) {
         <div class="construction-parcel-dl-row"><dt>추정 위치</dt><dd>${escape(lonStr)}, ${escape(latStr)} <span class="construction-parcel-dl-sub">WGS84</span></dd></div>
         <div class="construction-parcel-dl-row"><dt>PNU</dt><dd>${pnu}</dd></div>
         <div class="construction-parcel-dl-row"><dt>대지−필지 면적차</dt><dd>${escape(areaSqm)}</dd></div>
+        ${lxEncRow}
         <div class="construction-parcel-dl-row"><dt>좌표계 가정</dt><dd>EPSG:${escape(String(data.assumed_epsg ?? ""))}</dd></div>
         <div class="construction-parcel-dl-row"><dt>XY 바꿔 투영</dt><dd>${data.swap_xy ? "켜짐" : "끔"}</dd></div>
         <div class="construction-parcel-dl-row"><dt>쿼리점∈필지(WGS84)</dt><dd>${data.parcel_available ? (llIn ? "예" : "아니오") : "—"}</dd></div>
@@ -8866,6 +8980,17 @@ function inferOpenRectangleVertices(vertices) {
       return;
     }
     if (
+      t.id === "construction-parcel-lx-show-outline"
+      || t.id === "construction-parcel-lx-show-fill"
+      || t.id === "construction-parcel-lx-show-vertices"
+      || t.id === "construction-parcel-lx-show-encroach"
+      || t.id === "construction-parcel-lx-use-reference"
+    ) {
+      syncParcelLxOptionsToApp();
+      if (typeof requestRedraw === "function") requestRedraw();
+      return;
+    }
+    if (
       t.id === "construction-parcel-show-nearby-rings"
       || t.id === "construction-parcel-debug-nearby-vertices"
       || t.id === "construction-parcel-show-cadastral"
@@ -8911,6 +9036,176 @@ function inferOpenRectangleVertices(vertices) {
     }
     if (fb) setTimeout(() => { fb.textContent = ""; }, 3500);
   });
+
+  function parseParcelLxRegisterPaste(raw) {
+    const lines = String(raw || "").split(/\r?\n/);
+    const pts = [];
+    for (const line0 of lines) {
+      const line = line0.trim();
+      if (!line) continue;
+      let parts = line.split("\t").map((s) => s.trim()).filter((p) => p !== "");
+      if (parts.length < 2) {
+        parts = line.split(/[;,]/).map((s) => s.trim()).filter((p) => p !== "");
+      }
+      if (parts.length < 2) continue;
+      const x = Number(String(parts[0]).replace(/,/g, "").trim());
+      const y = Number(String(parts[1]).replace(/,/g, "").trim());
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      pts.push({ x, y });
+    }
+    return pts;
+  }
+
+  function syncParcelLxOptionsToApp() {
+    const fn = typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterSetOptions : null;
+    if (typeof fn !== "function") return;
+    fn({
+      showOutline: Boolean(q("#construction-parcel-lx-show-outline")?.checked),
+      showFill: Boolean(q("#construction-parcel-lx-show-fill")?.checked),
+      showVertices: Boolean(q("#construction-parcel-lx-show-vertices")?.checked),
+      showEncroachment: Boolean(q("#construction-parcel-lx-show-encroach")?.checked),
+      useAsReference: Boolean(q("#construction-parcel-lx-use-reference")?.checked),
+    });
+  }
+
+  const constructionParcelLxApplyBtn = q("#construction-parcel-lx-apply-btn");
+  if (constructionParcelLxApplyBtn) {
+    constructionParcelLxApplyBtn.addEventListener("click", () => {
+      const ta = q("#construction-parcel-lx-textarea");
+      const fb = q("#construction-parcel-lx-feedback");
+      const applyFn =
+        typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterApplyParsedRing : null;
+      if (typeof applyFn !== "function") {
+        if (fb) fb.textContent = "캔버스 모듈을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.";
+        return;
+      }
+      const pts = parseParcelLxRegisterPaste(ta ? ta.value : "");
+      const ok = applyFn(pts);
+      const getV = typeof window !== "undefined" ? window.pilexyGetParcelReviewLxRegisterVerticesForApi : null;
+      const nVert = typeof getV === "function" ? getV().length : 0;
+      if (fb) {
+        fb.textContent = ok
+          ? `폴리라인 적용: 꼭짓점 ${nVert}개 (도면 m)`
+          : "유효한 점이 3개 미만입니다. X·Y 두 열을 확인하세요.";
+      }
+    });
+  }
+  const constructionParcelLxClearBtn = q("#construction-parcel-lx-clear-btn");
+  if (constructionParcelLxClearBtn) {
+    constructionParcelLxClearBtn.addEventListener("click", () => {
+      const ta = q("#construction-parcel-lx-textarea");
+      const fb = q("#construction-parcel-lx-feedback");
+      if (ta) ta.value = "";
+      const clrFn = typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterClearRing : null;
+      if (typeof clrFn === "function") clrFn();
+      if (fb) fb.textContent = "등록부 링을 지웠습니다.";
+    });
+  }
+
+  function buildCoordinateAddressPayload() {
+    const epsgEl = q("#construction-parcel-epsg");
+    const swapEl = q("#construction-parcel-swap-xy");
+    const xEl = q("#construction-parcel-addr-x");
+    const yEl = q("#construction-parcel-addr-y");
+    const x = xEl && xEl.value !== "" ? Number(xEl.value) : NaN;
+    const y = yEl && yEl.value !== "" ? Number(yEl.value) : NaN;
+    return {
+      x,
+      y,
+      assumed_epsg: epsgEl ? Number(epsgEl.value) || 5186 : 5186,
+      swap_xy: Boolean(swapEl && swapEl.checked),
+    };
+  }
+
+  async function runCoordinateAddressLookup() {
+    const outEl = q("#construction-parcel-address-result");
+    const base = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "";
+    const body = buildCoordinateAddressPayload();
+    if (!Number.isFinite(body.x) || !Number.isFinite(body.y)) {
+      if (outEl) {
+        outEl.classList.add("construction-parcel-address-result--error");
+        outEl.textContent = "X·Y 값을 숫자로 입력하세요.";
+      }
+      return;
+    }
+    if (outEl) {
+      outEl.classList.remove("construction-parcel-address-result--error");
+      outEl.textContent = "조회 중…";
+    }
+    try {
+      const r = await fetch(`${base}/api/coordinate-address`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!outEl) return;
+      if (!r.ok) {
+        const detail = typeof data?.detail === "string" ? data.detail : JSON.stringify(data?.detail || "");
+        outEl.classList.add("construction-parcel-address-result--error");
+        outEl.textContent = detail || r.statusText || "요청 실패";
+        return;
+      }
+      if (!data.ok) {
+        outEl.classList.add("construction-parcel-address-result--error");
+        const w = data.wgs84 || {};
+        const wgs =
+          Number.isFinite(Number(w.lon)) && Number.isFinite(Number(w.lat))
+            ? `경위도: ${Number(w.lon).toFixed(5)}, ${Number(w.lat).toFixed(5)} (WGS84)\n`
+            : "";
+        outEl.textContent = `${wgs}${data.error || data.summary || data.vworld_error || "주소를 가져오지 못했습니다."}`;
+        return;
+      }
+      outEl.classList.remove("construction-parcel-address-result--error");
+      const w = data.wgs84 || {};
+      const lon = Number.isFinite(Number(w.lon)) ? Number(w.lon).toFixed(5) : "—";
+      const lat = Number.isFinite(Number(w.lat)) ? Number(w.lat).toFixed(5) : "—";
+      const lines =
+        Array.isArray(data.detail_lines) && data.detail_lines.length
+          ? data.detail_lines.join("\n")
+          : [data.road_address, data.parcel_address].filter(Boolean).join("\n");
+      const zip = data.zipcode ? `우편번호: ${data.zipcode}\n` : "";
+      const dx = Number(data.drawing?.x);
+      const dy = Number(data.drawing?.y);
+      outEl.textContent =
+        `도면: (${Number.isFinite(dx) ? dx.toFixed(3) : "—"}, ${Number.isFinite(dy) ? dy.toFixed(3) : "—"}) m\n`
+        + `WGS84: ${lon}, ${lat}\n`
+        + zip
+        + (lines || data.summary || "(상세 없음)");
+    } catch (err) {
+      if (outEl) {
+        outEl.classList.add("construction-parcel-address-result--error");
+        outEl.textContent = errorMessage(err);
+      }
+    }
+  }
+
+  const constructionParcelAddressBtn = q("#construction-parcel-address-btn");
+  if (constructionParcelAddressBtn) {
+    constructionParcelAddressBtn.addEventListener("click", () => void runCoordinateAddressLookup());
+  }
+  const constructionParcelAddrFillQueryBtn = q("#construction-parcel-address-fill-query-btn");
+  if (constructionParcelAddrFillQueryBtn) {
+    constructionParcelAddrFillQueryBtn.addEventListener("click", () => {
+      const qp = lastParcelReviewResponse && lastParcelReviewResponse.query_point;
+      const xEl = q("#construction-parcel-addr-x");
+      const yEl = q("#construction-parcel-addr-y");
+      const fb = q("#construction-parcel-address-result");
+      if (!qp || !Number.isFinite(Number(qp.x)) || !Number.isFinite(Number(qp.y))) {
+        if (fb) {
+          fb.classList.add("construction-parcel-address-result--error");
+          fb.textContent = "먼저 「자동 검토 실행」으로 쿼리점이 생긴 뒤 사용하세요.";
+        }
+        return;
+      }
+      if (xEl) xEl.value = String(qp.x);
+      if (yEl) yEl.value = String(qp.y);
+      if (fb) {
+        fb.classList.remove("construction-parcel-address-result--error");
+        fb.textContent = `쿼리점 반영: (${Number(qp.x).toFixed(3)}, ${Number(qp.y).toFixed(3)}) m — 「이 좌표의 주소 조회」를 누르세요.`;
+      }
+    });
+  }
 
   const constructionParcelRunBtn = q("#construction-parcel-run-btn");
   if (constructionParcelRunBtn) {

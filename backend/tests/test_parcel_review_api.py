@@ -17,10 +17,15 @@ except ImportError:  # pragma: no cover
     _has_shapely = False
 
 try:
-    from backend.parcel_review_api import _client_nearby_parcel_rings, _pick_parcel_polygon
+    from backend.parcel_review_api import (
+        _client_nearby_parcel_rings,
+        _parse_vworld_address_payload,
+        _pick_parcel_polygon,
+    )
 except ImportError:  # pragma: no cover
     _pick_parcel_polygon = None  # type: ignore[misc, assignment]
     _client_nearby_parcel_rings = None  # type: ignore[misc, assignment]
+    _parse_vworld_address_payload = None  # type: ignore[misc, assignment]
 
 
 @unittest.skipUnless(
@@ -122,6 +127,28 @@ class ParcelReviewPickTest(unittest.TestCase):
         self.assertTrue(rows[0]["is_winner"])
         self.assertFalse(rows[1]["is_winner"])
         self.assertFalse(rows[2]["is_winner"])
+
+
+@unittest.skipUnless(_parse_vworld_address_payload is not None, "parcel_review_api import")
+class VworldAddressParseTest(unittest.TestCase):
+    def test_parse_ok_list(self) -> None:
+        data = {
+            "response": {
+                "status": "OK",
+                "result": [
+                    {"zipcode": "13480", "parceladdr": "경기 성남시 지번", "roadaddr": "경기 성남시 도로명"},
+                ],
+            }
+        }
+        p = _parse_vworld_address_payload(data)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["zipcode"], "13480")
+        self.assertIn("도로명", p["summary"])
+
+    def test_parse_not_found(self) -> None:
+        data = {"response": {"status": "NOT_FOUND", "text": "없음"}}
+        p = _parse_vworld_address_payload(data)
+        self.assertFalse(p["ok"])
 
 
 if __name__ == "__main__":
