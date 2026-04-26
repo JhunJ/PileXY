@@ -798,6 +798,34 @@ def parcel_review(body: ParcelReviewRequest = Body(...)) -> Dict[str, Any]:
         "parcel_pick": {},
     }
 
+    query_address: Dict[str, Any] = {
+        "ok": False,
+        "summary": "",
+        "parcel_address": "",
+        "road_address": "",
+        "zipcode": "",
+        "detail_lines": [],
+    }
+    if lonlat and api_key:
+        q_lon, q_lat = float(lonlat[0]), float(lonlat[1])
+        raw_addr, err_addr = _vworld_reverse_address_request(q_lon, q_lat, api_key, domain)
+        if err_addr:
+            query_address["error"] = err_addr
+        else:
+            parsed_addr = _parse_vworld_address_payload(raw_addr)
+            query_address = {
+                "ok": bool(parsed_addr.get("ok")),
+                "summary": str(parsed_addr.get("summary") or ""),
+                "parcel_address": parsed_addr.get("parcel_address") or "",
+                "road_address": parsed_addr.get("road_address") or "",
+                "zipcode": parsed_addr.get("zipcode") or "",
+                "detail_lines": parsed_addr.get("detail_lines") or [],
+            }
+    elif lonlat and not api_key:
+        query_address["skipped"] = "no_vworld_key"
+    elif not lonlat:
+        query_address["skipped"] = "no_query_lonlat"
+
     if lonlat and api_key and _HAS_SHAPELY:
         lon, lat = lonlat
         q_bbox = _bbox_lonlat_around_query(lon, lat, PARCEL_WFS_QUERY_BBOX_HALF_M)
@@ -950,6 +978,7 @@ def parcel_review(body: ParcelReviewRequest = Body(...)) -> Dict[str, Any]:
     return {
         "ok": True,
         "query_point": {"x": qx, "y": qy, "method": qmethod},
+        "query_address": query_address,
         "query_lonlat": ({"lon": lonlat[0], "lat": lonlat[1]} if lonlat else None),
         "assumed_epsg": body.assumed_epsg,
         "tolerance_m": body.tolerance_m,

@@ -407,12 +407,48 @@
             <li>서버에 <code>VWORLD_API_KEY</code>가 있으면 연속지적 경계를 조회해 침범 여부를 계산합니다.</li>
           </ul>
         </div>
+        <div class="construction-parcel-viz-group construction-parcel-main-canvas-block">
+          <p class="construction-parcel-viz-group-title">메인 캔버스(말뚝 도면)</p>
+          <label class="construction-parcel-nearby-viz-label">
+            <input type="checkbox" id="construction-parcel-main-canvas-viewer" />
+            <span class="construction-parcel-option-text">
+              <span class="construction-parcel-option-primary">필지 검토 <strong>뷰어 표시</strong></span>
+              <span class="construction-parcel-option-detail">켜면 왼쪽 캔버스에 지적·필지·등록부 등이 그려집니다. 처음 불러오기 시 기본은 끔입니다.</span>
+            </span>
+          </label>
+          <div class="construction-parcel-viz-bulk-actions" role="group" aria-label="도면 오버레이 일괄">
+            <button type="button" id="construction-parcel-viz-all-on" class="ghost">도면 오버레이 전체 켜기</button>
+            <button type="button" id="construction-parcel-viz-all-off" class="ghost">도면 오버레이 전체 끄기</button>
+          </div>
+        </div>
         <div class="construction-parcel-lx-card">
-          <p class="construction-parcel-viz-group-title">경계점 좌표등록부 (도면 m)</p>
-          <p class="construction-parcel-lx-paste-hint">Excel에서 <strong>X</strong>·<strong>Y</strong> 열만 복사해 붙여넣기 (탭 또는 쉼표). 숫자가 아닌 첫 열은 자동으로 건너뜁니다.</p>
-          <textarea id="construction-parcel-lx-textarea" class="construction-parcel-lx-textarea" rows="5" spellcheck="false" placeholder="예) X	Y&#10;210.12	451880.5&#10;211.05	451881.2&#10;…"></textarea>
+          <p class="construction-parcel-viz-group-title construction-parcel-lx-title"><span>경계점 좌표등록부 (도면 m)</span><span class="construction-parcel-lx-title-suffix">(경계측량 보고서)</span></p>
+          <div class="construction-parcel-lx-rows-toolbar">
+            <label class="construction-parcel-lx-rows-label">행 수
+              <input type="number" id="construction-parcel-lx-row-count" class="save-work-input construction-parcel-lx-row-count-inp" min="1" max="500" value="12" />
+            </label>
+            <button type="button" id="construction-parcel-lx-apply-rows-btn" class="ghost">행 수 적용</button>
+            <button type="button" id="construction-parcel-lx-mobile-paste-btn" class="ghost" title="모바일(특히 iOS/Safari)에서 엑셀 복사 텍스트가 표에 바로 붙지 않으면 이 버튼을 사용하세요.">모바일 붙여넣기</button>
+          </div>
+          <details id="construction-parcel-lx-expand-details" class="construction-parcel-lx-expand-details">
+            <summary class="construction-parcel-lx-expand-summary">표 펼치기 · 긴 붙여넣기(스크롤 없이 높게 보기)</summary>
+          </details>
+          <div id="construction-parcel-lx-scroll" class="construction-parcel-lx-scroll" tabindex="0" aria-label="등록부 표 영역">
+            <div id="construction-parcel-lx-table-wrap" class="construction-parcel-lx-table-wrap" tabindex="-1">
+              <table class="construction-parcel-lx-table" aria-label="경계점 좌표등록부">
+                <thead>
+                  <tr>
+                    <th scope="col" class="construction-parcel-lx-th-n">번호</th>
+                    <th scope="col" class="construction-parcel-lx-th-x">X (도면 m)</th>
+                    <th scope="col" class="construction-parcel-lx-th-y">Y (도면 m)</th>
+                  </tr>
+                </thead>
+                <tbody id="construction-parcel-lx-tbody"></tbody>
+              </table>
+            </div>
+          </div>
           <div class="construction-parcel-lx-actions">
-            <button type="button" id="construction-parcel-lx-apply-btn" class="header-construction-btn">적용 · 메인 캔버스에 폴리라인</button>
+            <button type="button" id="construction-parcel-lx-save-btn" class="header-construction-btn">저장하기</button>
             <button type="button" id="construction-parcel-lx-clear-btn" class="ghost">등록부 지우기</button>
           </div>
           <p id="construction-parcel-lx-feedback" class="construction-parcel-lx-feedback" aria-live="polite"></p>
@@ -439,39 +475,15 @@
                 <span class="construction-parcel-option-detail">좌표 확인용 작은 점</span>
               </span>
             </label>
-            <label class="construction-parcel-nearby-viz-label">
-              <input type="checkbox" id="construction-parcel-lx-show-encroach" checked />
-              <span class="construction-parcel-option-text">
-                <span class="construction-parcel-option-primary"><strong>대지 초과</strong> 영역</span>
-                <span class="construction-parcel-option-detail">자동 검토 시 「기준으로 사용」을 켠 경우 서버가 계산한 대지−등록부</span>
-              </span>
-            </label>
-            <label class="construction-parcel-nearby-viz-label">
-              <input type="checkbox" id="construction-parcel-lx-use-reference" />
-              <span class="construction-parcel-option-text">
-                <span class="construction-parcel-option-primary">자동 검토 시 등록부를 <strong>기준</strong>으로 사용</span>
-                <span class="construction-parcel-option-detail">대지(볼록)에서 등록부를 빼 초과 면적·윤곽을 서버에서 계산합니다. 적용 후 「자동 검토 실행」을 다시 하세요.</span>
-              </span>
-            </label>
+            <div class="construction-parcel-lx-viz-apply-row">
+              <button type="button" id="construction-parcel-lx-viz-apply-btn" class="ghost">등록부 가시성 적용</button>
+            </div>
           </div>
         </div>
         <div class="construction-sync-actions">
           <button type="button" id="construction-parcel-run-btn" class="header-construction-btn">자동 검토 실행</button>
           <button type="button" id="construction-parcel-focus-nearby-btn" class="ghost" disabled title="먼저 「자동 검토 실행」을 하세요.">인접 필지 구역으로 이동·확대</button>
           <button type="button" id="construction-parcel-clear-viz-btn" class="ghost">지도 오버레이 지우기</button>
-        </div>
-        <div class="construction-parcel-address-card">
-          <p class="construction-parcel-viz-group-title">도면 좌표 → 주소 (역지오코딩)</p>
-          <p class="construction-parcel-lx-paste-hint">파일(도면)과 같은 <strong>X·Y (m)</strong>를 입력합니다. 「고급: 도면 평면좌표」의 EPSG·XY 바꿔 투영과 동일하게 서버에서 경위도로 바꾼 뒤 브이월드 주소 API를 호출합니다.</p>
-          <div class="construction-parcel-address-row">
-            <label>X (도면 m)<input type="number" step="any" id="construction-parcel-addr-x" class="save-work-input" placeholder="예: 210.12" /></label>
-            <label>Y (도면 m)<input type="number" step="any" id="construction-parcel-addr-y" class="save-work-input" placeholder="예: 451880" /></label>
-          </div>
-          <div class="construction-parcel-lx-actions">
-            <button type="button" id="construction-parcel-address-btn" class="header-construction-btn">이 좌표의 주소 조회</button>
-            <button type="button" id="construction-parcel-address-fill-query-btn" class="ghost" title="마지막으로 실행한 필지 검토의 쿼리점 좌표를 채웁니다.">마지막 검토 쿼리점 넣기</button>
-          </div>
-          <div id="construction-parcel-address-result" class="construction-parcel-address-result" aria-live="polite"></div>
         </div>
         <div id="construction-parcel-canvas-selection" class="construction-parcel-canvas-selection" aria-live="polite"></div>
         <div class="construction-parcel-viz-group">
@@ -2094,11 +2106,14 @@
     ctx.fillRect(0, 0, width, height);
     /* app.js drawCanvas 과 동일: 필지 검토 오버레이만 있어도 빈 화면이 아니게 */
     const parcelOverlay =
-      state.parcelReviewViz != null
-      || (typeof pilexyParcelReviewVizHasGeometry === "function"
-        && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
-      || (typeof pilexyParcelReviewLxUserHasGeometry === "function"
-        && pilexyParcelReviewLxUserHasGeometry());
+      Boolean(state.parcelReviewMainCanvasViewer)
+      && (
+        state.parcelReviewViz != null
+        || (typeof pilexyParcelReviewVizHasGeometry === "function"
+          && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
+        || (typeof pilexyParcelReviewLxUserHasGeometry === "function"
+          && pilexyParcelReviewLxUserHasGeometry())
+      );
     if ((!state.hasDataset || !(state.circles || []).length) && !parcelOverlay) {
       ctx.fillStyle = "#9ca3af";
       ctx.font = "16px 'Segoe UI'";
@@ -8539,6 +8554,34 @@ function inferOpenRectangleVertices(vertices) {
       : "먼저 「자동 검토 실행」을 하세요.";
   }
 
+  /** 다른 프로젝트·작업·윤곽 설정을 불러온 뒤 이전 필지/지적 검토 결과가 남지 않게 함 */
+  function resetParcelReviewForWorkContextChange() {
+    lastParcelReviewResponse = null;
+    const setMain = typeof window !== "undefined" ? window.pilexySetParcelReviewMainCanvasViewer : null;
+    if (typeof setMain === "function") setMain(false);
+    else state.parcelReviewMainCanvasViewer = false;
+    const mainCb = q("#construction-parcel-main-canvas-viewer");
+    if (mainCb) mainCb.checked = false;
+    const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+    if (typeof setViz === "function") setViz(null);
+    const selEl = q("#construction-parcel-canvas-selection");
+    if (selEl) selEl.textContent = "";
+    const sum = q("#construction-parcel-summary");
+    if (sum) {
+      sum.innerHTML =
+        '<div class="construction-parcel-note">「자동 검토 실행」 후 이곳에 판정·PNU·면적 요약이 표시됩니다.</div>';
+    }
+    const jsonEl = q("#construction-parcel-json");
+    if (jsonEl) jsonEl.textContent = "(실행 전)";
+    const cntEl = q("#construction-parcel-nearby-count");
+    if (cntEl) cntEl.textContent = "";
+    const copyFb = q("#construction-parcel-copy-feedback");
+    if (copyFb) copyFb.textContent = "";
+    syncParcelFocusNearbyButton();
+    syncParcelLayerDependentControls();
+    updateParcelNearbyVerticesDebugPre();
+  }
+
   /** 「필지 표시」가 꺼지면 인접·꼭짓점 디버그는 도면에 반영되지 않으므로 입력만 비활성화 */
   function syncParcelLayerDependentControls() {
     const lot = q("#construction-parcel-show-parcel-lot");
@@ -8556,6 +8599,49 @@ function inferOpenRectangleVertices(vertices) {
     if (dbgLab) {
       dbgLab.title = on ? "" : "필지·인접 표시가 꺼져 있으면 인접 꼭짓점 디버그는 적용되지 않습니다.";
     }
+  }
+
+  function applyParcelLxDisplayOptions() {
+    syncParcelLxOptionsToApp();
+    if (lastParcelReviewResponse) {
+      const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+      if (typeof setViz === "function") {
+        setViz(buildParcelVizPayload(lastParcelReviewResponse));
+      }
+      const selEl = q("#construction-parcel-canvas-selection");
+      if (selEl) selEl.textContent = "";
+    } else if (typeof requestRedraw === "function") {
+      requestRedraw();
+    }
+  }
+
+  function setParcelOverlayCheckboxesAll(on) {
+    const cad = q("#construction-parcel-show-cadastral");
+    const lot = q("#construction-parcel-show-parcel-lot");
+    const nearby = q("#construction-parcel-show-nearby-rings");
+    const probe = q("#construction-parcel-coord-probe");
+    const dbg = q("#construction-parcel-debug-nearby-vertices");
+    if (cad) cad.checked = on;
+    if (lot) lot.checked = on;
+    if (nearby) nearby.checked = on;
+    if (probe) probe.checked = on;
+    if (dbg) dbg.checked = false;
+    syncParcelLayerDependentControls();
+    const setProbe = typeof window !== "undefined" ? window.pilexySetParcelReviewCoordProbe : null;
+    if (typeof setProbe === "function" && probe) setProbe(Boolean(probe.checked));
+    if (!lastParcelReviewResponse) {
+      if (typeof requestRedraw === "function") requestRedraw();
+      updateParcelNearbyVerticesDebugPre();
+      return;
+    }
+    const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+    if (typeof setViz === "function") {
+      setViz(buildParcelVizPayload(lastParcelReviewResponse));
+    }
+    const selEl = q("#construction-parcel-canvas-selection");
+    if (selEl) selEl.textContent = "";
+    updateParcelNearbyVerticesDebugPre();
+    if (on) renderParcelReviewSummary(lastParcelReviewResponse, {});
   }
 
   function buildParcelReviewDebugSummaryHtml(data) {
@@ -8857,6 +8943,29 @@ function inferOpenRectangleVertices(vertices) {
     const ll = data.query_lonlat;
     const lonStr = ll && Number.isFinite(Number(ll.lon)) ? Number(ll.lon).toFixed(5) : "—";
     const latStr = ll && Number.isFinite(Number(ll.lat)) ? Number(ll.lat).toFixed(5) : "—";
+    const qa = data.query_address && typeof data.query_address === "object" ? data.query_address : null;
+    let addrRow = "";
+    if (qa) {
+      const sk = String(qa.skipped || "");
+      if (sk === "no_vworld_key") {
+        addrRow =
+          '<div class="construction-parcel-dl-row"><dt>쿼리점 주소</dt><dd><span class="construction-parcel-dl-sub">VWORLD 키 없음 — 역지오 생략</span></dd></div>';
+      } else if (sk === "no_query_lonlat") {
+        addrRow =
+          '<div class="construction-parcel-dl-row"><dt>쿼리점 주소</dt><dd><span class="construction-parcel-dl-sub">경위도 변환 실패 — 역지오 생략</span></dd></div>';
+      } else if (sk) {
+        addrRow = `<div class="construction-parcel-dl-row"><dt>쿼리점 주소</dt><dd><span class="construction-parcel-dl-sub">${escape(sk)}</span></dd></div>`;
+      } else if (qa.error) {
+        addrRow = `<div class="construction-parcel-dl-row"><dt>쿼리점 주소</dt><dd>${escape(String(qa.error))}</dd></div>`;
+      } else {
+        const sum = escape(String(qa.summary || (qa.ok ? "" : "(주소 없음)")));
+        const extra =
+          Array.isArray(qa.detail_lines) && qa.detail_lines.length
+            ? `<span class="construction-parcel-dl-sub"> · ${escape(qa.detail_lines.join(" · "))}</span>`
+            : "";
+        addrRow = `<div class="construction-parcel-dl-row"><dt>쿼리점 주소</dt><dd>${sum}${extra}</dd></div>`;
+      }
+    }
     let verdictLabel = "";
     let verdictClass = "construction-parcel-verdict--muted";
     const llIn = Boolean(data.parcel_contains_query_lonlat);
@@ -8900,6 +9009,7 @@ function inferOpenRectangleVertices(vertices) {
       <dl class="construction-parcel-dl">
         <div class="construction-parcel-dl-row"><dt>쿼리점(도면)</dt><dd>(${qxs}, ${qys})</dd></div>
         <div class="construction-parcel-dl-row"><dt>추정 위치</dt><dd>${escape(lonStr)}, ${escape(latStr)} <span class="construction-parcel-dl-sub">WGS84</span></dd></div>
+        ${addrRow}
         <div class="construction-parcel-dl-row"><dt>PNU</dt><dd>${pnu}</dd></div>
         <div class="construction-parcel-dl-row"><dt>대지−필지 면적차</dt><dd>${escape(areaSqm)}</dd></div>
         ${lxEncRow}
@@ -8922,6 +9032,7 @@ function inferOpenRectangleVertices(vertices) {
       renderParcelReviewSummary({}, { errorText: "말뚝 좌표가 없습니다. DXF를 업로드하거나 작업을 불러오세요." });
       return;
     }
+    syncLxTableToCanvas();
     renderParcelReviewSummary({}, { loading: true });
     try {
       const r = await fetch(`${base}/api/parcel-review`, {
@@ -8979,15 +9090,22 @@ function inferOpenRectangleVertices(vertices) {
       if (typeof fn === "function") fn(Boolean(t.checked));
       return;
     }
-    if (
-      t.id === "construction-parcel-lx-show-outline"
-      || t.id === "construction-parcel-lx-show-fill"
-      || t.id === "construction-parcel-lx-show-vertices"
-      || t.id === "construction-parcel-lx-show-encroach"
-      || t.id === "construction-parcel-lx-use-reference"
-    ) {
-      syncParcelLxOptionsToApp();
-      if (typeof requestRedraw === "function") requestRedraw();
+    if (t.id === "construction-parcel-main-canvas-viewer") {
+      const fn = typeof window !== "undefined" ? window.pilexySetParcelReviewMainCanvasViewer : null;
+      if (typeof fn === "function") {
+        fn(Boolean(t.checked));
+        if (t.checked && lastParcelReviewResponse) {
+          const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+          if (typeof setViz === "function") setViz(buildParcelVizPayload(lastParcelReviewResponse));
+        }
+      } else {
+        state.parcelReviewMainCanvasViewer = Boolean(t.checked);
+        if (t.checked && lastParcelReviewResponse) {
+          const setViz = typeof window !== "undefined" ? window.pilexySetParcelReviewViz : null;
+          if (typeof setViz === "function") setViz(buildParcelVizPayload(lastParcelReviewResponse));
+        }
+        if (typeof requestRedraw === "function") requestRedraw();
+      }
       return;
     }
     if (
@@ -9037,23 +9155,794 @@ function inferOpenRectangleVertices(vertices) {
     if (fb) setTimeout(() => { fb.textContent = ""; }, 3500);
   });
 
-  function parseParcelLxRegisterPaste(raw) {
-    const lines = String(raw || "").split(/\r?\n/);
-    const pts = [];
-    for (const line0 of lines) {
-      const line = line0.trim();
-      if (!line) continue;
-      let parts = line.split("\t").map((s) => s.trim()).filter((p) => p !== "");
-      if (parts.length < 2) {
-        parts = line.split(/[;,]/).map((s) => s.trim()).filter((p) => p !== "");
-      }
-      if (parts.length < 2) continue;
-      const x = Number(String(parts[0]).replace(/,/g, "").trim());
-      const y = Number(String(parts[1]).replace(/,/g, "").trim());
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      pts.push({ x, y });
+  const LX_COL_ORDER = ["n", "x", "y"];
+  /** `loadLxTableFromStorage` 비동기 겹침 시 늦게 도착한 응답이 표를 덮어쓰지 않게 함 */
+  let lxRegisterTableLoadSeq = 0;
+  const lxGridSelect = {
+    cells: new Set(),
+    anchorRow: 0,
+    anchorCol: 0,
+    hasAnchor: false,
+    dragActive: false,
+    dragAnchorRow: 0,
+    dragAnchorCol: 0,
+    dragMoved: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    dragMoveHandler: null,
+    dragUpHandler: null,
+  };
+
+  function lxResolveCellFromTarget(t) {
+    if (!t || typeof t.closest !== "function") return null;
+    const inp = t.closest(".construction-parcel-lx-inp-n, .construction-parcel-lx-inp-x, .construction-parcel-lx-inp-y");
+    const td = (inp || t).closest("td[data-lx-col]");
+    const tr = (inp || t).closest("tr[data-lx-row]");
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!td || !tr || !tb || !tb.contains(tr)) return null;
+    const colAttr = td.getAttribute("data-lx-col");
+    const colIdx = LX_COL_ORDER.indexOf(colAttr);
+    if (colIdx < 0) return null;
+    const rowIdx = [...tb.querySelectorAll("tr[data-lx-row]")].indexOf(tr);
+    if (rowIdx < 0) return null;
+    const inputEl = inp || td.querySelector("input");
+    return { td, tr, rowIdx, colIdx, inputEl };
+  }
+
+  function lxRefreshGridCellSelectionDom() {
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return;
+    tb.querySelectorAll("td[data-lx-col]").forEach((td) => {
+      td.classList.remove("construction-parcel-lx-cell--selected");
+    });
+    const rows = [...tb.querySelectorAll("tr[data-lx-row]")];
+    lxGridSelect.cells.forEach((key) => {
+      const parts = String(key).split(",");
+      const r = parseInt(parts[0], 10);
+      const c = parseInt(parts[1], 10);
+      if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+      const tr = rows[r];
+      if (!tr) return;
+      const colKey = LX_COL_ORDER[c];
+      if (!colKey) return;
+      const td = tr.querySelector(`td[data-lx-col="${colKey}"]`);
+      if (td) td.classList.add("construction-parcel-lx-cell--selected");
+    });
+  }
+
+  function lxGridDetachDragListeners() {
+    if (lxGridSelect.dragMoveHandler) {
+      document.removeEventListener("mousemove", lxGridSelect.dragMoveHandler, true);
+      lxGridSelect.dragMoveHandler = null;
     }
+    if (lxGridSelect.dragUpHandler) {
+      document.removeEventListener("mouseup", lxGridSelect.dragUpHandler, true);
+      lxGridSelect.dragUpHandler = null;
+    }
+    lxGridSelect.dragActive = false;
+  }
+
+  function lxGridClearCellSelection() {
+    lxGridDetachDragListeners();
+    lxGridSelect.cells.clear();
+    lxGridSelect.hasAnchor = false;
+    lxRefreshGridCellSelectionDom();
+  }
+
+  function lxGridSelectRectangle(r0, c0, r1, c1) {
+    lxGridSelect.cells.clear();
+    const rmin = Math.min(r0, r1);
+    const rmax = Math.max(r0, r1);
+    const cmin = Math.min(c0, c1);
+    const cmax = Math.max(c0, c1);
+    for (let r = rmin; r <= rmax; r += 1) {
+      for (let c = cmin; c <= cmax; c += 1) {
+        lxGridSelect.cells.add(`${r},${c}`);
+      }
+    }
+    lxRefreshGridCellSelectionDom();
+  }
+
+  function lxGridFocusScrollForKeys() {
+    const scrollEl = q("#construction-parcel-lx-scroll");
+    if (scrollEl && typeof scrollEl.focus === "function") {
+      try {
+        scrollEl.focus({ preventScroll: true });
+      } catch (_) {
+        scrollEl.focus();
+      }
+    }
+  }
+
+  function lxGridSelectionBounds() {
+    let minR = Infinity;
+    let maxR = -1;
+    let minC = Infinity;
+    let maxC = -1;
+    lxGridSelect.cells.forEach((key) => {
+      const [rs, cs] = String(key).split(",");
+      const r = parseInt(rs, 10);
+      const c = parseInt(cs, 10);
+      if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+      minR = Math.min(minR, r);
+      maxR = Math.max(maxR, r);
+      minC = Math.min(minC, c);
+      maxC = Math.max(maxC, c);
+    });
+    if (minR === Infinity) return null;
+    return { minR, maxR, minC, maxC };
+  }
+
+  async function lxGridCopySelectionToClipboard() {
+    const b = lxGridSelectionBounds();
+    if (!b) return false;
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return false;
+    const rows = [...tb.querySelectorAll("tr[data-lx-row]")];
+    const lines = [];
+    for (let r = b.minR; r <= b.maxR; r += 1) {
+      const cells = [];
+      for (let c = b.minC; c <= b.maxC; c += 1) {
+        if (!lxGridSelect.cells.has(`${r},${c}`)) {
+          cells.push("");
+          continue;
+        }
+        const tr = rows[r];
+        if (!tr) {
+          cells.push("");
+          continue;
+        }
+        const colKey = LX_COL_ORDER[c];
+        const inp = tr.querySelector(
+          colKey === "n"
+            ? ".construction-parcel-lx-inp-n"
+            : colKey === "x"
+              ? ".construction-parcel-lx-inp-x"
+              : ".construction-parcel-lx-inp-y",
+        );
+        cells.push(inp ? String(inp.value ?? "") : "");
+      }
+      lines.push(cells.join("\t"));
+    }
+    const text = lines.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function lxGridDeleteSelectionValues() {
+    if (!lxGridSelect.cells.size) return;
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return;
+    const rows = [...tb.querySelectorAll("tr[data-lx-row]")];
+    lxGridSelect.cells.forEach((key) => {
+      const [rs, cs] = String(key).split(",");
+      const r = parseInt(rs, 10);
+      const c = parseInt(cs, 10);
+      if (!Number.isFinite(r) || c !== 1 && c !== 2) return;
+      const tr = rows[r];
+      if (!tr) return;
+      const sel = c === 1 ? ".construction-parcel-lx-inp-x" : ".construction-parcel-lx-inp-y";
+      const inp = tr.querySelector(sel);
+      if (inp) inp.value = "";
+    });
+    renumberLxTableRows();
+    syncLxTableToCanvas();
+  }
+
+  function lxGridIsHotTarget(el) {
+    const scrollEl = q("#construction-parcel-lx-scroll");
+    const wrap = q("#construction-parcel-lx-table-wrap");
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!el) return false;
+    return Boolean(
+      tb?.contains(el)
+      || scrollEl === el
+      || wrap?.contains(el),
+    );
+  }
+
+  function readLxRowCountInput() {
+    const el = q("#construction-parcel-lx-row-count");
+    let n = parseInt(String(el && el.value !== "" ? el.value : "12"), 10);
+    if (!Number.isFinite(n)) n = 12;
+    return Math.min(500, Math.max(1, n));
+  }
+
+  function renumberLxTableRows() {
+    q("#construction-parcel-lx-tbody")?.querySelectorAll("tr[data-lx-row]").forEach((tr, i) => {
+      const nEl = tr.querySelector(".construction-parcel-lx-inp-n");
+      if (nEl) nEl.value = String(i + 1);
+    });
+  }
+
+  function appendLxTableRow(x, y) {
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return;
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-lx-row", "1");
+    const tdN = document.createElement("td");
+    tdN.className = "construction-parcel-lx-td-n";
+    tdN.setAttribute("data-lx-col", "n");
+    const inpN = document.createElement("input");
+    inpN.type = "text";
+    inpN.className = "save-work-input construction-parcel-lx-inp-n";
+    inpN.setAttribute("aria-label", "번호");
+    inpN.readOnly = true;
+    inpN.tabIndex = -1;
+    inpN.value = "";
+    tdN.appendChild(inpN);
+    const tdX = document.createElement("td");
+    tdX.className = "construction-parcel-lx-td-x";
+    tdX.setAttribute("data-lx-col", "x");
+    const inpX = document.createElement("input");
+    inpX.type = "text";
+    inpX.className = "save-work-input construction-parcel-lx-inp-x";
+    inpX.setAttribute("aria-label", "X 도면 m");
+    inpX.value = String(x ?? "");
+    tdX.appendChild(inpX);
+    const tdY = document.createElement("td");
+    tdY.className = "construction-parcel-lx-td-y";
+    tdY.setAttribute("data-lx-col", "y");
+    const inpY = document.createElement("input");
+    inpY.type = "text";
+    inpY.className = "save-work-input construction-parcel-lx-inp-y";
+    inpY.setAttribute("aria-label", "Y 도면 m");
+    inpY.value = String(y ?? "");
+    tdY.appendChild(inpY);
+    tr.appendChild(tdN);
+    tr.appendChild(tdX);
+    tr.appendChild(tdY);
+    tb.appendChild(tr);
+  }
+
+  /**
+   * @param {number} n
+   * @param {{ preserveExistingValues?: boolean }} [opts] - 기본 true. 행 수 적용·붙여넣기 등은 유지, 저장소에서 불러올 때는 false로 이전 표 값이 섞이지 않게 함.
+   */
+  function applyLxTableRowCount(n, opts) {
+    lxGridClearCellSelection();
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return;
+    const clamped = Math.min(500, Math.max(1, Math.floor(Number(n)) || 1));
+    const preserve = opts?.preserveExistingValues !== false;
+    const old = [];
+    if (preserve) {
+      tb.querySelectorAll("tr[data-lx-row]").forEach((tr) => {
+        old.push({
+          x: tr.querySelector(".construction-parcel-lx-inp-x")?.value ?? "",
+          y: tr.querySelector(".construction-parcel-lx-inp-y")?.value ?? "",
+        });
+      });
+    }
+    tb.innerHTML = "";
+    for (let i = 0; i < clamped; i += 1) {
+      const o = preserve ? old[i] : null;
+      appendLxTableRow(o ? o.x : "", o ? o.y : "");
+    }
+    renumberLxTableRows();
+    syncLxTableToCanvas();
+  }
+
+  function collectLxVerticesFromTable() {
+    const pts = [];
+    q("#construction-parcel-lx-tbody")?.querySelectorAll("tr[data-lx-row]").forEach((tr) => {
+      const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+      const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+      const xs = String(xEl?.value ?? "").replace(/,/g, "").trim();
+      const ys = String(yEl?.value ?? "").replace(/,/g, "").trim();
+      if (xs === "" || ys === "") return;
+      const x = Number(xs);
+      const y = Number(ys);
+      if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x: y, y: x });
+    });
     return pts;
+  }
+
+  function syncLxTableToCanvas() {
+    const pts = collectLxVerticesFromTable();
+    const applyFn = typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterApplyParsedRing : null;
+    if (typeof applyFn === "function") applyFn(pts);
+  }
+
+  function lxRowHasCompleteXY(tr) {
+    const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+    const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+    const xs = String(xEl?.value ?? "").replace(/,/g, "").trim();
+    const ys = String(yEl?.value ?? "").replace(/,/g, "").trim();
+    if (xs === "" || ys === "") return false;
+    const x = Number(xs);
+    const y = Number(ys);
+    return Number.isFinite(x) && Number.isFinite(y);
+  }
+
+  function getLxVertexIndexForTableRow(tr) {
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb || !tr) return null;
+    const all = [...tb.querySelectorAll("tr[data-lx-row]")];
+    const rowIndex = all.indexOf(tr);
+    if (rowIndex < 0 || !lxRowHasCompleteXY(tr)) return null;
+    let v = 0;
+    for (let i = 0; i < rowIndex; i += 1) {
+      if (lxRowHasCompleteXY(all[i])) v += 1;
+    }
+    return v;
+  }
+
+  /** 표 X·Y → 도면 월드(캔버스와 동일하게 열 값 교차) */
+  function getLxWorldPointFromTableRow(tr) {
+    const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+    const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+    const xs = String(xEl?.value ?? "").replace(/,/g, "").trim();
+    const ys = String(yEl?.value ?? "").replace(/,/g, "").trim();
+    if (xs === "" || ys === "") return null;
+    const tx = Number(xs);
+    const ty = Number(ys);
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return null;
+    return { x: ty, y: tx };
+  }
+
+  function clearLxTableRowHighlightActive() {
+    q("#construction-parcel-lx-tbody")?.querySelectorAll("tr.construction-parcel-lx-row--active").forEach((r) => {
+      r.classList.remove("construction-parcel-lx-row--active");
+    });
+  }
+
+  function focusLxTableRowByVertexIndex(idx) {
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb || !Number.isFinite(Number(idx))) return;
+    const n = Math.floor(Number(idx));
+    lxGridClearCellSelection();
+    clearLxTableRowHighlightActive();
+    let trHit = null;
+    tb.querySelectorAll("tr[data-lx-row]").forEach((tr) => {
+      if (getLxVertexIndexForTableRow(tr) === n) trHit = tr;
+    });
+    if (!trHit) return;
+    trHit.classList.add("construction-parcel-lx-row--active");
+    if (typeof trHit.scrollIntoView === "function") {
+      trHit.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  window.pilexyFocusParcelReviewLxTableRow = (idx) => {
+    openConstructionDrawer("parcel-review");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => focusLxTableRowByVertexIndex(idx));
+    });
+  };
+
+  window.addEventListener("pilexy-parcel-review-lx-vertex-clear", () => {
+    lxGridClearCellSelection();
+    clearLxTableRowHighlightActive();
+  });
+
+  function lxGridGetPasteStartRowTr() {
+    if (!lxGridSelect.cells.size) return null;
+    const b = lxGridSelectionBounds();
+    if (!b) return null;
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return null;
+    const rows = [...tb.querySelectorAll("tr[data-lx-row]")];
+    return rows[b.minR] || null;
+  }
+
+  const lxTbodyEl = q("#construction-parcel-lx-tbody");
+  if (lxTbodyEl) {
+    lxTbodyEl.addEventListener("mousedown", (ev) => {
+      const meta = lxResolveCellFromTarget(ev.target);
+      if (!meta || !lxTbodyEl.contains(meta.tr)) return;
+      const { rowIdx, colIdx } = meta;
+      const shift = ev.shiftKey;
+      const ctrl = ev.ctrlKey || ev.metaKey;
+
+      lxGridDetachDragListeners();
+
+      if (shift && lxGridSelect.hasAnchor) {
+        ev.preventDefault();
+        lxGridSelectRectangle(lxGridSelect.anchorRow, lxGridSelect.anchorCol, rowIdx, colIdx);
+        lxGridFocusScrollForKeys();
+        return;
+      }
+
+      if (ctrl) {
+        ev.preventDefault();
+        const key = `${rowIdx},${colIdx}`;
+        if (lxGridSelect.cells.has(key)) lxGridSelect.cells.delete(key);
+        else lxGridSelect.cells.add(key);
+        lxGridSelect.anchorRow = rowIdx;
+        lxGridSelect.anchorCol = colIdx;
+        lxGridSelect.hasAnchor = true;
+        lxRefreshGridCellSelectionDom();
+        lxGridFocusScrollForKeys();
+        return;
+      }
+
+      lxGridSelect.anchorRow = rowIdx;
+      lxGridSelect.anchorCol = colIdx;
+      lxGridSelect.hasAnchor = true;
+      lxGridSelect.dragActive = true;
+      lxGridSelect.dragAnchorRow = rowIdx;
+      lxGridSelect.dragAnchorCol = colIdx;
+      lxGridSelect.dragMoved = false;
+      lxGridSelect.dragStartX = ev.clientX;
+      lxGridSelect.dragStartY = ev.clientY;
+      lxGridSelectRectangle(rowIdx, colIdx, rowIdx, colIdx);
+
+      const onMove = (e2) => {
+        if (!lxGridSelect.dragActive) return;
+        if (!lxGridSelect.dragMoved) {
+          const dx = e2.clientX - lxGridSelect.dragStartX;
+          const dy = e2.clientY - lxGridSelect.dragStartY;
+          if (Math.hypot(dx, dy) < 4) return;
+          lxGridSelect.dragMoved = true;
+          const ae = document.activeElement;
+          if (lxTbodyEl.contains(ae) && ae.tagName === "INPUT") {
+            try {
+              ae.blur();
+            } catch (_) {}
+          }
+        }
+        const el = document.elementFromPoint(e2.clientX, e2.clientY);
+        const meta2 = lxResolveCellFromTarget(el);
+        if (!meta2) return;
+        lxGridSelectRectangle(lxGridSelect.dragAnchorRow, lxGridSelect.dragAnchorCol, meta2.rowIdx, meta2.colIdx);
+      };
+
+      const onUp = () => {
+        lxGridSelect.dragActive = false;
+        lxGridDetachDragListeners();
+        if (lxGridSelect.cells.size) lxGridFocusScrollForKeys();
+      };
+
+      lxGridSelect.dragMoveHandler = onMove;
+      lxGridSelect.dragUpHandler = onUp;
+      document.addEventListener("mousemove", onMove, true);
+      document.addEventListener("mouseup", onUp, true);
+    }, true);
+
+    lxTbodyEl.addEventListener("click", (ev) => {
+      const nInp = ev.target?.closest?.(".construction-parcel-lx-inp-n");
+      if (!nInp || !lxTbodyEl.contains(nInp)) return;
+      const tr = nInp.closest("tr[data-lx-row]");
+      if (!tr) return;
+      const vi = getLxVertexIndexForTableRow(tr);
+      const wp = getLxWorldPointFromTableRow(tr);
+      if (vi == null || !wp) return;
+      const fnA = typeof window !== "undefined" ? window.pilexySetParcelReviewLxRegisterActiveVertex : null;
+      const fnZ = typeof window !== "undefined" ? window.pilexyFocusParcelReviewWorldPoint : null;
+      if (typeof fnA === "function") fnA(vi);
+      if (typeof fnZ === "function") fnZ(wp.x, wp.y);
+      clearLxTableRowHighlightActive();
+      tr.classList.add("construction-parcel-lx-row--active");
+    });
+    lxTbodyEl.addEventListener("dblclick", (ev) => {
+      const xyInp = ev.target?.closest?.(".construction-parcel-lx-inp-x, .construction-parcel-lx-inp-y");
+      if (!xyInp || !lxTbodyEl.contains(xyInp)) return;
+      const tr = xyInp.closest("tr[data-lx-row]");
+      if (!tr) return;
+      const vi = getLxVertexIndexForTableRow(tr);
+      const wp = getLxWorldPointFromTableRow(tr);
+      if (vi == null || !wp) return;
+      const fnA = typeof window !== "undefined" ? window.pilexySetParcelReviewLxRegisterActiveVertex : null;
+      const fnZ = typeof window !== "undefined" ? window.pilexyFocusParcelReviewWorldPoint : null;
+      if (typeof fnA === "function") fnA(vi);
+      if (typeof fnZ === "function") fnZ(wp.x, wp.y);
+      clearLxTableRowHighlightActive();
+      tr.classList.add("construction-parcel-lx-row--active");
+    });
+  }
+
+  function handleLxBulkPaste(rawText, startTr) {
+    const tb = q("#construction-parcel-lx-tbody");
+    if (!tb) return;
+    const trimmed = String(rawText || "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    if (!trimmed.length) return;
+    const rows = [];
+    for (const line of trimmed) {
+      let parts = line.split("\t").map((s) => s.trim());
+      if (parts.length < 2) parts = line.split(/[,;]/).map((s) => s.trim());
+      if (parts.length >= 3) rows.push({ x: parts[1] || "", y: parts[2] || "" });
+      else if (parts.length >= 2) rows.push({ x: parts[0] || "", y: parts[1] || "" });
+    }
+    if (!rows.length) return;
+    const x0 = Number(String(rows[0].x).replace(/,/g, ""));
+    const y0 = Number(String(rows[0].y).replace(/,/g, ""));
+    if (!Number.isFinite(x0) || !Number.isFinite(y0)) rows.shift();
+    if (!rows.length) return;
+    const rcEl = q("#construction-parcel-lx-row-count");
+    const hadStart = Boolean(startTr);
+    let startIdxSaved = 0;
+    if (hadStart) {
+      const ix = [...tb.querySelectorAll("tr[data-lx-row]")].indexOf(startTr);
+      startIdxSaved = ix >= 0 ? ix : 0;
+    }
+    if (!hadStart) {
+      const cur = readLxRowCountInput();
+      const bump = Math.min(500, Math.max(cur, rows.length, 6));
+      if (rcEl) rcEl.value = String(bump);
+      applyLxTableRowCount(bump);
+    } else {
+      const need = startIdxSaved + rows.length;
+      const cur = readLxRowCountInput();
+      if (need > cur) {
+        if (rcEl) rcEl.value = String(Math.min(500, need));
+        applyLxTableRowCount(Math.min(500, need));
+      }
+    }
+    const startFill = hadStart ? startIdxSaved : 0;
+    const allTr = [...tb.querySelectorAll("tr[data-lx-row]")];
+    rows.forEach((r, i) => {
+      const tr = allTr[startFill + i];
+      if (!tr) return;
+      const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+      const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+      if (xEl) xEl.value = r.x;
+      if (yEl) yEl.value = r.y;
+    });
+    renumberLxTableRows();
+    syncLxTableToCanvas();
+  }
+
+  /**
+   * 좌표등록부 저장 범위. "기본" 자동 추론 없음.
+   * 우선순위는 getActiveProjectName()과 동일하게: 프로젝트명 입력란 → 불러온 작업(작업 ID가 있을 때만 메타) → 불러온 윤곽 설정명 → 설정 드롭다운 → 메이샤 보조.
+   * (예전: 작업 메타가 입력란보다 먼저라, 윤곽 불러오기 후에도 이전 작업 프로젝트로 키가 잡히는 경우가 있었음)
+   */
+  function lxRegisterProjectScopeSegment() {
+    let pname = "";
+
+    if (typeof projectNameInput !== "undefined" && projectNameInput) {
+      const pin = String(projectNameInput.value || "").trim();
+      if (pin) pname = pin;
+    }
+    if (!pname && state.loadedWorkId && state.loadedWorkMeta?.project) {
+      const wm = String(state.loadedWorkMeta.project || "").trim();
+      if (wm) pname = wm;
+    }
+    if (!pname && state.loadedProjectName) {
+      const lp = String(state.loadedProjectName || "").trim();
+      if (lp) pname = lp;
+    }
+
+    const sel = typeof readSettingsContextSelection === "function" ? readSettingsContextSelection() : null;
+    if (!pname && sel?.project) pname = String(sel.project).trim();
+
+    if (!pname) {
+      const sp = String(state.settingsContextProject || "").trim();
+      const pid = String(state.settingsContextProjectId || "").trim();
+      const msIdx = typeof meissaProjectSelect !== "undefined" && meissaProjectSelect
+        ? meissaProjectSelect.selectedIndex
+        : -1;
+      if (sp && (pid || msIdx > 0)) pname = sp;
+    }
+
+    if (pname) {
+      try {
+        if (typeof normalizeProjectName === "function") pname = normalizeProjectName(pname);
+      } catch (_) {}
+      return { kind: "name", value: pname };
+    }
+
+    const wid =
+      state.loadedWorkId != null && String(state.loadedWorkId) !== ""
+        ? String(state.loadedWorkId)
+        : "";
+    if (wid) return { kind: "work", value: wid };
+
+    return { kind: "none", value: "__none__" };
+  }
+
+  function lxRegisterStorageKey() {
+    const s = lxRegisterProjectScopeSegment();
+    return `pilexy.parcelLxRegister.v2:${s.kind}:${encodeURIComponent(s.value)}`;
+  }
+
+  /** 서버 API 쿼리 — 프로젝트명(contextProject) 또는 workId만 전달 */
+  function lxRegisterApiScopeQuery() {
+    const s = lxRegisterProjectScopeSegment();
+    const params = new URLSearchParams();
+    if (s.kind === "name") params.set("contextProject", s.value);
+    else if (s.kind === "work") params.set("workId", s.value);
+    return params.toString();
+  }
+
+  function lxRegisterApiBaseUrl() {
+    const raw = typeof API_BASE_URL !== "undefined" ? String(API_BASE_URL).trim() : "";
+    return raw.replace(/\/+$/, "");
+  }
+
+  function lxRegisterScopeDescriptionForUser() {
+    const s = lxRegisterProjectScopeSegment();
+    if (s.kind === "name") return `프로젝트명: ${s.value}`;
+    if (s.kind === "work") return `저장 작업 ID: ${s.value}`;
+    return "프로젝트·작업 미지정(공용 범위)";
+  }
+
+  function lxRegisterBuildPayload() {
+    const rowCount = readLxRowCountInput();
+    const completeRows = [];
+    q("#construction-parcel-lx-tbody")?.querySelectorAll("tr[data-lx-row]").forEach((tr) => {
+      const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+      const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+      const xs = String(xEl?.value ?? "").replace(/,/g, "").trim();
+      const ys = String(yEl?.value ?? "").replace(/,/g, "").trim();
+      if (xs === "" || ys === "") return;
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      completeRows.push({ no: String(completeRows.length + 1), x: xs, y: ys });
+    });
+    return { version: 2, rowCount, completeRows };
+  }
+
+  function lxRegisterWriteLocal(payload) {
+    try {
+      localStorage.setItem(lxRegisterStorageKey(), JSON.stringify(payload));
+    } catch (_) {
+      /* quota */
+    }
+  }
+
+  async function lxRegisterPushToServer(payload) {
+    const base = lxRegisterApiBaseUrl();
+    if (!base) return { ok: false, reason: "no-base" };
+    const qs = lxRegisterApiScopeQuery();
+    const url = `${base}/api/parcel-lx-register${qs ? `?${qs}` : ""}`;
+    let detail = "";
+    try {
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        try {
+          detail = (await res.text()).trim().slice(0, 220);
+        } catch (_) {}
+      }
+      return { ok: res.ok, status: res.status, detail };
+    } catch (_) {
+      return { ok: false, reason: "network", detail: "" };
+    }
+  }
+
+  async function lxRegisterDeleteOnServer() {
+    const base = lxRegisterApiBaseUrl();
+    if (!base) return;
+    const qs = lxRegisterApiScopeQuery();
+    const url = `${base}/api/parcel-lx-register${qs ? `?${qs}` : ""}`;
+    try {
+      await fetch(url, { method: "DELETE" });
+    } catch (_) {}
+  }
+
+  /** v2 우선, 구버전 v1:작업ID 폴백만(v1:__none__ 제외 — 프로젝트 간 데이터 뭉침 방지) */
+  function lxRegisterReadLocalStoragePayload(keysOverride) {
+    const keys =
+      Array.isArray(keysOverride) && keysOverride.length
+        ? keysOverride.slice()
+        : (() => {
+            const ks = [lxRegisterStorageKey()];
+            const wid =
+              state.loadedWorkId != null && String(state.loadedWorkId) !== ""
+                ? String(state.loadedWorkId)
+                : "";
+            if (wid) ks.push(`pilexy.parcelLxRegister.v1:${wid}`);
+            return ks;
+          })();
+    for (const k of keys) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed) continue;
+        const okV2 = parsed.version === 2 && Array.isArray(parsed.completeRows);
+        const okLegacy = Array.isArray(parsed.rows) && parsed.rows.length;
+        if (!okV2 && !okLegacy) continue;
+        return { data: parsed, fromKey: k };
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function saveLxTableToStorage() {
+    const payload = lxRegisterBuildPayload();
+    lxRegisterWriteLocal(payload);
+    void lxRegisterPushToServer(payload);
+  }
+
+  async function loadLxTableFromStorage() {
+    const tb = q("#construction-parcel-lx-tbody");
+    const rcEl = q("#construction-parcel-lx-row-count");
+    if (!tb) return;
+    const seq = ++lxRegisterTableLoadSeq;
+    const scopeQueryForThisLoad = lxRegisterApiScopeQuery();
+    const storageKeyForThisLoad = lxRegisterStorageKey();
+    const widForThisLoad =
+      state.loadedWorkId != null && String(state.loadedWorkId) !== ""
+        ? String(state.loadedWorkId)
+        : "";
+    const localKeysForThisLoad = [storageKeyForThisLoad];
+    if (widForThisLoad) localKeysForThisLoad.push(`pilexy.parcelLxRegister.v1:${widForThisLoad}`);
+
+    let data = null;
+    const base = lxRegisterApiBaseUrl();
+    if (base) {
+      try {
+        const res = await fetch(
+          `${base}/api/parcel-lx-register${scopeQueryForThisLoad ? `?${scopeQueryForThisLoad}` : ""}`,
+        );
+        if (seq !== lxRegisterTableLoadSeq) return;
+        if (res.ok) {
+          const srv = await res.json();
+          if (seq !== lxRegisterTableLoadSeq) return;
+          if (srv && srv.version === 2 && Array.isArray(srv.completeRows)) {
+            data = srv;
+            try {
+              localStorage.setItem(storageKeyForThisLoad, JSON.stringify(srv));
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    if (seq !== lxRegisterTableLoadSeq) return;
+    if (!data) {
+      const pack = lxRegisterReadLocalStoragePayload(localKeysForThisLoad);
+      if (seq !== lxRegisterTableLoadSeq) return;
+      data = pack?.data ?? null;
+    }
+
+    if (seq !== lxRegisterTableLoadSeq) return;
+
+    let rowCount = 12;
+    const completeRows = [];
+
+    if (data && data.version === 2 && Array.isArray(data.completeRows)) {
+      rowCount = Math.min(500, Math.max(1, Math.floor(Number(data.rowCount)) || 12));
+      data.completeRows.forEach((r) => {
+        const xs = String(r.x ?? "").replace(/,/g, "").trim();
+        const ys = String(r.y ?? "").replace(/,/g, "").trim();
+        if (xs === "" || ys === "") return;
+        const x = Number(xs);
+        const y = Number(ys);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        completeRows.push({ no: String(completeRows.length + 1), x: xs, y: ys });
+      });
+    } else if (data && Array.isArray(data.rows) && data.rows.length) {
+      data.rows.forEach((r) => {
+        const xs = String(r.x ?? "").replace(/,/g, "").trim();
+        const ys = String(r.y ?? "").replace(/,/g, "").trim();
+        if (xs === "" || ys === "") return;
+        const x = Number(xs);
+        const y = Number(ys);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        completeRows.push({ no: String(completeRows.length + 1), x: xs, y: ys });
+      });
+      rowCount = Math.min(500, Math.max(1, data.rows.length, completeRows.length, 12));
+    }
+
+    if (seq !== lxRegisterTableLoadSeq) return;
+
+    if (rcEl) rcEl.value = String(rowCount);
+    applyLxTableRowCount(rowCount, { preserveExistingValues: false });
+    const allTr = [...tb.querySelectorAll("tr[data-lx-row]")];
+    completeRows.forEach((r, i) => {
+      const tr = allTr[i];
+      if (!tr) return;
+      const xEl = tr.querySelector(".construction-parcel-lx-inp-x");
+      const yEl = tr.querySelector(".construction-parcel-lx-inp-y");
+      if (xEl) xEl.value = String(r.x ?? "");
+      if (yEl) yEl.value = String(r.y ?? "");
+    });
+    renumberLxTableRows();
+    syncLxTableToCanvas();
   }
 
   function syncParcelLxOptionsToApp() {
@@ -9063,149 +9952,207 @@ function inferOpenRectangleVertices(vertices) {
       showOutline: Boolean(q("#construction-parcel-lx-show-outline")?.checked),
       showFill: Boolean(q("#construction-parcel-lx-show-fill")?.checked),
       showVertices: Boolean(q("#construction-parcel-lx-show-vertices")?.checked),
-      showEncroachment: Boolean(q("#construction-parcel-lx-show-encroach")?.checked),
-      useAsReference: Boolean(q("#construction-parcel-lx-use-reference")?.checked),
+      showEncroachment: false,
+      useAsReference: false,
     });
   }
 
-  const constructionParcelLxApplyBtn = q("#construction-parcel-lx-apply-btn");
-  if (constructionParcelLxApplyBtn) {
-    constructionParcelLxApplyBtn.addEventListener("click", () => {
-      const ta = q("#construction-parcel-lx-textarea");
+  function lxOnGridPaste(ev) {
+    const text = ev.clipboardData?.getData("text/plain");
+    if (text == null || String(text).trim() === "") return;
+    const t = String(text);
+    const lines = t.split(/\r?\n/).filter((l) => l.trim() !== "");
+    const hasTab = t.indexOf("\t") >= 0;
+    if (lines.length <= 1 && !hasTab) return;
+    ev.preventDefault();
+    const active = document.activeElement;
+    const wrap = q("#construction-parcel-lx-table-wrap");
+    const scrollEl = q("#construction-parcel-lx-scroll");
+    const startTr =
+      active && typeof active.closest === "function" && (wrap?.contains(active) || scrollEl?.contains(active))
+        ? active.closest("tr[data-lx-row]")
+        : lxGridGetPasteStartRowTr();
+    handleLxBulkPaste(text, startTr);
+  }
+
+  // 모바일(iOS/Safari 등): paste 이벤트 대신 beforeinput(insertFromPaste)로 들어오는 경우가 있음.
+  function lxOnGridBeforeInput(ev) {
+    const it = String(ev?.inputType || "");
+    if (!it || !it.toLowerCase().includes("paste")) return;
+    const text = typeof ev?.data === "string" ? ev.data : "";
+    if (!text || text.trim() === "") return;
+    const t = String(text);
+    const lines = t.split(/\r?\n/).filter((l) => l.trim() !== "");
+    const hasTab = t.indexOf("\t") >= 0;
+    if (lines.length <= 1 && !hasTab) return;
+    ev.preventDefault();
+    const active = document.activeElement;
+    const wrap = q("#construction-parcel-lx-table-wrap");
+    const scrollEl = q("#construction-parcel-lx-scroll");
+    const startTr =
+      active && typeof active.closest === "function" && (wrap?.contains(active) || scrollEl?.contains(active))
+        ? active.closest("tr[data-lx-row]")
+        : lxGridGetPasteStartRowTr();
+    handleLxBulkPaste(text, startTr);
+  }
+
+  // 모바일 “꾹 누르기 → 붙여넣기”는 paste/clipboardData가 비어있는 경우가 흔함.
+  // 실제로 input.value에 텍스트가 들어온 뒤(input 이벤트) 멀티라인/탭이면 표로 분해 반영한다.
+  function lxOnGridInput(ev) {
+    const t = ev?.target;
+    if (!t || t.tagName !== "INPUT") return;
+    if (!t.classList || (!t.classList.contains("construction-parcel-lx-inp-x") && !t.classList.contains("construction-parcel-lx-inp-y"))) {
+      return;
+    }
+    const raw = String(t.value ?? "");
+    // 단일 숫자 입력은 그대로 둔다.
+    const hasTab = raw.indexOf("\t") >= 0;
+    const hasMultiLine = raw.split(/\r?\n/).filter((l) => l.trim() !== "").length > 1;
+    if (!hasTab && !hasMultiLine) return;
+
+    const wrap = q("#construction-parcel-lx-table-wrap");
+    const scrollEl = q("#construction-parcel-lx-scroll");
+    const startTr =
+      typeof t.closest === "function" && (wrap?.contains(t) || scrollEl?.contains(t))
+        ? t.closest("tr[data-lx-row]")
+        : null;
+
+    // 붙여넣기 원문이 한 칸에 남아있지 않게 우선 비움(이후 handleLxBulkPaste가 표 채움).
+    t.value = "";
+    handleLxBulkPaste(raw, startTr);
+  }
+  const lxTableWrap = q("#construction-parcel-lx-table-wrap");
+  const lxScrollEl = q("#construction-parcel-lx-scroll");
+  if (lxTableWrap) lxTableWrap.addEventListener("paste", lxOnGridPaste);
+  if (lxScrollEl) lxScrollEl.addEventListener("paste", lxOnGridPaste);
+  if (lxTableWrap) lxTableWrap.addEventListener("beforeinput", lxOnGridBeforeInput, true);
+  if (lxScrollEl) lxScrollEl.addEventListener("beforeinput", lxOnGridBeforeInput, true);
+  if (lxTableWrap) lxTableWrap.addEventListener("input", lxOnGridInput, true);
+  if (lxScrollEl) lxScrollEl.addEventListener("input", lxOnGridInput, true);
+
+  document.addEventListener("mousedown", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+    if (lxTableWrap?.contains(t) || lxScrollEl?.contains(t)) return;
+    if (lxGridSelect.cells.size) lxGridClearCellSelection();
+  }, true);
+
+  document.addEventListener("keydown", async (ev) => {
+    if (!lxGridSelect.cells.size) return;
+    const ae = document.activeElement;
+    if (!lxGridIsHotTarget(ae)) return;
+
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      lxGridClearCellSelection();
+      return;
+    }
+
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "c" || ev.key === "C")) {
+      ev.preventDefault();
+      const ok = await lxGridCopySelectionToClipboard();
       const fb = q("#construction-parcel-lx-feedback");
-      const applyFn =
-        typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterApplyParsedRing : null;
-      if (typeof applyFn !== "function") {
-        if (fb) fb.textContent = "캔버스 모듈을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.";
-        return;
-      }
-      const pts = parseParcelLxRegisterPaste(ta ? ta.value : "");
-      const ok = applyFn(pts);
-      const getV = typeof window !== "undefined" ? window.pilexyGetParcelReviewLxRegisterVerticesForApi : null;
-      const nVert = typeof getV === "function" ? getV().length : 0;
+      if (fb) fb.textContent = ok ? "선택 영역을 복사했습니다." : "복사에 실패했습니다.";
+      if (fb) setTimeout(() => { fb.textContent = ""; }, 2800);
+      return;
+    }
+
+    if (ev.key === "Delete") {
+      const inLxInput = ae && ae.tagName === "INPUT" && lxTbodyEl?.contains(ae);
+      if (lxGridSelect.cells.size === 1 && inLxInput) return;
+      ev.preventDefault();
+      lxGridDeleteSelectionValues();
+      const fb = q("#construction-parcel-lx-feedback");
+      if (fb) fb.textContent = "선택한 X·Y 칸을 지웠습니다.";
+      if (fb) setTimeout(() => { fb.textContent = ""; }, 2200);
+    }
+  }, true);
+  const lxApplyRowsBtn = q("#construction-parcel-lx-apply-rows-btn");
+  if (lxApplyRowsBtn) {
+    lxApplyRowsBtn.addEventListener("click", () => {
+      const nRows = readLxRowCountInput();
+      applyLxTableRowCount(nRows);
+      const fb = q("#construction-parcel-lx-feedback");
       if (fb) {
-        fb.textContent = ok
-          ? `폴리라인 적용: 꼭짓점 ${nVert}개 (도면 m)`
-          : "유효한 점이 3개 미만입니다. X·Y 두 열을 확인하세요.";
+        const msg = `행 ${nRows}개로 맞췄습니다.`;
+        fb.textContent = msg;
+        setTimeout(() => {
+          if (fb && fb.textContent === msg) fb.textContent = "";
+        }, 2200);
       }
+    });
+  }
+  const lxMobilePasteBtn = q("#construction-parcel-lx-mobile-paste-btn");
+  if (lxMobilePasteBtn) {
+    lxMobilePasteBtn.addEventListener("click", () => {
+      // iOS/Safari 등에서 clipboardData 접근이 제한되는 경우를 위한 우회 입력.
+      const text = window.prompt("엑셀(또는 메모장)에서 복사한 표를 그대로 붙여넣으세요.\n(열 구분: 탭/쉼표/세미콜론, 행 구분: 줄바꿈)", "");
+      if (text == null) return;
+      handleLxBulkPaste(String(text), null);
+      const fb = q("#construction-parcel-lx-feedback");
+      if (fb) {
+        const msg = "붙여넣기 입력을 표에 반영했습니다.";
+        fb.textContent = msg;
+        setTimeout(() => {
+          if (fb && fb.textContent === msg) fb.textContent = "";
+        }, 2200);
+      }
+    });
+  }
+  const lxSaveBtn = q("#construction-parcel-lx-save-btn");
+  if (lxSaveBtn) {
+    lxSaveBtn.addEventListener("click", async () => {
+      const payload = lxRegisterBuildPayload();
+      lxRegisterWriteLocal(payload);
+      syncLxTableToCanvas();
+      const srv = await lxRegisterPushToServer(payload);
+      const fb = q("#construction-parcel-lx-feedback");
+      const n = collectLxVerticesFromTable().length;
+      const rc = readLxRowCountInput();
+      const hasApi = Boolean(lxRegisterApiBaseUrl());
+      const scopeLine = lxRegisterScopeDescriptionForUser();
+      const apiLine = hasApi ? ` API: ${lxRegisterApiBaseUrl()}` : "";
+      const baseMsg =
+        n >= 3
+          ? `저장했습니다. X·Y 완성 ${n}건만 보관(번호 1~${n}), 표는 행 ${rc}개 유지. 캔버스에 반영했습니다.`
+          : `저장했습니다. X·Y 완성 ${n}건만 보관했습니다. 3개 미만이면 등록부 링은 비워집니다.`;
+      let tail = "";
+      if (!hasApi) {
+        tail = " (API 주소가 비어 있어 서버에는 올리지 못했습니다. HTML에서 window.__API_BASE_URL__ 를 설정하세요.)";
+      } else if (srv.ok) {
+        tail = ` 서버 저장 완료. (${scopeLine}) 다른 PC에서는 같은 사이트 주소로 접속한 뒤, 설정에서 같은 프로젝트 컨텍스트를 맞추면 불러옵니다.`;
+      } else if (srv.reason === "no-base") {
+        tail = "";
+      } else if (srv.reason === "network") {
+        tail = ` 서버로 전송하지 못했습니다(네트워크·CORS).${apiLine}`;
+      } else {
+        const hint = srv.detail ? ` ${srv.detail}` : "";
+        tail = ` 서버 저장 실패 HTTP ${srv.status ?? "?"}${hint}.${apiLine}`;
+      }
+      if (fb) fb.textContent = `${baseMsg}${tail}`;
     });
   }
   const constructionParcelLxClearBtn = q("#construction-parcel-lx-clear-btn");
   if (constructionParcelLxClearBtn) {
     constructionParcelLxClearBtn.addEventListener("click", () => {
-      const ta = q("#construction-parcel-lx-textarea");
       const fb = q("#construction-parcel-lx-feedback");
-      if (ta) ta.value = "";
+      const rcEl = q("#construction-parcel-lx-row-count");
+      try {
+        localStorage.removeItem(lxRegisterStorageKey());
+      } catch (_) {
+        /* ignore */
+      }
+      void lxRegisterDeleteOnServer();
+      if (rcEl) rcEl.value = "12";
+      applyLxTableRowCount(12, { preserveExistingValues: false });
       const clrFn = typeof window !== "undefined" ? window.pilexyParcelReviewLxRegisterClearRing : null;
       if (typeof clrFn === "function") clrFn();
-      if (fb) fb.textContent = "등록부 링을 지웠습니다.";
+      if (fb) fb.textContent = "등록부 표·로컬·서버 저장본·캔버스 링을 지웠습니다.";
     });
   }
 
-  function buildCoordinateAddressPayload() {
-    const epsgEl = q("#construction-parcel-epsg");
-    const swapEl = q("#construction-parcel-swap-xy");
-    const xEl = q("#construction-parcel-addr-x");
-    const yEl = q("#construction-parcel-addr-y");
-    const x = xEl && xEl.value !== "" ? Number(xEl.value) : NaN;
-    const y = yEl && yEl.value !== "" ? Number(yEl.value) : NaN;
-    return {
-      x,
-      y,
-      assumed_epsg: epsgEl ? Number(epsgEl.value) || 5186 : 5186,
-      swap_xy: Boolean(swapEl && swapEl.checked),
-    };
-  }
-
-  async function runCoordinateAddressLookup() {
-    const outEl = q("#construction-parcel-address-result");
-    const base = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "";
-    const body = buildCoordinateAddressPayload();
-    if (!Number.isFinite(body.x) || !Number.isFinite(body.y)) {
-      if (outEl) {
-        outEl.classList.add("construction-parcel-address-result--error");
-        outEl.textContent = "X·Y 값을 숫자로 입력하세요.";
-      }
-      return;
-    }
-    if (outEl) {
-      outEl.classList.remove("construction-parcel-address-result--error");
-      outEl.textContent = "조회 중…";
-    }
-    try {
-      const r = await fetch(`${base}/api/coordinate-address`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!outEl) return;
-      if (!r.ok) {
-        const detail = typeof data?.detail === "string" ? data.detail : JSON.stringify(data?.detail || "");
-        outEl.classList.add("construction-parcel-address-result--error");
-        outEl.textContent = detail || r.statusText || "요청 실패";
-        return;
-      }
-      if (!data.ok) {
-        outEl.classList.add("construction-parcel-address-result--error");
-        const w = data.wgs84 || {};
-        const wgs =
-          Number.isFinite(Number(w.lon)) && Number.isFinite(Number(w.lat))
-            ? `경위도: ${Number(w.lon).toFixed(5)}, ${Number(w.lat).toFixed(5)} (WGS84)\n`
-            : "";
-        outEl.textContent = `${wgs}${data.error || data.summary || data.vworld_error || "주소를 가져오지 못했습니다."}`;
-        return;
-      }
-      outEl.classList.remove("construction-parcel-address-result--error");
-      const w = data.wgs84 || {};
-      const lon = Number.isFinite(Number(w.lon)) ? Number(w.lon).toFixed(5) : "—";
-      const lat = Number.isFinite(Number(w.lat)) ? Number(w.lat).toFixed(5) : "—";
-      const lines =
-        Array.isArray(data.detail_lines) && data.detail_lines.length
-          ? data.detail_lines.join("\n")
-          : [data.road_address, data.parcel_address].filter(Boolean).join("\n");
-      const zip = data.zipcode ? `우편번호: ${data.zipcode}\n` : "";
-      const dx = Number(data.drawing?.x);
-      const dy = Number(data.drawing?.y);
-      outEl.textContent =
-        `도면: (${Number.isFinite(dx) ? dx.toFixed(3) : "—"}, ${Number.isFinite(dy) ? dy.toFixed(3) : "—"}) m\n`
-        + `WGS84: ${lon}, ${lat}\n`
-        + zip
-        + (lines || data.summary || "(상세 없음)");
-    } catch (err) {
-      if (outEl) {
-        outEl.classList.add("construction-parcel-address-result--error");
-        outEl.textContent = errorMessage(err);
-      }
-    }
-  }
-
-  const constructionParcelAddressBtn = q("#construction-parcel-address-btn");
-  if (constructionParcelAddressBtn) {
-    constructionParcelAddressBtn.addEventListener("click", () => void runCoordinateAddressLookup());
-  }
-  const constructionParcelAddrFillQueryBtn = q("#construction-parcel-address-fill-query-btn");
-  if (constructionParcelAddrFillQueryBtn) {
-    constructionParcelAddrFillQueryBtn.addEventListener("click", () => {
-      const qp = lastParcelReviewResponse && lastParcelReviewResponse.query_point;
-      const xEl = q("#construction-parcel-addr-x");
-      const yEl = q("#construction-parcel-addr-y");
-      const fb = q("#construction-parcel-address-result");
-      if (!qp || !Number.isFinite(Number(qp.x)) || !Number.isFinite(Number(qp.y))) {
-        if (fb) {
-          fb.classList.add("construction-parcel-address-result--error");
-          fb.textContent = "먼저 「자동 검토 실행」으로 쿼리점이 생긴 뒤 사용하세요.";
-        }
-        return;
-      }
-      if (xEl) xEl.value = String(qp.x);
-      if (yEl) yEl.value = String(qp.y);
-      if (fb) {
-        fb.classList.remove("construction-parcel-address-result--error");
-        fb.textContent = `쿼리점 반영: (${Number(qp.x).toFixed(3)}, ${Number(qp.y).toFixed(3)}) m — 「이 좌표의 주소 조회」를 누르세요.`;
-      }
-    });
-  }
+  loadLxTableFromStorage();
+  syncParcelLxOptionsToApp();
 
   const constructionParcelRunBtn = q("#construction-parcel-run-btn");
   if (constructionParcelRunBtn) {
@@ -9222,6 +10169,21 @@ function inferOpenRectangleVertices(vertices) {
   }
   syncParcelFocusNearbyButton();
   syncParcelLayerDependentControls();
+
+  const lxVizApplyBtn = q("#construction-parcel-lx-viz-apply-btn");
+  if (lxVizApplyBtn) {
+    lxVizApplyBtn.addEventListener("click", () => {
+      applyParcelLxDisplayOptions();
+    });
+  }
+  const parcelVizAllOnBtn = q("#construction-parcel-viz-all-on");
+  if (parcelVizAllOnBtn) {
+    parcelVizAllOnBtn.addEventListener("click", () => setParcelOverlayCheckboxesAll(true));
+  }
+  const parcelVizAllOffBtn = q("#construction-parcel-viz-all-off");
+  if (parcelVizAllOffBtn) {
+    parcelVizAllOffBtn.addEventListener("click", () => setParcelOverlayCheckboxesAll(false));
+  }
 
   const constructionParcelClearVizBtn = q("#construction-parcel-clear-viz-btn");
   if (constructionParcelClearVizBtn) {
@@ -9940,7 +10902,18 @@ function inferOpenRectangleVertices(vertices) {
     requestRedraw();
   });
 
-  window.addEventListener("pilexy:work-context-changed", () => {
+  function scheduleLoadLxTableFromStorage() {
+    window.requestAnimationFrame(() => {
+      if (typeof loadLxTableFromStorage === "function") loadLxTableFromStorage();
+    });
+  }
+
+  window.addEventListener("pilexy:parcel-lx-register-context-changed", scheduleLoadLxTableFromStorage);
+
+  window.addEventListener("pilexy:work-context-changed", (ev) => {
+    if (ev.detail && ev.detail.resetParcelReview) {
+      resetParcelReviewForWorkContextChange();
+    }
     constructionState.foundationThicknessByPileId = state.foundationThicknessByPileId && typeof state.foundationThicknessByPileId === "object"
       ? { ...state.foundationThicknessByPileId }
       : {};
@@ -9978,6 +10951,7 @@ function inferOpenRectangleVertices(vertices) {
     requestAnimationFrame(() => {
       refreshFoundationPanel();
       updateConstructionButtonsState();
+      scheduleLoadLxTableFromStorage();
     });
   });
 

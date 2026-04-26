@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 import requests
@@ -238,6 +239,11 @@ except ImportError:
 SAVED_WORKS_DIR = os.path.join(_PROJECT_ROOT, "data", "saved_works")
 SAVED_WORKS_INDEX = "index.json"
 
+_SAVED_WORKS_INDEX_CACHE: Optional[List[Dict[str, Any]]] = None
+_SAVED_WORKS_INDEX_CACHE_MTIME_NS: Optional[int] = None
+_SAVED_WORKS_INDEX_CACHE_SIZE: Optional[int] = None
+_SAVED_WORKS_INDEX_CACHE_LOCK = threading.Lock()
+
 
 def _ensure_saved_works_dir() -> str:
     os.makedirs(SAVED_WORKS_DIR, exist_ok=True)
@@ -245,10 +251,27 @@ def _ensure_saved_works_dir() -> str:
 
 
 def _read_saved_works_index() -> List[Dict[str, Any]]:
+    global _SAVED_WORKS_INDEX_CACHE, _SAVED_WORKS_INDEX_CACHE_MTIME_NS, _SAVED_WORKS_INDEX_CACHE_SIZE
     _ensure_saved_works_dir()
     path = os.path.join(SAVED_WORKS_DIR, SAVED_WORKS_INDEX)
     if not os.path.isfile(path):
         return []
+    try:
+        st = os.stat(path)
+        mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))
+        size = int(st.st_size)
+    except Exception:
+        mtime_ns = None
+        size = None
+    if mtime_ns is not None and size is not None:
+        with _SAVED_WORKS_INDEX_CACHE_LOCK:
+            if (
+                _SAVED_WORKS_INDEX_CACHE is not None
+                and _SAVED_WORKS_INDEX_CACHE_MTIME_NS == mtime_ns
+                and _SAVED_WORKS_INDEX_CACHE_SIZE == size
+            ):
+                # callers may mutate -> return a defensive copy
+                return copy.deepcopy(_SAVED_WORKS_INDEX_CACHE)
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -258,6 +281,13 @@ def _read_saved_works_index() -> List[Dict[str, Any]]:
         for entry in items:
             if "project" not in entry:
                 entry["project"] = "기본"
+        # 일관성 + 이후 호출 비용 절감(정렬은 읽기 시 1회만)
+        items.sort(key=lambda x: (x.get("timestamp") or ""), reverse=True)
+        if mtime_ns is not None and size is not None:
+            with _SAVED_WORKS_INDEX_CACHE_LOCK:
+                _SAVED_WORKS_INDEX_CACHE = items
+                _SAVED_WORKS_INDEX_CACHE_MTIME_NS = mtime_ns
+                _SAVED_WORKS_INDEX_CACHE_SIZE = size
         return items
     except Exception:
         return []
@@ -268,6 +298,12 @@ def _write_saved_works_index(items: List[Dict[str, Any]]) -> None:
     path = os.path.join(SAVED_WORKS_DIR, SAVED_WORKS_INDEX)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
+    # 캐시 무효화(다음 읽기에서 최신 반영)
+    with _SAVED_WORKS_INDEX_CACHE_LOCK:
+        global _SAVED_WORKS_INDEX_CACHE, _SAVED_WORKS_INDEX_CACHE_MTIME_NS, _SAVED_WORKS_INDEX_CACHE_SIZE
+        _SAVED_WORKS_INDEX_CACHE = None
+        _SAVED_WORKS_INDEX_CACHE_MTIME_NS = None
+        _SAVED_WORKS_INDEX_CACHE_SIZE = None
 
 
 def _work_file_path(work_id: str) -> str:
@@ -420,6 +456,70 @@ def _remove_saved_setting(
     return False
 
 
+# ---------- 필지 경계점 좌표등록부 (프로젝트·작업 범위, 서버 공유) ----------
+PARCEL_LX_REGISTER_DIR = os.path.join(_PROJECT_ROOT, "data", "parcel_lx_register")
+
+
+def _ensure_parcel_lx_register_dir() -> str:
+    os.makedirs(PARCEL_LX_REGISTER_DIR, exist_ok=True)
+    return PARCEL_LX_REGISTER_DIR
+
+
+def _parcel_lx_register_scope_key(
+    context_project_id: Optional[str],
+    context_project: Optional[str],
+    work_id: Optional[str],
+) -> str:
+    """저장 파일 키: 프로젝트명만 사용(Meissa contextProjectId 쿼리는 호환용으로 받되 무시)."""
+    cproj = _normalize_settings_context_project(context_project)
+    if cproj:
+        raw = f"name::{cproj}"
+    else:
+        wid = str(work_id or "").strip()
+        if wid:
+            raw = f"work::{wid}"
+        else:
+            raw = "none"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _parcel_lx_register_path(scope_key: str) -> str:
+    _ensure_parcel_lx_register_dir()
+    return os.path.join(PARCEL_LX_REGISTER_DIR, f"{scope_key}.json")
+
+
+def _sanitize_parcel_lx_register_payload(payload: Any) -> Dict[str, Any]:
+    raw = payload if isinstance(payload, dict) else {}
+    try:
+        rc = int(raw.get("rowCount"))
+    except (TypeError, ValueError):
+        rc = 12
+    rc = min(500, max(1, rc))
+    rows_in = raw.get("completeRows")
+    if not isinstance(rows_in, list):
+        rows_in = []
+    out_rows: List[Dict[str, str]] = []
+    for r in rows_in:
+        if not isinstance(r, dict):
+            continue
+        xs = str(r.get("x", "")).replace(",", "").strip()
+        ys = str(r.get("y", "")).replace(",", "").strip()
+        if xs == "" or ys == "":
+            continue
+        try:
+            float(xs)
+            float(ys)
+        except (TypeError, ValueError):
+            continue
+        out_rows.append({"no": str(len(out_rows) + 1), "x": xs, "y": ys})
+    return {
+        "version": 2,
+        "rowCount": rc,
+        "completeRows": out_rows,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ---------- 엑셀 좌표 비교 결과 캐시 (프로젝트+파일 기준, 서버 공용) ----------
 EXCEL_COMPARE_CACHE_DIR = os.path.join(_PROJECT_ROOT, "data", "excel_compare_cache")
 
@@ -530,6 +630,16 @@ app.add_middleware(
         "X-Ortho-Max-Edge",
     ],
 )
+
+# 큰 JSON 응답(저장 작업 불러오기 등) 전송 최적화: 기능/데이터는 그대로, 바이트만 gzip 압축.
+# 브라우저(fetch)·urllib 모두 자동으로 해제 처리합니다.
+try:
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+except Exception:
+    # 압축 미지원 환경에서도 기능은 유지
+    pass
 
 
 @app.middleware("http")
@@ -4071,7 +4181,6 @@ async def delete_manual_match(circle_id: str) -> CircleResponse:
 async def list_saved_works() -> List[Dict[str, Any]]:
     """저장된 작업 목록 반환 (id, title, timestamp, buildingCount, circleCount)."""
     index = _read_saved_works_index()
-    index.sort(key=lambda x: (x.get("timestamp") or ""), reverse=True)
     return index
 
 
@@ -4395,6 +4504,64 @@ async def delete_saved_setting(
     ]
     _write_saved_settings_index(index)
     return {"status": "deleted"}
+
+
+@app.get("/api/parcel-lx-register")
+async def get_parcel_lx_register(
+    context_project_id: Optional[str] = Query(None, alias="contextProjectId"),
+    context_project: Optional[str] = Query(None, alias="contextProject"),
+    work_id: Optional[str] = Query(None, alias="workId"),
+) -> Dict[str, Any]:
+    """프로젝트(또는 작업) 범위의 경계점 좌표등록부 JSON. 없으면 404."""
+    key = _parcel_lx_register_scope_key(context_project_id, context_project, work_id)
+    path = _parcel_lx_register_path(key)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="No saved parcel LX register for this scope.")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read parcel LX register.") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=500, detail="Invalid parcel LX register file.")
+    return _sanitize_parcel_lx_register_payload(data)
+
+
+@app.put("/api/parcel-lx-register")
+async def put_parcel_lx_register(
+    context_project_id: Optional[str] = Query(None, alias="contextProjectId"),
+    context_project: Optional[str] = Query(None, alias="contextProject"),
+    work_id: Optional[str] = Query(None, alias="workId"),
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """좌표등록부 저장(다른 PC·브라우저와 공유)."""
+    safe = _sanitize_parcel_lx_register_payload(payload)
+    key = _parcel_lx_register_scope_key(context_project_id, context_project, work_id)
+    path = _parcel_lx_register_path(key)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(safe, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to write parcel LX register.") from exc
+    return {"status": "ok", "updatedAt": safe.get("updatedAt")}
+
+
+@app.delete("/api/parcel-lx-register")
+async def delete_parcel_lx_register(
+    context_project_id: Optional[str] = Query(None, alias="contextProjectId"),
+    context_project: Optional[str] = Query(None, alias="contextProject"),
+    work_id: Optional[str] = Query(None, alias="workId"),
+) -> Dict[str, str]:
+    """해당 범위 서버 저장본 삭제."""
+    key = _parcel_lx_register_scope_key(context_project_id, context_project, work_id)
+    path = _parcel_lx_register_path(key)
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="Failed to delete parcel LX register.") from exc
+        return {"status": "deleted"}
+    return {"status": "noop"}
 
 
 def _parse_json_list_field(raw: str, field_name: str) -> List[Dict[str, Any]]:

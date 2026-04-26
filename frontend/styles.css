@@ -132,6 +132,13 @@ body {
   }
 }
 
+/* 모바일: 상단 시공 블록에서 매뉴얼 단축 버튼 숨김(드로어 내 매뉴얼 탭은 유지) */
+@media (max-width: 767px) {
+  #construction-manual-btn {
+    display: none;
+  }
+}
+
 .construction-tab-panel[data-panel="manual"] .construction-brds-preset-row {
   display: flex;
   flex-wrap: wrap;
@@ -814,7 +821,8 @@ body {
 .construction-drawer-body .construction-sync-actions .header-construction-btn,
 .construction-drawer-body .construction-filter-actions .header-construction-btn,
 .construction-drawer-body .construction-manual-login-block .header-construction-btn,
-.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn {
+.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn,
+.construction-drawer-body .construction-parcel-lx-actions .header-construction-btn {
   background: #2563eb;
   color: #ffffff;
   border: 1px solid #1d4ed8;
@@ -828,7 +836,8 @@ body {
 .construction-drawer-body .construction-sync-actions .header-construction-btn:hover:not(:disabled),
 .construction-drawer-body .construction-filter-actions .header-construction-btn:hover:not(:disabled),
 .construction-drawer-body .construction-manual-login-block .header-construction-btn:hover:not(:disabled),
-.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn:hover:not(:disabled) {
+.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn:hover:not(:disabled),
+.construction-drawer-body .construction-parcel-lx-actions .header-construction-btn:hover:not(:disabled) {
   background: #1d4ed8;
   border-color: #1e40af;
   color: #ffffff;
@@ -838,7 +847,8 @@ body {
 .construction-drawer-body .construction-sync-actions .header-construction-btn:disabled,
 .construction-drawer-body .construction-filter-actions .header-construction-btn:disabled,
 .construction-drawer-body .construction-manual-login-block .header-construction-btn:disabled,
-.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn:disabled {
+.construction-drawer-body .construction-tab-panel[data-panel="manual"] .header-construction-btn:disabled,
+.construction-drawer-body .construction-parcel-lx-actions .header-construction-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
@@ -1106,50 +1116,6 @@ body {
   color: #94a3b8;
 }
 
-.construction-parcel-address-card {
-  margin: 0.55rem 0 0.65rem;
-  padding: 0.55rem 0.65rem 0.6rem;
-  border-radius: 10px;
-  border: 1px solid #e0e7ef;
-  background: #fff;
-}
-
-.construction-parcel-address-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem 0.65rem;
-  margin-top: 0.35rem;
-}
-
-.construction-parcel-address-row label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #334155;
-}
-
-.construction-parcel-address-result {
-  margin-top: 0.5rem;
-  padding: 0.45rem 0.55rem;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: #0f172a;
-  min-height: 2.5em;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.construction-parcel-address-result.construction-parcel-address-result--error {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
 .construction-parcel-lx-card {
   margin: 0.55rem 0 0.65rem;
   padding: 0.55rem 0.65rem 0.6rem;
@@ -1158,26 +1124,132 @@ body {
   background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
 }
 
-.construction-parcel-lx-paste-hint {
-  margin: 0 0 0.45rem;
+.construction-parcel-lx-rows-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  align-items: center;
+  margin: 0 0 0.4rem;
+}
+
+.construction-parcel-lx-rows-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.78rem;
-  line-height: 1.45;
+  font-weight: 600;
+  color: #334155;
+}
+
+.construction-parcel-lx-row-count-inp {
+  width: 4.25rem;
+}
+
+.construction-parcel-lx-expand-details {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
   color: #475569;
 }
 
-.construction-parcel-lx-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 5.5rem;
-  padding: 0.45rem 0.5rem;
+.construction-parcel-lx-expand-summary {
+  cursor: pointer;
+  user-select: none;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.construction-parcel-lx-scroll {
+  max-height: 220px;
+  overflow: auto;
   border-radius: 8px;
   border: 1px solid #cbd5e1;
+  background: #fff;
+  outline: none;
+}
+
+.construction-parcel-lx-expand-details[open] + .construction-parcel-lx-scroll {
+  max-height: min(72vh, 1200px);
+  overflow: auto;
+}
+
+.construction-parcel-lx-table-wrap {
+  overflow-x: auto;
+  border-radius: 0;
+  border: none;
+  background: #fff;
+  outline: none;
+}
+
+.construction-parcel-lx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.construction-parcel-lx-table th,
+.construction-parcel-lx-table td {
+  border: 1px solid #e2e8f0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.construction-parcel-lx-table th {
+  padding: 0.28rem 0.4rem;
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #334155;
+  text-align: left;
+}
+
+.construction-parcel-lx-th-n,
+.construction-parcel-lx-td-n {
+  width: 3.2rem;
+  max-width: 4.5rem;
+}
+
+.construction-parcel-lx-table .construction-parcel-lx-inp-n {
+  color: #64748b;
+  background: #f8fafc !important;
+  cursor: pointer;
+}
+
+.construction-parcel-lx-table tr.construction-parcel-lx-row--active {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  background: rgba(239, 246, 255, 0.95);
+}
+
+.construction-parcel-lx-table tr.construction-parcel-lx-row--active .save-work-input {
+  background: transparent !important;
+}
+
+.construction-parcel-lx-table td.construction-parcel-lx-cell--selected {
+  background: rgba(59, 130, 246, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.55);
+}
+
+.construction-parcel-lx-table td.construction-parcel-lx-cell--selected .save-work-input {
+  background: transparent !important;
+}
+
+.construction-parcel-lx-table .save-work-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  border: none;
+  border-radius: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.76rem;
-  line-height: 1.35;
-  color: #0f172a;
-  resize: vertical;
-  background: #fff;
+  padding: 0.32rem 0.4rem;
+  background: transparent;
+}
+
+.construction-parcel-lx-table .save-work-input:focus {
+  background: #f8fafc;
+  outline: 2px solid #93c5fd;
+  outline-offset: -2px;
+  z-index: 1;
+  position: relative;
 }
 
 .construction-parcel-lx-actions {
@@ -1201,6 +1273,20 @@ body {
   background: #fff;
 }
 
+.construction-parcel-lx-viz-apply-row {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.construction-parcel-viz-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
 .construction-parcel-viz-group {
   margin-top: 0.55rem;
   padding: 0.55rem 0.65rem 0.6rem;
@@ -1215,6 +1301,20 @@ body {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #475569;
+}
+
+.construction-parcel-lx-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.construction-parcel-lx-title-suffix {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .construction-parcel-viz-group .construction-parcel-nearby-viz-label {
@@ -1460,16 +1560,13 @@ body {
   top: 52px;
   left: 12px;
   z-index: 6;
-  max-width: min(340px, calc(100% - 24px));
-  padding: 0.45rem 0.65rem;
+  max-width: min(280px, calc(100% - 24px));
+  padding: 0.38rem 0.55rem;
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.88);
   border: 1px solid rgba(148, 163, 184, 0.55);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
   pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
   line-height: 1.35;
 }
 
@@ -1483,15 +1580,6 @@ body {
   letter-spacing: 0.02em;
   color: #7dd3fc;
   text-transform: uppercase;
-}
-
-.parcel-review-canvas-badge-body {
-  font-size: 0.8rem;
-  color: #e2e8f0;
-}
-
-.parcel-review-canvas-badge-body strong {
-  color: #fff;
 }
 
 .construction-summary-grid {

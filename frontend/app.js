@@ -513,8 +513,10 @@ const state = {
     showOutline: true,
     showFill: false,
     showVertices: true,
-    showEncroachment: true,
+    showEncroachment: false,
     useAsReference: false,
+    /** 등록부 링 꼭짓점 중 캔버스·표에서 선택된 인덱스(0부터, 링 순서) */
+    activeLxRegisterVertexIndex: null,
   },
   /** 캔버스 클릭으로 고른 필지: { pnu, isWinner } | null */
   parcelReviewSelection: null,
@@ -524,6 +526,8 @@ const state = {
   parcelReviewCoordHover: null,
   /** 쿼리점 클릭으로 고정한 좌표 안내(null이면 미고정) */
   parcelReviewCoordPinned: null,
+  /** 메인 말뚝 캔버스에 필지 검토 오버레이를 그릴지(기본 끔 — 탭에서 켠 뒤 표시) */
+  parcelReviewMainCanvasViewer: false,
   /** 동별 클러스터 윤곽 자동생성 — 이름 목록 순서와 동일 */
   autoBuildingOutlineByOrder: [],
   lastUploadedFileName: "",
@@ -648,7 +652,8 @@ function updateHeaderWorkContextLabel() {
   }
 }
 
-function notifyWorkContextChanged() {
+/** @param {{ resetParcelReview?: boolean }} [patch] — resetParcelReview: 다른 작업/윤곽/DXF로 바뀔 때만 true (천공·기초 입력만 반영할 때는 생략) */
+function notifyWorkContextChanged(patch) {
   // 저장된 작업/프로젝트를 불러온 직후에는 해당 컨텍스트를 윤곽 설정 목록에 즉시 반영한다.
   // 수동으로 선택해 둔 드롭다운 값보다 "방금 불러온 프로젝트"를 우선한다.
   if (state.loadedWorkMeta?.project) {
@@ -656,6 +661,7 @@ function notifyWorkContextChanged() {
   } else if (state.loadedProjectName) {
     persistSettingsContext(state.loadedProjectName, state.settingsContextProjectId || "");
   }
+  const extra = patch && typeof patch === "object" ? patch : {};
   window.dispatchEvent(new CustomEvent("pilexy:work-context-changed", {
     detail: {
       loadedWorkId: state.loadedWorkId,
@@ -663,10 +669,18 @@ function notifyWorkContextChanged() {
       loadedProjectName: state.loadedProjectName,
       hasDataset: state.hasDataset,
       circleCount: Array.isArray(state.circles) ? state.circles.length : 0,
+      ...extra,
     },
   }));
   updateHeaderWorkContextLabel();
   renderProjectList();
+}
+
+/** 필지 경계점 좌표등록부: 프로젝트(설정 컨텍스트) 전환 시 construction 쪽에서 다시 불러오기 */
+function notifyParcelLxRegisterContextChanged() {
+  try {
+    window.dispatchEvent(new CustomEvent("pilexy:parcel-lx-register-context-changed"));
+  } catch (_) {}
 }
 
 function normalizeAreaKind(value) {
@@ -2171,8 +2185,19 @@ function bindEvents() {
     updateProjectBtn.addEventListener("click", handleUpdateProject);
   }
   if (projectNameInput) {
-    projectNameInput.addEventListener("input", updateProjectButtonState);
-    projectNameInput.addEventListener("blur", updateProjectButtonState);
+    let pilexyLxRegisterNameDebounce = null;
+    projectNameInput.addEventListener("input", () => {
+      updateProjectButtonState();
+      if (pilexyLxRegisterNameDebounce) window.clearTimeout(pilexyLxRegisterNameDebounce);
+      pilexyLxRegisterNameDebounce = window.setTimeout(() => {
+        pilexyLxRegisterNameDebounce = null;
+        notifyParcelLxRegisterContextChanged();
+      }, 350);
+    });
+    projectNameInput.addEventListener("blur", () => {
+      updateProjectButtonState();
+      notifyParcelLxRegisterContextChanged();
+    });
   }
   if (projectSourceTypeSelect) {
     projectSourceTypeSelect.addEventListener("change", () => {
@@ -2184,12 +2209,14 @@ function bindEvents() {
     meissaProjectSelect.addEventListener("change", () => {
       syncSettingsContextFromUi();
       renderProjectList();
+      notifyParcelLxRegisterContextChanged();
     });
   }
   if (meissaProjectIdInput) {
     meissaProjectIdInput.addEventListener("change", () => {
       syncSettingsContextFromUi();
       renderProjectList();
+      notifyParcelLxRegisterContextChanged();
     });
   }
   if (settingsContextSelect) {
@@ -2197,6 +2224,7 @@ function bindEvents() {
       const selected = readSettingsContextSelection();
       if (selected) persistSettingsContext(selected.project, selected.projectId);
       renderProjectList();
+      notifyParcelLxRegisterContextChanged();
     });
   }
   if (refreshProjectListBtn) {
@@ -2278,11 +2306,11 @@ function bindEvents() {
   if (loadWorkBtn) {
     loadWorkBtn.addEventListener("click", async () => {
       openLoadWorkListPanel();
-      await renderLoadWorkList();
+      await renderLoadWorkList({ force: false });
     });
   }
   if (loadWorkListRefresh) {
-    loadWorkListRefresh.addEventListener("click", () => renderLoadWorkList());
+    loadWorkListRefresh.addEventListener("click", () => renderLoadWorkList({ force: true }));
   }
   if (loadWorkListClose) {
     loadWorkListClose.addEventListener("click", () => closeLoadWorkListPanel());
@@ -3340,7 +3368,7 @@ async function handleUpload(event) {
     state.loadedWorkId = null;
     state.manualOverrides = {};
     state.loadedWorkMeta = null;
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
     setPhase("ready", 100);
     setTimeout(() => setPhase("idle"), 600);
     state.lastUploadedFileName = file ? file.name : "";
@@ -8017,9 +8045,12 @@ function drawCanvas() {
   ctx.fillStyle = "#0f172a";
   ctx.fillRect(0, 0, width, height);
   const parcelOverlay =
-    state.parcelReviewViz != null
-    || pilexyParcelReviewVizHasGeometry(state.parcelReviewViz)
-    || pilexyParcelReviewLxUserHasGeometry();
+    Boolean(state.parcelReviewMainCanvasViewer)
+    && (
+      state.parcelReviewViz != null
+      || pilexyParcelReviewVizHasGeometry(state.parcelReviewViz)
+      || pilexyParcelReviewLxUserHasGeometry()
+    );
   if ((!state.hasDataset || !state.circles.length) && !parcelOverlay) {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "16px 'Segoe UI'";
@@ -8094,13 +8125,6 @@ function pilexyParcelReviewVizHasGeometry(payload) {
   ) {
     return true;
   }
-  if (
-    Array.isArray(payload.lxRegisterEncroachmentRings)
-    && payload.lxRegisterEncroachmentRings.some((r) => hasPoly(r))
-    && state.parcelReviewLxRegister?.showEncroachment !== false
-  ) {
-    return true;
-  }
   return false;
 }
 
@@ -8110,13 +8134,31 @@ function pilexySetParcelReviewCanvasBadge(visible) {
   badge.classList.toggle("hidden", !visible);
 }
 
+function pilexyRefreshParcelReviewCanvasBadge() {
+  const show =
+    Boolean(state.parcelReviewMainCanvasViewer)
+    && (
+      (state.parcelReviewViz != null && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
+      || pilexyParcelReviewLxUserHasGeometry()
+    );
+  pilexySetParcelReviewCanvasBadge(show);
+}
+
+function pilexySetParcelReviewMainCanvasViewer(on) {
+  state.parcelReviewMainCanvasViewer = Boolean(on);
+  pilexyRefreshParcelReviewCanvasBadge();
+  requestRedraw();
+}
+
+window.pilexySetParcelReviewMainCanvasViewer = pilexySetParcelReviewMainCanvasViewer;
+
 function pilexySetParcelReviewViz(payload) {
   if (!payload) {
     state.parcelReviewViz = null;
     state.parcelReviewSelection = null;
     state.parcelReviewCoordHover = null;
     state.parcelReviewCoordPinned = null;
-    pilexySetParcelReviewCanvasBadge(pilexyParcelReviewLxUserHasGeometry());
+    pilexyRefreshParcelReviewCanvasBadge();
     requestRedraw();
     return;
   }
@@ -8154,9 +8196,7 @@ function pilexySetParcelReviewViz(payload) {
       .map((r) => pilexyParcelVizRingFromPayload(r, 3))
       .filter((r) => r.length >= 3),
   };
-  pilexySetParcelReviewCanvasBadge(
-    pilexyParcelReviewVizHasGeometry(payload) || pilexyParcelReviewLxUserHasGeometry(),
-  );
+  pilexyRefreshParcelReviewCanvasBadge();
   requestRedraw();
 }
 
@@ -8313,12 +8353,30 @@ function pickParcelReviewQueryPointCanvas(canvasX, canvasY) {
   return Math.hypot(c.x - canvasX, c.y - canvasY) <= PARCEL_COORD_QUERY_PX;
 }
 
+/** 경계점 등록부 링 꼭짓점 근처 클릭 — 0부터 인덱스 */
+function pickParcelReviewLxRegisterVertexIndex(canvasX, canvasY) {
+  const pts = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
+  if (pts.length < 1) return null;
+  const tol = PARCEL_COORD_VERTEX_PX;
+  let bestI = null;
+  let bestD = Infinity;
+  for (let i = 0; i < pts.length; i += 1) {
+    const c = worldToCanvas(pts[i].x, pts[i].y);
+    const d = Math.hypot(c.x - canvasX, c.y - canvasY);
+    if (d <= tol && d < bestD) {
+      bestD = d;
+      bestI = i;
+    }
+  }
+  return bestI != null ? { index: bestI } : null;
+}
+
 function pilexyParcelReviewRingsForCoordProbe(viz) {
   const rows = [];
   if (!viz) {
     const lxOnly = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
     if (lxOnly.length >= 3) {
-      rows.push({ ring: lxOnly, label: "경계점 좌표등록부(입력)" });
+      rows.push({ ring: lxOnly, label: "경계점 좌표등록부(입력)", lxVertexNumbers: true });
     }
     return rows;
   }
@@ -8345,13 +8403,8 @@ function pilexyParcelReviewRingsForCoordProbe(viz) {
   });
   const lxUserRing = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
   if (lxUserRing.length >= 3) {
-    rows.push({ ring: lxUserRing, label: "경계점 좌표등록부(입력)" });
+    rows.push({ ring: lxUserRing, label: "경계점 좌표등록부(입력)", lxVertexNumbers: true });
   }
-  (viz.lxRegisterEncroachmentRings || []).forEach((r, idx) => {
-    if (Array.isArray(r) && r.length >= 2) {
-      rows.push({ ring: r, label: `등록부 기준 대지 초과 ${idx + 1}` });
-    }
-  });
   if (viz.showCadastralMap !== false) {
     (viz.cadastralBonbunRings || []).forEach((r, idx) => {
       if (Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2) {
@@ -8397,37 +8450,47 @@ function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
     }
   }
 
-  const tryVertex = (wx, wy, edgeLabel, onSelectedRing) => {
+  const tryVertex = (wx, wy, edgeLabel, onSelectedRing, secondLineOverride) => {
     const cc = worldToCanvas(wx, wy);
     const d = Math.hypot(cc.x - canvasX, cc.y - canvasY);
     const tol = onSelectedRing ? PARCEL_COORD_VERTEX_SELECTED_PX : PARCEL_COORD_VERTEX_PX;
     if (d > tol) return;
     const z = onSelectedRing ? 1 : 2;
     const suffix = onSelectedRing ? " (선택·꼭짓점)" : " (꼭짓점)";
+    const line2 =
+      secondLineOverride != null && String(secondLineOverride) !== ""
+        ? String(secondLineOverride)
+        : `X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}`;
     cands.push({
       d,
       z,
       model: {
         wx,
         wy,
-        lines: [edgeLabel, `X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}`],
+        lines: [edgeLabel, line2],
         clientX,
         clientY,
       },
     });
   };
 
-  const tryRingVerticesOnly = (ring, edgeLabel) => {
+  const tryRingVerticesOnly = (ring, edgeLabel, lxVertexNumbers) => {
     const onSel = isSelRing(ring);
     const pts = pilexyNormalizeParcelRingPoints(ring);
     const n = pts.length;
     if (n < 2) return;
     for (let i = 0; i < n; i += 1) {
-      tryVertex(pts[i].x, pts[i].y, edgeLabel, onSel);
+      const wx = pts[i].x;
+      const wy = pts[i].y;
+      const suffix = onSel ? " (선택·꼭짓점)" : " (꼭짓점)";
+      const override = lxVertexNumbers ? `번호 ${i + 1} · X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}` : null;
+      tryVertex(wx, wy, edgeLabel, onSel, override);
     }
   };
 
-  pilexyParcelReviewRingsForCoordProbe(viz).forEach((row) => tryRingVerticesOnly(row.ring, row.label));
+  pilexyParcelReviewRingsForCoordProbe(viz).forEach((row) => {
+    tryRingVerticesOnly(row.ring, row.label, Boolean(row.lxVertexNumbers));
+  });
 
   if (!cands.length) return null;
   cands.sort((u, v) => (u.d !== v.d ? u.d - v.d : u.z - v.z));
@@ -8476,31 +8539,80 @@ function pilexySetParcelReviewCoordProbe(enabled) {
 
 window.pilexySetParcelReviewCoordProbe = pilexySetParcelReviewCoordProbe;
 
+function pilexyDispatchParcelReviewLxVertexClearUi() {
+  try {
+    window.dispatchEvent(new CustomEvent("pilexy-parcel-review-lx-vertex-clear"));
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function pilexySetParcelReviewLxRegisterActiveVertex(i0) {
+  const reg = state.parcelReviewLxRegister;
+  if (!reg) return;
+  const pts = pilexyNormalizeParcelRingPoints(reg.ring);
+  if (i0 == null || i0 === "" || !Number.isFinite(Number(i0)) || Number(i0) < 0 || Number(i0) >= pts.length) {
+    reg.activeLxRegisterVertexIndex = null;
+    pilexyDispatchParcelReviewLxVertexClearUi();
+  } else {
+    reg.activeLxRegisterVertexIndex = Math.floor(Number(i0));
+  }
+  requestRedraw();
+}
+
+function pilexyClampParcelReviewLxRegisterActiveVertex() {
+  const reg = state.parcelReviewLxRegister;
+  if (!reg || reg.activeLxRegisterVertexIndex == null) return;
+  const pts = pilexyNormalizeParcelRingPoints(reg.ring);
+  if (reg.activeLxRegisterVertexIndex >= pts.length) {
+    reg.activeLxRegisterVertexIndex = null;
+    pilexyDispatchParcelReviewLxVertexClearUi();
+    requestRedraw();
+  }
+}
+
+window.pilexySetParcelReviewLxRegisterActiveVertex = pilexySetParcelReviewLxRegisterActiveVertex;
+window.pilexyClampParcelReviewLxRegisterActiveVertex = pilexyClampParcelReviewLxRegisterActiveVertex;
+
 function pilexyParcelReviewLxRegisterApplyParsedRing(points) {
   const pts = pilexyNormalizeParcelRingPoints(points);
   if (!state.parcelReviewLxRegister) return false;
-  state.parcelReviewLxRegister.ring = pts.length >= 3 ? pts : null;
-  pilexySetParcelReviewCanvasBadge(
-    (state.parcelReviewViz && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz))
-      || pilexyParcelReviewLxUserHasGeometry(),
-  );
+  let ring = pts.length >= 3 ? pts : null;
+  if (ring) {
+    let minx = ring[0].x;
+    let maxx = ring[0].x;
+    let miny = ring[0].y;
+    let maxy = ring[0].y;
+    for (let i = 1; i < ring.length; i += 1) {
+      const p = ring[i];
+      minx = Math.min(minx, p.x);
+      maxx = Math.max(maxx, p.x);
+      miny = Math.min(miny, p.y);
+      maxy = Math.max(maxy, p.y);
+    }
+    if (Math.hypot(maxx - minx, maxy - miny) < 1e-6) ring = null;
+  }
+  state.parcelReviewLxRegister.ring = ring;
+  pilexyClampParcelReviewLxRegisterActiveVertex();
+  pilexyRefreshParcelReviewCanvasBadge();
   requestRedraw();
-  return pts.length >= 3;
+  return ring != null;
 }
 
 function pilexyParcelReviewLxRegisterClearRing() {
   if (!state.parcelReviewLxRegister) return;
   state.parcelReviewLxRegister.ring = null;
+  state.parcelReviewLxRegister.activeLxRegisterVertexIndex = null;
+  pilexyDispatchParcelReviewLxVertexClearUi();
   if (state.parcelReviewViz) state.parcelReviewViz.lxRegisterEncroachmentRings = [];
-  pilexySetParcelReviewCanvasBadge(
-    state.parcelReviewViz != null && pilexyParcelReviewVizHasGeometry(state.parcelReviewViz),
-  );
+  pilexyRefreshParcelReviewCanvasBadge();
   requestRedraw();
 }
 
 function pilexyParcelReviewLxRegisterSetOptions(partial) {
   if (!state.parcelReviewLxRegister || !partial || typeof partial !== "object") return;
   Object.assign(state.parcelReviewLxRegister, partial);
+  pilexyRefreshParcelReviewCanvasBadge();
   requestRedraw();
 }
 
@@ -8516,7 +8628,7 @@ window.pilexyParcelReviewLxRegisterSetOptions = pilexyParcelReviewLxRegisterSetO
 window.pilexyGetParcelReviewLxRegisterVerticesForApi = pilexyGetParcelReviewLxRegisterVerticesForApi;
 
 function pilexyGetParcelReviewLxRegisterUseReference() {
-  return Boolean(state.parcelReviewLxRegister?.useAsReference);
+  return false;
 }
 
 window.pilexyGetParcelReviewLxRegisterUseReference = pilexyGetParcelReviewLxRegisterUseReference;
@@ -8578,6 +8690,16 @@ function pilexyFocusParcelReviewRingOnCanvas(ring) {
   fitViewToBounds({ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY });
   requestRedraw();
 }
+
+/** 등록부 꼭짓점 한 점(도면 m) 기준으로 뷰 맞춤 */
+function pilexyFocusParcelReviewWorldPoint(wx, wy) {
+  if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
+  const pad = 48;
+  fitViewToBounds({ minX: wx - pad, maxX: wx + pad, minY: wy - pad, maxY: wy + pad });
+  requestRedraw();
+}
+
+window.pilexyFocusParcelReviewWorldPoint = pilexyFocusParcelReviewWorldPoint;
 
 window.pilexyFocusParcelReviewRingOnCanvas = pilexyFocusParcelReviewRingOnCanvas;
 
@@ -8813,6 +8935,7 @@ function pilexyFocusParcelReviewNearbyOnCanvas(payload) {
 window.pilexyFocusParcelReviewNearbyOnCanvas = pilexyFocusParcelReviewNearbyOnCanvas;
 
 function drawParcelReviewViz() {
+  if (!state.parcelReviewMainCanvasViewer) return;
   const lxOpt = state.parcelReviewLxRegister;
   const rawViz = state.parcelReviewViz;
   if (!rawViz && !pilexyParcelReviewLxUserHasGeometry()) return;
@@ -8830,14 +8953,6 @@ function drawParcelReviewViz() {
     queryPoint: null,
     lxRegisterEncroachmentRings: [],
   };
-  const hasNearby =
-    viz.showParcelLot !== false &&
-    viz.showNearbyParcels !== false &&
-    (viz.nearbyParcelRings || []).some((n) => n && pilexyNormalizeParcelRingPoints(n.ring).length >= 2);
-  const bonbunData = (viz.cadastralBonbunRings || []).some(
-    (r) => Array.isArray(r) && pilexyNormalizeParcelRingPoints(r).length >= 2,
-  );
-  const hasBonbun = bonbunData && viz.showCadastralMap !== false;
 
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
@@ -8963,20 +9078,6 @@ function drawParcelReviewViz() {
   /* 1) 대지 외곽: 주차장 윤곽(drawBuildings dashed)과 유사 — 주황 점선 */
   strokeParcelRingWorld(viz.siteRing, "rgba(253, 224, 71, 0.92)", 1.2, [10, 6], 0.88);
 
-  /* 1b) 등록부 기준: 대지에서 등록부를 뺀 초과 영역(서버 Shapely) */
-  if (
-    lxOpt
-    && lxOpt.showEncroachment !== false
-    && Array.isArray(viz.lxRegisterEncroachmentRings)
-    && viz.lxRegisterEncroachmentRings.length
-  ) {
-    viz.lxRegisterEncroachmentRings.forEach((ring) => {
-      if (!Array.isArray(ring) || ring.length < 3) return;
-      fillParcelRingWorld(ring, "rgba(234, 88, 12, 0.26)", 1);
-      strokeParcelRingWorld(ring, "rgba(180, 52, 6, 0.92)", 1.55, [7, 5], 0.95);
-    });
-  }
-
   /* 2) WFS 인접: 실선만(면 없음), 동 팔레트처럼 고정 두께 + 다각형 겹침 완화 알파 — 「필지 표시」꺼지면 후보도 숨김 */
   if (viz.showParcelLot !== false && viz.showNearbyParcels !== false) {
     (viz.nearbyParcelRings || []).forEach((item) => {
@@ -9032,13 +9133,22 @@ function drawParcelReviewViz() {
       strokeParcelRingWorld(lxUserPts, "rgba(8, 145, 178, 0.98)", 2.1, [4, 3], 0.92);
     }
     if (lxOpt.showVertices !== false) {
-      lxUserPts.forEach((p) => {
+      const activeI = lxOpt.activeLxRegisterVertexIndex;
+      lxUserPts.forEach((p, i) => {
         const c = worldToCanvas(p.x, p.y);
+        const isActive = activeI != null && Number(activeI) === i;
         ctx.beginPath();
-        ctx.fillStyle = "rgba(165, 243, 252, 0.95)";
-        ctx.strokeStyle = "rgba(21, 94, 117, 0.9)";
-        ctx.lineWidth = 1.1;
-        ctx.arc(c.x, c.y, 3.2, 0, Math.PI * 2);
+        if (isActive) {
+          ctx.fillStyle = "rgba(253, 224, 71, 0.98)";
+          ctx.strokeStyle = "rgba(180, 83, 9, 0.95)";
+          ctx.lineWidth = 2;
+          ctx.arc(c.x, c.y, 6.2, 0, Math.PI * 2);
+        } else {
+          ctx.fillStyle = "rgba(165, 243, 252, 0.95)";
+          ctx.strokeStyle = "rgba(21, 94, 117, 0.9)";
+          ctx.lineWidth = 1.1;
+          ctx.arc(c.x, c.y, 3.2, 0, Math.PI * 2);
+        }
         ctx.fill();
         ctx.stroke();
       });
@@ -9069,73 +9179,6 @@ function drawParcelReviewViz() {
     }
   }
 
-  /* 좌하단 범례(우측 패널에 가리지 않음) */
-  const { width, height } = getCanvasSize();
-  const pad = 10;
-  const rowH = 18;
-  ctx.save();
-  ctx.font = "13px 'Segoe UI', 'Malgun Gothic', sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  const rows = [];
-  if (hasNearby) {
-    rows.push({
-      c: "rgba(232, 121, 249, 0.96)",
-      t: "자홍 실선 = WFS 인접 필지 후보(면 제거·겹침 시 가림 방지)",
-    });
-  }
-  if (hasBonbun) {
-    rows.push({
-      c: "rgba(56, 189, 248, 0.96)",
-      t: "하늘 점선 = 지적 본번 경계(WFS 본번)",
-    });
-  }
-  const lxU = pilexyNormalizeParcelRingPoints(state.parcelReviewLxRegister?.ring);
-  if (lxU.length >= 3 && state.parcelReviewLxRegister?.showOutline !== false) {
-    rows.push({
-      c: "rgba(8, 145, 178, 0.96)",
-      t: "청록 점선 = 경계점 좌표등록부(입력)",
-    });
-  }
-  if (
-    (viz.lxRegisterEncroachmentRings || []).some((r) => pilexyNormalizeParcelRingPoints(r).length >= 3)
-    && state.parcelReviewLxRegister?.showEncroachment !== false
-  ) {
-    rows.push({
-      c: "rgba(234, 88, 12, 0.96)",
-      t: "주황 영역 = 등록부 기준 대지 초과(대지−등록부)",
-    });
-  }
-  rows.push(
-    { c: "rgba(250, 204, 21, 1)", t: "노란 점 = 쿼리점(검토 기준)" },
-    { c: "rgba(74, 222, 128, 0.95)", t: "초록 = 선택 필지(가장 유리한 후보)" },
-    { c: "rgba(251, 191, 36, 1)", t: "주황 점선 = 대지 외곽" },
-    { c: "rgba(254, 202, 202, 1)", t: "붉은 영역 = 필지 밖" },
-  );
-  const boxW = 312;
-  const boxH = rowH * rows.length + pad * 2;
-  /* 우측 패널에 가리지 않도록 좌하단 */
-  const x0 = pad;
-  const y0 = height - boxH - pad;
-  ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  if (typeof ctx.roundRect === "function") {
-    ctx.roundRect(x0, y0, boxW, boxH, 6);
-  } else {
-    ctx.rect(x0, y0, boxW, boxH);
-  }
-  ctx.fill();
-  ctx.stroke();
-  rows.forEach((row, i) => {
-    const cy = y0 + pad + rowH * i + rowH / 2;
-    ctx.fillStyle = row.c;
-    ctx.fillRect(x0 + pad, cy - 5, 12, 10);
-    ctx.fillStyle = "#e2e8f0";
-    ctx.fillText(row.t, x0 + pad + 18, cy);
-  });
-  ctx.restore();
   ctx.restore();
 }
 
@@ -9773,13 +9816,29 @@ function handleCanvasMouseUp(event) {
     && !state.buildingOutlinePickMode
     && state.manualPickMode !== "circle"
     && state.manualPickMode !== "text"
-    && state.parcelReviewViz != null
+    && (state.parcelReviewViz != null || pilexyParcelReviewLxUserHasGeometry())
   ) {
     const { x: upX, y: upY } = getCanvasCoordsFromEvent(event);
     const dx = upX - mouseDownPos.x;
     const dy = upY - mouseDownPos.y;
     if (dx * dx + dy * dy < 25) {
-      if (state.parcelReviewCoordProbe && pickParcelReviewQueryPointCanvas(upX, upY)) {
+      const lxHit = pilexyParcelReviewLxUserHasGeometry() ? pickParcelReviewLxRegisterVertexIndex(upX, upY) : null;
+      if (lxHit && lxHit.index != null) {
+        pilexySetParcelReviewLxRegisterActiveVertex(lxHit.index);
+        if (typeof window.pilexyFocusParcelReviewLxTableRow === "function") {
+          window.pilexyFocusParcelReviewLxTableRow(lxHit.index);
+        }
+        setUploadStatus(`등록부 꼭짓점 번호 ${lxHit.index + 1}`);
+        requestRedraw();
+        mouseDownPos = null;
+        return;
+      }
+      if (
+        state.parcelReviewCoordProbe
+        && state.parcelReviewViz != null
+        && pickParcelReviewQueryPointCanvas(upX, upY)
+      ) {
+        pilexySetParcelReviewLxRegisterActiveVertex(null);
         state.parcelReviewCoordPinned =
           state.parcelReviewCoordPinned?.kind === "query" ? null : { kind: "query" };
         setUploadStatus(
@@ -9791,23 +9850,27 @@ function handleCanvasMouseUp(event) {
         mouseDownPos = null;
         return;
       }
-      const hit = pickParcelReviewRingAtCanvas(upX, upY);
-      if (hit && String(hit.pnu || "").trim() !== "") {
-        state.parcelReviewSelection = { pnu: String(hit.pnu), isWinner: Boolean(hit.isWinner) };
-        setUploadStatus(`필지 선택: PNU ${hit.pnu}${hit.isWinner ? " (연속지적 승자)" : " (인접 후보)"}`);
-        try {
-          window.dispatchEvent(
-            new CustomEvent("pilexy-parcel-review-select", { detail: { pnu: hit.pnu, isWinner: hit.isWinner } }),
-          );
-        } catch (_) {
-          /* ignore */
+      if (state.parcelReviewViz != null) {
+        const hit = pickParcelReviewRingAtCanvas(upX, upY);
+        if (hit && String(hit.pnu || "").trim() !== "") {
+          pilexySetParcelReviewLxRegisterActiveVertex(null);
+          state.parcelReviewSelection = { pnu: String(hit.pnu), isWinner: Boolean(hit.isWinner) };
+          setUploadStatus(`필지 선택: PNU ${hit.pnu}${hit.isWinner ? " (연속지적 승자)" : " (인접 후보)"}`);
+          try {
+            window.dispatchEvent(
+              new CustomEvent("pilexy-parcel-review-select", { detail: { pnu: hit.pnu, isWinner: hit.isWinner } }),
+            );
+          } catch (_) {
+            /* ignore */
+          }
+          requestRedraw();
+          mouseDownPos = null;
+          return;
         }
-        requestRedraw();
-        mouseDownPos = null;
-        return;
       }
       const hadSel = state.parcelReviewSelection != null;
       state.parcelReviewSelection = null;
+      pilexySetParcelReviewLxRegisterActiveVertex(null);
       if (hadSel) {
         try {
           window.dispatchEvent(new CustomEvent("pilexy-parcel-review-select", { detail: { cleared: true } }));
@@ -10538,16 +10601,40 @@ async function handleApplyClusteringSettings() {
  */
 
 /** 중앙 저장 API: 목록 조회 */
-async function getSavedWorksList() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/saved-works`);
-    if (!response.ok) throw new Error(response.statusText);
-    const list = await response.json();
-    return Array.isArray(list) ? list.map(normalizeSavedWorkItem) : [];
-  } catch (e) {
-    console.error("저장 목록 읽기 실패:", e);
-    return [];
+let savedWorksListCache = [];
+let savedWorksListCacheAt = 0;
+let savedWorksListInFlight = null;
+const SAVED_WORKS_LIST_TTL_MS = 15_000;
+
+async function getSavedWorksList({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && Array.isArray(savedWorksListCache) && savedWorksListCache.length) {
+    if (now - savedWorksListCacheAt < SAVED_WORKS_LIST_TTL_MS) {
+      return savedWorksListCache;
+    }
   }
+  if (!force && savedWorksListInFlight) {
+    return savedWorksListInFlight;
+  }
+
+  savedWorksListInFlight = (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/saved-works`);
+      if (!response.ok) throw new Error(response.statusText);
+      const list = await response.json();
+      const normalized = Array.isArray(list) ? list.map(normalizeSavedWorkItem) : [];
+      savedWorksListCache = normalized;
+      savedWorksListCacheAt = Date.now();
+      return normalized;
+    } catch (e) {
+      console.error("저장 목록 읽기 실패:", e);
+      return Array.isArray(savedWorksListCache) ? savedWorksListCache : [];
+    } finally {
+      savedWorksListInFlight = null;
+    }
+  })();
+
+  return savedWorksListInFlight;
 }
 
 /** 불러오기 패널: 캐시 및 선택된 프로젝트 */
@@ -10653,8 +10740,8 @@ function savedWorkMatchesVersionSearch(item, qNorm) {
   return blob.includes(qNorm);
 }
 
-async function refetchLoadWorkCache() {
-  savedWorksCache = (await getSavedWorksList()).map(normalizeSavedWorkItem);
+async function refetchLoadWorkCache({ force = false } = {}) {
+  savedWorksCache = (await getSavedWorksList({ force })).map(normalizeSavedWorkItem);
   pruneLoadWorkFavorites();
   rebuildManualHistoryReferenceWorkSelectOptions();
   return savedWorksCache;
@@ -10959,7 +11046,7 @@ async function syncCurrentWorkToServer(statusMessage) {
       sourceType: entry.sourceType || saveData.sourceType || DEFAULT_SOURCE_TYPE,
     };
     setProjectContext(state.loadedWorkMeta.project, state.loadedWorkMeta.sourceType);
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
     if (statusMessage) setUploadStatus(`${statusMessage} 서버에 저장했습니다(새 작업).`);
     if (saveWorkBtn) saveWorkBtn.disabled = false;
     if (saveWorkUpdateBtn) saveWorkUpdateBtn.disabled = false;
@@ -11008,11 +11095,18 @@ async function openSaveWorkModal(isOverwrite = false) {
     saveWorkSourceTypeSelect.value = getActiveSourceType();
   }
 
+  let savedWorksListForModal = [];
+  try {
+    savedWorksListForModal = await getSavedWorksList({ force: false });
+  } catch (_) {
+    savedWorksListForModal = [];
+  }
+
   if (isOverwrite && saveWorkOverwriteSelect) {
     saveWorkOverwriteSelect.innerHTML = "";
     saveWorkOverwriteSelect.removeEventListener("change", saveWorkOverwriteSelect._overwriteChange);
     try {
-      const list = await getSavedWorksList();
+      const list = savedWorksListForModal;
       // await 이후 한 번 더 비움: 연속으로 모달이 열리면 이전 비동기 호출이 나중에 끝나며 옵션이 이중으로 붙는 것을 방지
       saveWorkOverwriteSelect.innerHTML = "";
       list.forEach((item) => {
@@ -11071,10 +11165,7 @@ async function openSaveWorkModal(isOverwrite = false) {
   }
 
   if (saveWorkAuthorSelect) {
-    let authorList = [];
-    try {
-      authorList = await getSavedWorksList();
-    } catch (_) {}
+    const authorList = savedWorksListForModal;
     saveWorkAuthorSelect.innerHTML = "";
     const optEmpty = document.createElement("option");
     optEmpty.value = "";
@@ -11098,10 +11189,7 @@ async function openSaveWorkModal(isOverwrite = false) {
   if (saveWorkAuthorCustom) saveWorkAuthorCustom.value = "";
 
   if (saveWorkProjectSelect) {
-    let projectList = [];
-    try {
-      projectList = await getSavedWorksList();
-    } catch (_) {}
+    const projectList = savedWorksListForModal;
     const set = new Set([DEFAULT_PROJECT_NAME]);
     projectList.map((item) => normalizeProjectName(item.project)).filter(Boolean).forEach((p) => set.add(p));
     const projects = [...set].sort();
@@ -11230,7 +11318,7 @@ async function submitSaveWorkModal() {
       sourceType: entry.sourceType || data.sourceType || DEFAULT_SOURCE_TYPE,
     };
     setProjectContext(state.loadedWorkMeta.project, state.loadedWorkMeta.sourceType);
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
     await refetchLoadWorkCache();
     closeSaveWorkModal();
     setUploadStatus(
@@ -11257,9 +11345,15 @@ async function handleLoadWork(id, loadBtn) {
   if (!id) return;
   if (loadBtn) loadBtn.disabled = true;
   try {
-    const response = await fetch(`${API_BASE_URL}/api/saved-works/${encodeURIComponent(id)}`);
+    const url = `${API_BASE_URL}/api/saved-works/${encodeURIComponent(id)}`;
+    const response = await fetch(url);
     if (!response.ok) {
-      setUploadStatus("해당 저장 데이터를 찾을 수 없습니다.", true);
+      let bodyText = "";
+      try {
+        bodyText = await response.text();
+      } catch (_) {}
+      console.warn("저장된 작업 불러오기 실패:", response.status, url, bodyText);
+      setUploadStatus(`해당 저장 데이터를 찾을 수 없습니다. (HTTP ${response.status})`, true);
       return;
     }
     const data = await response.json();
@@ -11392,8 +11486,9 @@ async function handleLoadWork(id, loadBtn) {
       author: data.author || "",
       sourceType: normalizeSourceType(data.sourceType),
     };
+    state.loadedProjectName = state.loadedWorkMeta.project;
     setProjectContext(state.loadedWorkMeta.project, state.loadedWorkMeta.sourceType);
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
     resetManualSelection();
     state.areaRectCreate = null;
     if (saveWorkBtn) saveWorkBtn.disabled = false;
@@ -11787,14 +11882,23 @@ function renderLoadWorkItems(projectName) {
 }
 
 /** 불러오기 패널 열 때: 목록 조회 후 프로젝트 목록 표시 */
-async function renderLoadWorkList() {
+async function renderLoadWorkList({ force = false } = {}) {
   const btn = loadWorkListRefresh;
   if (btn) btn.disabled = true;
   try {
+    if (!API_BASE_URL || window.location.origin === "null") {
+      if (loadWorkList) {
+        loadWorkList.innerHTML =
+          "<div class=\"load-work-empty\">백엔드 서버가 필요합니다. (예: <code>python -m uvicorn backend.main:app --port 8000</code>)</div>";
+      }
+      if (loadWorkProjects) loadWorkProjects.innerHTML = "";
+      if (loadWorkItemsLabel) loadWorkItemsLabel.textContent = "작업 버전 · 서버 연결 필요";
+      return;
+    }
     if (loadWorkList) loadWorkList.innerHTML = "<div class=\"load-work-empty\">목록 불러오는 중...</div>";
     if (loadWorkProjects) loadWorkProjects.innerHTML = "";
     if (loadWorkItemsLabel) loadWorkItemsLabel.textContent = "작업 버전 · 왼쪽에서 프로젝트(버전 그룹)를 선택하세요";
-    await refetchLoadWorkCache();
+    await refetchLoadWorkCache({ force });
     selectedLoadProject = null;
     selectedLoadSourceType = LOAD_WORK_SOURCE_ALL;
     renderLoadWorkProjects();
@@ -14005,7 +14109,7 @@ async function handleSaveProject() {
     state.loadedProjectVersionId = versionId;
     state.loadedProjectSourceType = sourceType;
     updateProjectButtonState();
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
   } catch (error) {
     console.error("프로젝트 저장 실패:", error);
     setUploadStatus("윤곽 설정 저장에 실패했습니다.", true);
@@ -14132,7 +14236,7 @@ async function handleUpdateProject() {
     renderProjectList();
     setUploadStatus(`윤곽 설정 "${projectName}"이(가) 수정(덮어쓰기)되었습니다.`);
     updateProjectButtonState();
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
   } catch (error) {
     console.error("프로젝트 수정 실패:", error);
     setUploadStatus("윤곽 설정 수정에 실패했습니다.", true);
@@ -14185,7 +14289,10 @@ function handleLoadProject(projectName, versionId) {
     state.loadedWorkMeta = null;
     state.manualOverrides = {};
     state.manualHistoryReferenceWorkId = null;
-    persistSettingsContext(projectData.contextProject || previousLoadedWorkProject, projectData.contextProjectId || "");
+    persistSettingsContext(
+      projectData.contextProject || (projectData.projectName || projectName) || previousLoadedWorkProject,
+      projectData.contextProjectId || "",
+    );
     updateProjectButtonState();
 
     // 동 윤곽선(클러스터 폴리라인) 복원 — 비어 있으면 이전 프로젝트 잔상 제거
@@ -14280,7 +14387,7 @@ function handleLoadProject(projectName, versionId) {
     requestRedraw();
 
     setUploadStatus(`윤곽 설정 "${projectData.projectName || projectName}"을(를) 불러왔습니다.`);
-    notifyWorkContextChanged();
+    notifyWorkContextChanged({ resetParcelReview: true });
   } catch (error) {
     console.error("프로젝트 불러오기 실패:", error);
     setUploadStatus("윤곽 설정 불러오기에 실패했습니다.", true);
@@ -14384,7 +14491,9 @@ function handleDeleteProject(projectName, event, versionId) {
         ),
     );
     saveProjectList(filtered);
+    let clearedLoadedOutline = false;
     if (projectNameInput && projectNameInput.value === projectName && state.loadedProjectVersionId === vid) {
+      clearedLoadedOutline = true;
       projectNameInput.value = "";
       state.loadedProjectName = null;
       state.loadedProjectVersionId = null;
@@ -14395,7 +14504,7 @@ function handleDeleteProject(projectName, event, versionId) {
     }
     renderProjectList();
     updateProjectButtonState();
-    notifyWorkContextChanged();
+    notifyWorkContextChanged(clearedLoadedOutline ? { resetParcelReview: true } : undefined);
     setUploadStatus(`윤곽 설정 "${projectName}"이(가) 삭제되었습니다.`);
   } catch (error) {
     console.error("프로젝트 삭제 실패:", error);
