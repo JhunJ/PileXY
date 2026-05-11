@@ -92,6 +92,8 @@ from .construction_reports import (
     list_datasets as list_construction_datasets,
     sync_pdam_workbook,
 )
+from .materials_state import get_materials_state, put_materials_state
+from .billing_state import get_billing_state, put_billing_state
 from .dxf_parser import foundation_pf_only_flag, parse_dxf_entities
 from .excel_compare import compare_excel_workbook, inspect_excel_workbook
 from .models import (
@@ -4789,6 +4791,52 @@ async def delete_construction_dataset_item(dataset_id: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.exception("Construction dataset delete failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to delete construction dataset.") from exc
+
+
+@app.get("/api/materials/state")
+async def api_get_materials_state(project_context: Optional[str] = Query(None, alias="project_context")) -> Dict[str, Any]:
+    try:
+        return await run_in_threadpool(lambda: get_materials_state(project_context))
+    except Exception as exc:
+        logger.exception("Materials state read failed: %s", exc)
+        raise HTTPException(status_code=500, detail="자재 데이터를 불러오지 못했습니다.") from exc
+
+
+@app.put("/api/materials/state")
+async def api_put_materials_state(
+    project_context: Optional[str] = Query(None, alias="project_context"),
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    try:
+        return await run_in_threadpool(lambda: put_materials_state(project_context, payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Materials state write failed: %s", exc)
+        raise HTTPException(status_code=500, detail="자재 데이터를 저장하지 못했습니다.") from exc
+
+
+@app.get("/api/billing/state")
+async def api_get_billing_state(project_context: Optional[str] = Query(None, alias="project_context")) -> Dict[str, Any]:
+    try:
+        return await run_in_threadpool(lambda: get_billing_state(project_context))
+    except Exception as exc:
+        logger.exception("Billing state read failed: %s", exc)
+        raise HTTPException(status_code=500, detail="정산관리 데이터를 불러오지 못했습니다.") from exc
+
+
+@app.put("/api/billing/state")
+async def api_put_billing_state(
+    project_context: Optional[str] = Query(None, alias="project_context"),
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    try:
+        return await run_in_threadpool(lambda: put_billing_state(project_context, payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Billing state write failed: %s", exc)
+        raise HTTPException(status_code=500, detail="정산관리 데이터를 저장하지 못했습니다.") from exc
 
 
 _BRDS_DEFAULT_SSO = "https://baronet.daewooenc.com/login.do"

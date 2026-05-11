@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>파일 마스터</title>
-    <link rel="stylesheet" href="/frontend/styles.css?v=202604243" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=202605154" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WS5RRTXTKW"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -32,13 +32,11 @@
               <button type="button" id="header-dashboard-btn" class="header-construction-btn" title="대시보드 전용 패널을 엽니다.">
                 대시보드
               </button>
-            </div>
-          </div>
-          <div class="header-action-group header-action-group--hide-sm">
-            <span class="header-action-group-label">자재</span>
-            <div class="header-action-group-buttons">
-              <button type="button" id="header-materials-btn" class="header-construction-btn" title="시공 패널의 자재관리 탭을 엽니다.">
-                자재
+              <button type="button" id="header-materials-btn" class="header-construction-btn" title="자재관리 전용 창을 엽니다.">
+                자재관리
+              </button>
+              <button type="button" id="header-billing-btn" class="header-construction-btn" title="정산관리 전용 창을 엽니다.">
+                정산관리
               </button>
             </div>
           </div>
@@ -347,6 +345,36 @@
               </section>
             </div>
           </div>
+        </div>
+      </div>
+      <div id="materials-panel" class="dashboard-panel materials-panel" aria-hidden="true">
+        <div class="dashboard-card materials-panel-card">
+          <div class="dashboard-header">
+            <div class="dashboard-header-text">
+              <strong id="materials-panel-title">자재관리</strong>
+              <p id="materials-panel-subtitle" class="dashboard-subtitle">
+                프로젝트 단위로 저장됩니다. 동 목록은 현재 프로젝트 윤곽(동·주차장)과 동일합니다.
+              </p>
+            </div>
+            <button type="button" id="materials-panel-close" class="ghost" aria-label="닫기">닫기</button>
+          </div>
+          <div class="dashboard-body materials-panel-body">
+            <div id="materials-app-mount" class="materials-app-mount"></div>
+          </div>
+        </div>
+      </div>
+      <div id="billing-panel" class="dashboard-panel materials-panel billing-panel" aria-hidden="true">
+        <div class="dashboard-card materials-panel-card">
+          <div class="dashboard-header">
+            <div class="dashboard-header-text">
+              <strong id="billing-panel-title">정산관리</strong>
+              <p id="billing-panel-subtitle" class="dashboard-subtitle">
+                항타기 호기별 휴무·대기·고장·우천 등 운용 현황을 날짜별로 기록합니다.
+              </p>
+            </div>
+            <button type="button" id="billing-panel-close" class="ghost" aria-label="닫기">닫기</button>
+          </div>
+          <div id="billing-panel-body" class="dashboard-body materials-panel-body"></div>
         </div>
       </div>
       <form id="upload-form" class="upload-form">
@@ -1635,7 +1663,8 @@
     <script src="/frontend/app.js?v=202604248clean1"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="/frontend/construction.js?v=202604248clean1"></script>
+    <script src="/frontend/construction.js?v=202605154"></script>
+    <script src="/frontend/materials.js?v=202605154"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/meissa-compare.js?v=202604201"></script>
   </body>

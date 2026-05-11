@@ -1645,12 +1645,2006 @@ body {
   display: block;
 }
 
+.construction-billing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+.construction-billing-month-actions,
+.construction-billing-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: end;
+}
+
+.construction-billing-current-month {
+  flex: 1 1 100%;
+  display: block;
+  margin-bottom: 0.1rem;
+  color: #0f172a;
+  font-size: 1.05rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.construction-billing-current-month span {
+  margin-right: 0.45rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.construction-billing-current-month b {
+  color: #2563eb;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.construction-billing-range-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.construction-billing-range-controls #construction-billing-rig-count {
+  width: 4.2rem;
+}
+
+.construction-billing-range-controls #construction-billing-apply-range {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.24);
+}
+
+.construction-billing-range-controls #construction-billing-apply-range:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1e40af;
+  color: #ffffff;
+}
+
+.construction-billing-range-controls .construction-billing-xlsx-btn {
+  background: #0f766e;
+  color: #ffffff;
+  border: 1px solid #0f766e;
+  box-shadow: 0 2px 10px rgba(15, 118, 110, 0.22);
+}
+
+.construction-billing-range-controls .construction-billing-xlsx-btn:hover:not(:disabled) {
+  background: #0d9488;
+  border-color: #0f766e;
+  color: #ffffff;
+}
+
+.construction-billing-help,
+.construction-billing-feedback {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.construction-billing-feedback {
+  min-height: 1rem;
+  color: #2563eb;
+}
+
+.construction-billing-table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 12.25rem);
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.construction-billing-table {
+  width: max-content;
+  min-width: 0;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.72rem;
+}
+
+.construction-billing-table--few-rigs {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.construction-billing-table th,
+.construction-billing-table td {
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.28rem;
+  vertical-align: top;
+}
+
+.construction-billing-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 800;
+  text-align: center;
+}
+
+.construction-billing-date-col,
+.construction-billing-date-cell {
+  width: 5rem;
+  min-width: 5rem;
+  max-width: 5rem;
+}
+
+.construction-billing-date-cell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+}
+
+.construction-billing-date-cell strong,
+.construction-billing-date-cell span,
+.construction-billing-date-cell em {
+  display: block;
+}
+
+.construction-billing-date-cell span {
+  margin-top: 0.08rem;
+  font-size: 0.68rem;
+  color: #64748b;
+}
+
+.construction-billing-date-cell em {
+  margin-top: 0.12rem;
+  font-style: normal;
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: #b91c1c;
+}
+
+.construction-billing-row--sunday .construction-billing-date-cell,
+.construction-billing-row--holiday .construction-billing-date-cell {
+  background: #fff1f2;
+}
+
+.construction-billing-row--sunday td,
+.construction-billing-row--holiday td {
+  background: #fff7ed;
+}
+
+.construction-billing-cell {
+  width: 7.7rem;
+  max-width: 7.7rem;
+  min-width: 0;
+  background: #ffffff;
+}
+
+.construction-billing-table--few-rigs .construction-billing-cell {
+  width: auto;
+  max-width: none;
+}
+
+.billing-panel .construction-billing-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.82rem;
+}
+
+.billing-panel .construction-billing-date-col,
+.billing-panel .construction-billing-date-cell {
+  width: 7.25rem;
+  min-width: 7.25rem;
+  max-width: 7.25rem;
+}
+
+.billing-panel .construction-billing-cell {
+  width: auto;
+  max-width: none;
+  padding: 0.42rem;
+}
+
+.billing-panel .construction-billing-status-grid {
+  grid-template-columns: repeat(5, minmax(3.6rem, 1fr));
+  gap: 0.24rem;
+}
+
+.billing-panel .construction-billing-status-btn,
+.billing-panel .construction-billing-substatus-btn {
+  min-height: 1.9rem;
+  padding: 0.35rem 0.3rem;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  line-height: 1.15;
+}
+
+.billing-panel .construction-billing-substatus {
+  gap: 0.24rem;
+  margin-top: 0.22rem;
+  padding-top: 0.22rem;
+}
+
+.billing-panel .construction-billing-extra {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  align-items: center;
+}
+
+.billing-panel .construction-billing-detail-input,
+.billing-panel .construction-billing-wait-input {
+  min-height: 2.05rem;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.billing-panel .construction-billing-detail-input {
+  margin-top: 0.35rem;
+}
+
+.construction-billing-cell--normal {
+  background: #f0fdf4 !important;
+}
+
+.construction-billing-cell--holiday,
+.construction-billing-cell--public_holiday {
+  background: #fff1f2 !important;
+}
+
+.construction-billing-cell--rain_all,
+.construction-billing-cell--rain_am,
+.construction-billing-cell--rain_pm {
+  background: #eff6ff !important;
+}
+
+.construction-billing-cell--off_am,
+.construction-billing-cell--off_pm {
+  background: #f8fafc !important;
+}
+
+.construction-billing-cell--standby {
+  background: #fffbeb !important;
+}
+
+.construction-billing-cell--breakdown {
+  background: #fef2f2 !important;
+}
+
+.construction-billing-detail-input,
+.construction-billing-wait-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 1.75rem;
+}
+
+.construction-billing-status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.12rem;
+}
+
+.construction-billing-status-btn,
+.construction-billing-substatus-btn {
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 0.2rem 0.08rem;
+  background: rgba(255, 255, 255, 0.88);
+  color: #334155;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.construction-billing-status-btn:hover,
+.construction-billing-substatus-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.construction-billing-status-btn.is-active,
+.construction-billing-substatus-btn.is-active {
+  border-color: #1d4ed8;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.construction-billing-substatus {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.12rem;
+  margin-top: 0.12rem;
+  padding-top: 0.12rem;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.construction-billing-extra {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.2rem;
+  align-items: start;
+  margin-top: 0.25rem;
+}
+
+.construction-billing-detail-input {
+  margin-top: 0.2rem;
+  padding: 0.26rem 0.35rem;
+  font-size: 0.68rem;
+}
+
+.construction-billing-fault-check {
+  display: inline-flex;
+  gap: 0.18rem;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: #7c2d12;
+}
+
+.construction-billing-wait-input {
+  padding: 0.26rem 0.35rem;
+  font-size: 0.68rem;
+}
+
+.construction-billing-extra.hidden {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .construction-billing-table-wrap {
+    max-height: calc(100vh - 10.5rem);
+  }
+
+  .construction-billing-toolbar {
+    align-items: stretch;
+  }
+
+  .construction-billing-range-controls label,
+  .construction-billing-range-controls button {
+    flex: 1 1 9rem;
+  }
+}
+
+/* 자재관리(전용 패널 + 마운트) */
+.materials-app-mount {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.materials-open-loading,
+.materials-open-error {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.materials-open-error {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.materials-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.materials-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
+  gap: 1rem 1.25rem;
+  align-items: start;
+}
+
+.materials-grid__main,
+.materials-grid__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.materials-grid__aside {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 7.5rem);
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+@media (max-width: 1180px) {
+  .materials-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .materials-grid__aside {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+.materials-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.materials-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+}
+
+.materials-filter-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 2.25rem;
+}
+
+.materials-filter-label {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+/* save-work-select 기본 width:100% 때문에 label 안에서 줄바꿈됨 → 자재 툴바만 좁게 */
+.materials-toolbar .materials-filter-item .save-work-select,
+.materials-toolbar .materials-filter-item .save-work-input {
+  width: auto;
+  min-width: 0;
+  max-width: 11rem;
+  flex: 0 1 auto;
+}
+
+.materials-toolbar .materials-filter-item #materials-filter-mode {
+  min-width: 5.5rem;
+  max-width: 8rem;
+}
+
+.materials-toolbar .materials-filter-item input[type="month"] {
+  min-width: 9.5rem;
+  max-width: 11rem;
+}
+
+.materials-range-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.materials-range-wrap .materials-filter-label {
+  margin-right: 0.1rem;
+}
+
+.materials-range-tilde {
+  color: #64748b;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0 0.1rem;
+  user-select: none;
+}
+
+.materials-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.materials-save-hint {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.materials-details {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.38rem 0.55rem 0.52rem;
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef5 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.materials-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #0f172a;
+  padding: 0.08rem 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.materials-details[open] {
+  border-color: #94a3b8;
+  background: linear-gradient(180deg, #eef2f7 0%, #e2e8f0 100%);
+}
+
+.materials-settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.38rem;
+  min-width: 0;
+}
+
+.materials-settings-row2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0.45rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.materials-cardish {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.42rem 0.5rem;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.materials-table-shell--truck {
+  max-height: none;
+}
+
+.materials-details .materials-cardish--dataset {
+  margin-bottom: 0.15rem;
+}
+
+.materials-dataset-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.materials-dataset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.materials-dataset-row .save-work-select {
+  flex: 1 1 10rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.materials-dataset-apply-btn {
+  flex: 0 0 auto;
+  font-size: 0.76rem !important;
+  padding: 0.32rem 0.75rem !important;
+  min-height: 34px !important;
+}
+
+.materials-dataset-actions {
+  margin-top: 0.35rem;
+}
+
+.materials-dataset-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.materials-details .materials-cement-fields {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.4rem 0.75rem;
+}
+
+.materials-field-label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.22rem;
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.materials-details .materials-cardish--cement .materials-field-label {
+  flex: 1 1 7.5rem;
+  max-width: 11rem;
+}
+
+.materials-field-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.materials-cardish .materials-field-control.save-work-select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.materials-cement-req-line {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+.materials-cement-req-line strong {
+  color: #0c4a6e;
+  font-weight: 800;
+}
+
+.materials-cement-pick-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: 0.45rem;
+  margin-top: 0.42rem;
+}
+
+.materials-cement-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.42rem 0.5rem;
+  border-radius: 10px;
+  border: 2px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.materials-cement-pick:hover {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.materials-cement-pick:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.materials-cement-pick--selected {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #eff6ff 0%, #e0f2fe 100%);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
+}
+
+.materials-cement-pick-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #1e3a5f;
+}
+
+.materials-cement-pick-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0c4a6e;
+}
+
+.materials-cement-pick-unit {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.materials-cement-pick-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #1d4ed8;
+  letter-spacing: -0.02em;
+}
+
+.materials-cement-pick-hint {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.materials-h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: #0f172a;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* 동별 계획·단본 이음: 접기/펼치기 */
+.materials-collapse {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.materials-collapse-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  padding: 0.1rem 0 0.5rem;
+  margin: 0;
+  user-select: none;
+  color: #0f172a;
+  border-radius: 6px;
+}
+
+.materials-collapse-summary:focus {
+  outline: none;
+}
+
+.materials-collapse-summary:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.materials-collapse-summary::-webkit-details-marker {
+  display: none;
+}
+
+.materials-collapse-summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid #475569;
+  border-bottom: 2px solid #475569;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+  margin-top: -0.05rem;
+}
+
+.materials-collapse[open] > .materials-collapse-summary::before {
+  transform: rotate(45deg);
+  margin-top: 0.12rem;
+}
+
+.materials-collapse-title {
+  font-size: 0.95rem;
+  line-height: 1.35;
+  font-weight: 800;
+  word-break: keep-all;
+}
+
+.materials-collapse-subhint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.45;
+  flex: 1 1 14rem;
+  min-width: min(100%, 12rem);
+  word-break: keep-all;
+}
+
+.materials-collapse-panel {
+  padding-top: 0.15rem;
+}
+
+.materials-collapse-panel > .materials-join-manager-wrap {
+  margin-top: 0;
+}
+
+.materials-h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.materials-details .materials-h4 {
+  margin: 0 0 0.28rem;
+  font-size: 0.8rem;
+}
+
+.materials-details .materials-cardish--suppliers .materials-h4 {
+  margin-bottom: 0.22rem;
+}
+
+.materials-details #materials-add-supplier {
+  margin-top: 0.28rem;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.materials-mini-table {
+  font-size: 0.78rem;
+}
+
+.materials-details .materials-mini-table {
+  font-size: 0.72rem;
+}
+
+.materials-details .materials-mini-table th,
+.materials-details .materials-mini-table td {
+  padding: 0.26rem 0.2rem;
+}
+
+.materials-wide-table {
+  font-size: 0.76rem;
+}
+
+.materials-receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+}
+
+.materials-receipt-table thead th {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.26rem 0.18rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.materials-receipt-table thead th.materials-rcpt-len-group {
+  white-space: normal;
+}
+
+.materials-receipt-table tbody td {
+  padding: 0.26rem 0.18rem;
+  vertical-align: middle;
+}
+
+.materials-receipt-table .materials-date-inp {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 7.4rem;
+  font-size: 0.72rem;
+  padding: 0.18rem 0.28rem;
+}
+
+.materials-receipt-table select.save-work-select {
+  box-sizing: border-box;
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  font-size: 0.72rem;
+  padding: 0.18rem 0.2rem;
+}
+
+.materials-receipt-table .materials-cell-inp {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 2.85rem;
+  padding: 0.16rem 0.2rem;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.materials-receipt-table .materials-am-pm-inp {
+  box-sizing: border-box;
+  width: 2.6rem;
+  max-width: 3rem;
+  min-width: 0;
+  padding: 0.16rem 0.15rem;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.materials-receipt-table .materials-th-del {
+  font-size: 0.65rem;
+  font-weight: 700;
+  max-width: 2.4rem;
+}
+
+.materials-receipt-table {
+  min-width: 1040px;
+}
+
+.materials-cell-inp {
+  min-width: 3rem;
+  max-width: 4.5rem;
+  padding: 0.2rem 0.35rem;
+}
+
+.materials-table-scroll,
+.materials-table-shell {
+  overflow: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.materials-table-shell--wide {
+  max-height: min(52vh, 520px);
+}
+
+/* 동별 계획 매트릭스: 행이 많을 때 세로로 더 쓰고 셀은 촘촘히 */
+.materials-table-shell--wide.materials-table-shell--matrix {
+  max-height: min(82vh, 960px);
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.materials-panel .materials-table-shell--matrix .materials-matrix {
+  width: 100%;
+  min-width: 0 !important;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+/* 동·합계는 col %, 길이 열은 col마다 동일 % — 폭은 JS에서 colgroup으로 지정 */
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:first-child,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody th:first-child,
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:last-child,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody td.materials-matrix-row-sum,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody tr.materials-total-row td.materials-matrix-grand-total {
+  position: static;
+  left: auto;
+  right: auto;
+  box-shadow: none;
+}
+
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody th,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody td {
+  overflow: hidden;
+}
+
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody th:first-child {
+  max-width: none;
+}
+
+.materials-table-shell--settings {
+  max-height: min(50vh, 460px);
+}
+
+.materials-details .materials-table-shell--settings {
+  max-height: min(34vh, 280px);
+}
+
+.materials-details .materials-table-shell--truck {
+  max-height: min(28vh, 220px);
+  overflow: auto;
+}
+
+.materials-panel .materials-table-shell--wide .construction-records-table,
+.materials-panel .materials-table-shell--settings .construction-records-table,
+.materials-panel .materials-table-shell--truck .construction-records-table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.materials-panel .materials-table-shell--matrix .construction-records-table.materials-matrix {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 우측 요약·파손·시멘트: 카드 폭에 맞춤(가로 드래그 최소화) */
+.materials-grid__aside .materials-table-shell {
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+.materials-grid__aside .materials-table-shell .construction-records-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  font-size: 0.72rem;
+}
+
+.materials-grid__aside .materials-damage-table,
+.materials-grid__aside .materials-cement-table {
+  min-width: 0;
+}
+
+/* 시멘트 벌크: 패널 폭 안에 맞춤 — 가로 스크롤 없이 요청·입고 열을 가능한 한 좁게 */
+.materials-grid__aside .materials-table-shell--cement-bulk {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(1),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(1),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(2),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(2) {
+  width: 14%;
+  min-width: 0;
+  max-width: 8.5rem;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(3),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(3),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) {
+  width: 10%;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(5) {
+  width: 38%;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-date-inp {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.18rem 0.22rem;
+  font-size: 0.7rem;
+}
+
+/* 파손·반출: 순번·삭제 열 축소, 일자·날짜 입력 확대, 삭제 버튼 가로 한 줄 */
+.materials-grid__aside .materials-damage-table th.materials-damage-th-idx,
+.materials-grid__aside .materials-damage-table td:nth-child(1) {
+  width: 1.65rem;
+  min-width: 1.65rem;
+  max-width: 2rem;
+  padding: 0.28rem 0.12rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.materials-grid__aside .materials-damage-table th.materials-damage-th-date,
+.materials-grid__aside .materials-damage-table td.materials-damage-td-date {
+  width: 9.75rem;
+  min-width: 9.25rem;
+  max-width: 11rem;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: nowrap;
+}
+
+.materials-grid__aside .materials-damage-table .materials-damage-date-inp {
+  box-sizing: border-box;
+  min-width: 9rem;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.22rem 0.35rem;
+  font-size: 0.78rem;
+}
+
+.materials-grid__aside .materials-damage-table th.materials-damage-th-del,
+.materials-grid__aside .materials-damage-table td.materials-damage-td-del,
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th.materials-cement-th-del,
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td.materials-cement-td-del {
+  width: 2.4rem;
+  min-width: 2.4rem;
+  max-width: 2.85rem;
+  padding: 0.22rem 0.12rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.materials-grid__aside .materials-damage-table th.materials-damage-th-del,
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th.materials-cement-th-del {
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #64748b;
+}
+
+.materials-grid__aside .materials-damage-table .materials-damage-del-btn,
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-cement-del-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  margin: 0 auto;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0.12rem 0.28rem;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+/* 우측: 업체별 입고(길이별 본수·총연장 m) */
+.materials-grid__aside .materials-table-shell--supplier-rcpt {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: min(42vh, 400px);
+  -webkit-overflow-scrolling: touch;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+  font-size: 0.7rem;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table th,
+.materials-grid__aside .materials-supplier-rcpt-table td {
+  padding: 0.26rem 0.2rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-name,
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 3px 0 6px rgba(15, 23, 42, 0.06);
+  text-align: left;
+  min-width: 5.5rem;
+  max-width: 10rem;
+  font-weight: 700;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table thead .materials-srcpt-th-name {
+  z-index: 3;
+  background: #eff6ff;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table thead .materials-srcpt-join-col {
+  background: linear-gradient(180deg, #f8fafc 0%, #e8edf4 100%);
+  font-weight: 800;
+  color: #334155;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.85rem;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-p,
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-m {
+  font-weight: 800;
+  color: #0c4a6e;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-join-col {
+  background: #f8fafc;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table tbody tr.materials-total-row th,
+.materials-grid__aside .materials-supplier-rcpt-table tbody tr.materials-total-row td {
+  background: #fff7ed;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table tbody tr.materials-total-row td.materials-srcpt-join-col {
+  background: #ffedd5;
+}
+
+.materials-grid__aside .materials-summary-table th,
+.materials-grid__aside .materials-summary-table td,
+.materials-grid__aside .materials-damage-table th,
+.materials-grid__aside .materials-damage-table td,
+.materials-grid__aside .materials-cement-table th,
+.materials-grid__aside .materials-cement-table td {
+  padding: 0.32rem 0.22rem;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.materials-grid__aside .materials-summary-table .materials-used-pdam {
+  font-size: 0.72rem;
+}
+
+.materials-grid__aside .save-work-input,
+.materials-grid__aside .save-work-select {
+  max-width: 100%;
+  box-sizing: border-box;
+  font-size: 0.7rem;
+  padding: 0.22rem 0.28rem;
+}
+
+.materials-suppliers-table th:nth-child(1),
+.materials-suppliers-table td:nth-child(1) {
+  min-width: 6.5rem;
+}
+
+.materials-suppliers-table th:nth-child(2),
+.materials-suppliers-table td:nth-child(2) {
+  min-width: 4.25rem;
+}
+
+.materials-suppliers-table th:nth-child(3),
+.materials-suppliers-table td:nth-child(3) {
+  min-width: 6rem;
+}
+
+.materials-suppliers-table th:nth-child(4),
+.materials-suppliers-table td:nth-child(4) {
+  min-width: 11rem;
+}
+
+.materials-suppliers-table th:nth-child(5),
+.materials-suppliers-table td:nth-child(5) {
+  min-width: 3rem;
+}
+
+.materials-suppliers-table th:nth-child(6),
+.materials-suppliers-table td:nth-child(6) {
+  min-width: 4.25rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(1),
+.materials-details .materials-suppliers-table td:nth-child(1) {
+  min-width: 5rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(2),
+.materials-details .materials-suppliers-table td:nth-child(2) {
+  min-width: 3.5rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(3),
+.materials-details .materials-suppliers-table td:nth-child(3) {
+  min-width: 4.75rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(4),
+.materials-details .materials-suppliers-table td:nth-child(4) {
+  min-width: 7.5rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(5),
+.materials-details .materials-suppliers-table td:nth-child(5) {
+  min-width: 2.6rem;
+}
+
+.materials-details .materials-suppliers-table th:nth-child(6),
+.materials-details .materials-suppliers-table td:nth-child(6) {
+  min-width: 3.5rem;
+}
+
+.materials-details .materials-suppliers-table .save-work-input {
+  padding: 0.16rem 0.22rem;
+  font-size: 0.7rem;
+}
+
+.materials-details .materials-truck-table .save-work-input {
+  padding: 0.14rem 0.2rem;
+  font-size: 0.7rem;
+}
+
+.materials-details .materials-field-control.save-work-select {
+  padding: 0.2rem 0.28rem;
+  font-size: 0.74rem;
+}
+
+.materials-grid__main .materials-damage-table,
+.materials-grid__main .materials-cement-table {
+  min-width: 520px;
+}
+
+.materials-matrix thead th,
+.materials-matrix tbody td {
+  white-space: nowrap;
+}
+
+.materials-matrix tbody th {
+  white-space: normal;
+  max-width: 4.25rem;
+  word-break: keep-all;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  text-align: left;
+  vertical-align: middle;
+  padding: 0.18rem 0.32rem;
+}
+
+.materials-matrix thead th {
+  font-size: 0.64rem;
+  padding: 0.16rem 0.1rem;
+}
+
+.materials-panel .materials-matrix tbody td {
+  padding: 0.1rem 0.06rem;
+  vertical-align: middle;
+}
+
+.materials-panel .materials-matrix .materials-cell-inp {
+  box-sizing: border-box;
+  min-width: 1.75rem;
+  width: 2.15rem;
+  max-width: 2.15rem;
+  padding: 0.08rem 0.1rem;
+  font-size: 0.66rem;
+  line-height: 1.15;
+  text-align: center;
+}
+
+/* 동별 계획: 고정 표 안에서 셀 폭에 맞춤 */
+.materials-panel .materials-table-shell--matrix .materials-matrix .materials-matrix-qty-inp {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.1rem 0.12rem;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.materials-panel .materials-matrix .materials-matrix-qty-inp {
+  min-width: 3.1rem;
+  width: 3.35rem;
+  max-width: 4.25rem;
+  padding: 0.12rem 0.22rem;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 동 열·합계 열 고정: 가로 스크롤 시 표 깨짐 완화 */
+.materials-panel .materials-matrix thead th:first-child,
+.materials-panel .materials-matrix tbody th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 3px 0 8px rgba(15, 23, 42, 0.06);
+}
+
+.materials-panel .materials-matrix tbody th:first-child {
+  top: auto;
+}
+
+.materials-panel .materials-matrix thead th:first-child {
+  z-index: 4;
+  top: 0;
+  background: #eff6ff;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row th:first-child {
+  z-index: 3;
+  top: auto;
+  background: #fff7ed;
+}
+
+.materials-panel .materials-matrix thead th:last-child,
+.materials-panel .materials-matrix tbody td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #fff;
+  box-shadow: -3px 0 8px rgba(15, 23, 42, 0.06);
+}
+
+.materials-panel .materials-matrix thead th:last-child {
+  z-index: 4;
+  background: #eff6ff;
+}
+
+/* 단본 이음 열 — 길이 열과 동일 폭 계열(표는 table-layout:fixed), 톤만 구분 */
+.materials-panel .materials-matrix thead th.materials-matrix-col--join {
+  background: linear-gradient(180deg, #f8fafc 0%, #e8edf4 100%);
+  color: #334155;
+  font-weight: 800;
+  border-left: 1px solid #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.materials-join-manager-wrap {
+  margin-top: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.materials-join-manager {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.materials-join-manager-desc {
+  margin: 0 0 0.45rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.materials-join-panel-table-shell {
+  max-width: 100%;
+}
+
+.materials-join-panel-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  font-size: 0.74rem;
+}
+
+.materials-join-panel-table thead th:nth-child(1),
+.materials-join-panel-table tbody th {
+  width: 32%;
+  min-width: 0;
+}
+
+.materials-join-panel-table thead th:nth-child(2),
+.materials-join-panel-table thead th:nth-child(3),
+.materials-join-panel-table tbody td:nth-child(2),
+.materials-join-panel-table tbody td:nth-child(3) {
+  width: 22%;
+  min-width: 0;
+}
+
+.materials-join-panel-table th,
+.materials-join-panel-table td {
+  padding: 0.28rem 0.35rem;
+}
+
+.materials-join-panel-th-del,
+.materials-join-panel-del-cell {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.materials-join-key-hint {
+  font-weight: 600;
+  color: #64748b;
+  font-size: 0.68rem;
+}
+
+.materials-join-panel-empty {
+  color: #64748b;
+  text-align: center;
+  padding: 0.5rem 0.35rem;
+}
+
+.materials-join-panel-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.materials-join-add-label {
+  font-weight: 700;
+  color: #334155;
+}
+
+.materials-join-add-inp {
+  width: 4rem;
+  max-width: 100%;
+}
+
+.materials-join-panel-seg {
+  width: 100%;
+  max-width: 5rem;
+  box-sizing: border-box;
+}
+
+.materials-join-panel-del {
+  min-width: 2rem;
+  padding: 0.08rem 0.28rem;
+  font-size: 0.95rem;
+  line-height: 1.1;
+}
+
+.materials-panel .materials-matrix thead th:not(.materials-matrix-col--join) + .materials-matrix-col--join {
+  border-left-width: 2px;
+  border-left-color: #818cf8;
+}
+
+.materials-panel .materials-matrix tbody tr:not(.materials-total-row) td.materials-matrix-td--selected {
+  background: rgba(37, 99, 235, 0.1);
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.45);
+}
+
+.materials-panel .materials-matrix tbody td.materials-matrix-col--join {
+  background: #f8fafc;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row td.materials-matrix-col--join {
+  background: #e2e8f0;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row td:last-child:not(.materials-matrix-grand-total) {
+  z-index: 3;
+  background: #fff7ed;
+}
+
+.materials-matrix {
+  min-width: min(780px, 100%);
+}
+
+.materials-panel .materials-matrix .materials-matrix-row-sum,
+.materials-panel .materials-matrix .materials-matrix-total-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.28rem;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row td.materials-matrix-total-cell {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row td.materials-matrix-total-cell.materials-matrix-col--join {
+  background: #ffedd5;
+  color: #7c2d12;
+}
+
+.materials-panel .materials-matrix tbody tr.materials-total-row td.materials-matrix-grand-total {
+  z-index: 3;
+  background: #fed7aa;
+  color: #431407;
+}
+
+.materials-summary-table {
+  min-width: 100%;
+}
+
+.materials-used-pdam {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0c4a6e;
+}
+
+.materials-pdam-orphan-inline {
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.materials-summary-table thead th {
+  font-size: 0.74rem;
+  padding: 0.35rem 0.28rem;
+  white-space: nowrap;
+}
+
+.materials-compact-thead th {
+  font-size: 0.74rem;
+  padding: 0.35rem 0.28rem;
+  white-space: nowrap;
+}
+
+.materials-building-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.materials-building-badge {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #0f172a;
+  background: #e0f2fe;
+  border: 1px solid #7dd3fc;
+  white-space: nowrap;
+}
+
+.materials-building-badge--muted {
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  white-space: normal;
+  max-width: 100%;
+}
+
+.materials-block {
+  border: 1px solid #dde6f0;
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+}
+
+.materials-block--wide {
+  padding: 0.85rem 1rem;
+}
+
+.materials-block--pdam .materials-pdam-blurb {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #0f172a;
+  word-break: keep-all;
+}
+
+.materials-block--pdam .materials-pdam-blurb strong {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.materials-block-intro-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+}
+
+.materials-total-row th,
+.materials-total-row td {
+  font-weight: 700;
+  background: #fff7ed;
+}
+
+/* 시멘트 벌크: 제목 아래 요약을 줄글 대신 카드형 키–값으로 */
+.materials-cement-bulk-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 0.65rem;
+}
+
+.materials-cement-bulk-strip {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem 0.55rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.materials-cement-bulk-strip--calc {
+  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fcd34d;
+}
+
+.materials-cement-bulk-strip-title {
+  margin: 0 0 0.38rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #475569;
+  line-height: 1.25;
+}
+
+.materials-cement-bulk-strip--calc .materials-cement-bulk-strip-title {
+  color: #92400e;
+}
+
+.materials-cement-bulk-kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.materials-cement-bulk-kv-row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 1fr) auto;
+  gap: 0.35rem 0.5rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #334155;
+}
+
+.materials-cement-bulk-kv-row dt {
+  margin: 0;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.materials-cement-bulk-kv-row dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.materials-cement-bulk-kv-row dd strong {
+  font-weight: 800;
+  color: #0c4a6e;
+}
+
+.materials-cement-bulk-kv-row--emph dt {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.materials-cement-bulk-kv-row--emph dd strong {
+  font-size: 0.92em;
+}
+
+.materials-cement-bulk-mode {
+  display: inline-block;
+  margin-right: 0.15rem;
+  font-size: 0.72em;
+  font-weight: 700;
+  color: #64748b;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.materials-cement-bulk-foot {
+  margin: 0.45rem 0 0;
+  padding-top: 0.4rem;
+  border-top: 1px dashed #cbd5e1;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.materials-cement-bulk-strip--calc .materials-cement-bulk-foot {
+  border-top-color: #fde68a;
+  color: #92400e;
+}
+
+.materials-cement-remain--warn {
+  color: #b91c1c !important;
+}
+
+.materials-cement-summary-strip {
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.55rem 0.5rem;
+  border-radius: 10px;
+  background: #fffbeb;
+  border: 1px solid #fb923c;
+  color: #0f172a;
+}
+
+.materials-cement-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.materials-cement-summary-table th,
+.materials-cement-summary-table td {
+  padding: 0.28rem 0.15rem;
+  vertical-align: baseline;
+  border-bottom: 1px solid #fed7aa;
+}
+
+.materials-cement-summary-table tr:last-child th,
+.materials-cement-summary-table tr:last-child td {
+  border-bottom: none;
+}
+
+.materials-cement-summary-table th {
+  text-align: left;
+  font-weight: 700;
+  color: #475569;
+  width: 48%;
+  padding-right: 0.45rem;
+}
+
+.materials-cement-summary-table td {
+  text-align: right;
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.materials-cement-summary-sub {
+  font-weight: 600;
+  font-size: 0.78em;
+  color: #64748b;
+}
+
+.materials-cement-summary-unit {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.82em;
+}
+
+.materials-cement-summary-num {
+  color: #0369a1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.materials-cement-summary-row--em th {
+  color: #9a3412;
+  font-weight: 800;
+}
+
+.materials-cement-summary-row--em .materials-cement-summary-num {
+  color: #c2410c;
+}
+
+.materials-em {
+  color: #9a3412;
+  font-weight: 800;
+}
+
+.materials-pre {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #0f172a;
+  white-space: pre-wrap;
+}
+
+/* 상차 힌트: 길이별 블록 + 표 */
+.materials-truck-hint-root {
+  margin: 0;
+}
+
+.materials-truck-hint-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.materials-truck-hint-block {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem 0.5rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.materials-truck-hint-len {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0c4a6e;
+}
+
+.materials-truck-hint-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.materials-truck-hint-table th,
+.materials-truck-hint-table td {
+  padding: 0.26rem 0.12rem;
+  vertical-align: top;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.materials-truck-hint-table tr:last-child th,
+.materials-truck-hint-table tr:last-child td {
+  border-bottom: none;
+}
+
+.materials-truck-hint-table th {
+  text-align: left;
+  font-weight: 700;
+  color: #64748b;
+  width: 42%;
+  padding-right: 0.4rem;
+  white-space: nowrap;
+}
+
+.materials-truck-hint-table td {
+  text-align: left;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: keep-all;
+}
+
+.materials-truck-hint-table td strong {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0369a1;
+}
+
+.materials-truck-hint-row--unord th {
+  color: #9a3412;
+  font-weight: 800;
+}
+
+.materials-truck-hint-row--unord td {
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.materials-truck-hint-warn {
+  color: #b45309 !important;
+  font-weight: 700;
+}
+
+.materials-truck-hint-empty {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #64748b;
+  font-weight: 600;
+  background: #f1f5f9;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+}
+
+.materials-app-mount .hidden {
+  display: none !important;
+}
+
 .construction-drawer-body .construction-placeholder-hint,
 .dashboard-main .construction-placeholder-hint {
   font-size: 0.9rem;
   line-height: 1.45;
   margin: 0.35rem 0 0;
   color: #64748b;
+}
+
+/* 자재 전용 패널: 헤더 부제·본문 힌트는 슬레이트 500보다 진하게 */
+.materials-panel .dashboard-header .dashboard-subtitle {
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.materials-app-mount .construction-placeholder-hint,
+.materials-app-mount .materials-block-intro-hint {
+  color: #334155;
 }
 
 /* 대시보드 — 버전 비교와 동일한 전면 오버레이 + 중앙 카드 */
@@ -1672,6 +3666,59 @@ body {
 .dashboard-panel.open {
   display: flex;
   flex-direction: column;
+}
+
+/* 자재관리 전용 창: 대시보드와 동일 오버레이·카드 토큰 재사용 */
+.materials-panel.dashboard-panel {
+  z-index: 1005;
+  padding: 0.35rem 0.45rem;
+  align-items: stretch;
+}
+
+/* 오버레이가 세로 flex일 때 카드가 늘어나지 않으면 본문(dashboard-body)의 flex:1이
+   가용 높이 0으로 잡혀 안쪽이 비어 보일 수 있음 — 자재·정산 전용 */
+.dashboard-panel.open.materials-panel > .dashboard-card.materials-panel-card {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.materials-panel .materials-panel-card {
+  max-width: min(1960px, calc(100vw - 6px));
+  width: 100%;
+  margin: 0 auto;
+  max-height: calc(100vh - 6px);
+}
+
+.materials-panel .materials-panel-body {
+  padding: 0.55rem 0.65rem 1rem;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  color: #0f172a;
+}
+
+.materials-panel .header-construction-btn {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 0.55rem 1rem;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.28);
+}
+
+.materials-panel .header-construction-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1e40af;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(29, 78, 216, 0.35);
+}
+
+.materials-panel .header-construction-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .dashboard-card {

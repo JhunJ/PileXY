@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -26,6 +27,8 @@ CONSTRUCTION_WORKBOOK_DIR = os.path.join(CONSTRUCTION_DIR, "workbooks")
 CONSTRUCTION_DB_PATH = os.path.join(CONSTRUCTION_DIR, "construction_reports.sqlite3")
 SAVED_WORKS_DIR = os.path.join(PROJECT_ROOT, "data", "saved_works")
 
+logger = logging.getLogger(__name__)
+
 HEADER_ALIASES: Dict[str, Sequence[str]] = {
     "sequence_no": ("번호",),
     "construction_date": ("시공일", "시공일자", "시공날짜"),
@@ -44,8 +47,34 @@ HEADER_ALIASES: Dict[str, Sequence[str]] = {
         "기초 번호",
     ),
     "pile_diameter": ("파일규격", "파일규격d", "파일규격(d)", "직경"),
-    "pile_classification_single": ("파일구분단본", "파일구분 단본", "단본"),
-    "pile_classification_total": ("파일구분합계", "파일구분 합계", "합계"),
+    "pile_classification_single": (
+        "파일구분단본",
+        "파일구분 단본",
+        "단본",
+        "파일길이",
+        "파일길이m",
+        "파일길이(m)",
+        "말뚝길이",
+        "말뚝길이m",
+        "말뚝길이(m)",
+        "본장",
+        "본장m",
+        "본장(m)",
+    ),
+    "pile_classification_total": (
+        "파일구분합계",
+        "파일구분 합계",
+        "합계",
+        "파일길이",
+        "파일길이m",
+        "파일길이(m)",
+        "말뚝길이",
+        "말뚝길이m",
+        "말뚝길이(m)",
+        "본장",
+        "본장m",
+        "본장(m)",
+    ),
     "boring_depth": ("천공깊이", "천공깊이m", "천공깊이(m)"),
     "penetration_depth": ("관입깊이", "관입깊이m", "관입깊이(m)"),
     "pile_remaining": ("파일잔량", "파일잔량m", "파일잔량(m)", "잔량"),
@@ -377,7 +406,10 @@ def _header_match_score(headers: Sequence[str]) -> Tuple[int, Dict[str, str]]:
     mapping = _resolve_field_mapping(headers)
     required = sum(1 for key in REQUIRED_IMPORT_FIELDS if mapping.get(key))
     optional = sum(1 for key in OPTIONAL_IMPORT_FIELDS if mapping.get(key))
-    return required * 100 + optional * 10, mapping
+    pile_cls = sum(1 for key in ("pile_classification_single", "pile_classification_total") if mapping.get(key))
+    # PDAM 등 2행 헤더에서 '현장명 …' 제목 행만 잡힌 후보는 점수가 같아도 파일구분(단본·합계)이 빠지는 경우가 많음 → 가산
+    score = required * 100 + optional * 10 + pile_cls * 25
+    return score, mapping
 
 
 def _reject_bad_pdam_header_mapping(mapping: Dict[str, str]) -> bool:
@@ -389,6 +421,15 @@ def _reject_bad_pdam_header_mapping(mapping: Dict[str, str]) -> bool:
     if pn:
         raw = _cell_text(pn)
         if "파일번호" in raw and " -" in raw:
+            return True
+        # 제목 행(현장명 : …)이 열 헤더로 밀려 들어간 잘못된 매핑 — 실제 데이터 행보다 위를 잡은 경우
+        if "현장명" in raw and len(raw) > 30:
+            return True
+    if cd and "현장명" in _cell_text(cd) and len(_cell_text(cd)) > 25:
+        return True
+    for key in ("location", "equipment", "pile_type", "construction_method"):
+        h = mapping.get(key)
+        if h and "현장명" in _cell_text(h) and len(_cell_text(h)) > 35:
             return True
     return False
 
@@ -604,6 +645,10 @@ def parse_construction_workbook(file_bytes: bytes, *, filename: Optional[str] = 
                 "total_penetration": _parse_float(row.get(mapping["total_penetration"])) if mapping.get("total_penetration") else None,
                 "notes": _normalize_text_value(row.get(mapping["notes"])) if mapping.get("notes") else None,
             }
+            if record.get("pile_classification_single") is None and record.get("pile_classification_total") is not None:
+                record["pile_classification_single"] = record["pile_classification_total"]
+            elif record.get("pile_classification_total") is None and record.get("pile_classification_single") is not None:
+                record["pile_classification_total"] = record["pile_classification_single"]
             record["installed"] = _record_installed(record)
             parsed_records.append(record)
 
@@ -958,6 +1003,96 @@ def _list_records(dataset_id: str) -> List[Dict[str, Any]]:
         ]
     finally:
         conn.close()
+
+
+def _get_dataset_workbook_path(dataset_id: str) -> Optional[str]:
+    """import 시 저장된 원본 엑셀 경로. 없거나 파일이 삭제됐으면 None."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT file_path FROM construction_datasets WHERE id = ?",
+            (dataset_id,),
+        ).fetchone()
+        if not row or not row["file_path"]:
+            return None
+        path = str(row["file_path"]).strip()
+        return path if path and os.path.isfile(path) else None
+    finally:
+        conn.close()
+
+
+def _merge_pile_classification_from_workbook_bytes(
+    records: Sequence[Dict[str, Any]],
+    file_bytes: bytes,
+    *,
+    filename: Optional[str] = None,
+) -> None:
+    """DB를 바꾸지 않고, 엑셀을 현재 `parse_construction_workbook` 규칙으로 다시 읽어
+    `pile_classification_*`가 비어 있는 행만 메모리에서 채운다."""
+    try:
+        parsed = parse_construction_workbook(file_bytes, filename=filename)
+    except Exception:
+        logger.exception("workbook reparsing failed for runtime pile classification merge")
+        return
+    by_key: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+    for pr in parsed.get("records") or []:
+        sheet = str(pr.get("sheet_name") or "")
+        try:
+            rn = int(pr.get("row_number") or 0)
+        except (TypeError, ValueError):
+            rn = 0
+        pn = _normalize_pile_number(pr.get("pile_number"))
+        by_key[(sheet, rn, pn)] = pr
+
+    for r in records:
+        if r.get("pile_classification_single") is not None or r.get("pile_classification_total") is not None:
+            continue
+        sheet = str(r.get("sheet_name") or "")
+        try:
+            rn = int(r.get("row_number") or 0)
+        except (TypeError, ValueError):
+            rn = 0
+        pn = _normalize_pile_number(r.get("pile_number"))
+        pr = by_key.get((sheet, rn, pn))
+        if not pr:
+            continue
+        s = pr.get("pile_classification_single")
+        t = pr.get("pile_classification_total")
+        if s is None and t is None:
+            continue
+        r["pile_classification_single"] = s
+        r["pile_classification_total"] = t
+        if r.get("pile_classification_single") is None and r.get("pile_classification_total") is not None:
+            r["pile_classification_single"] = r["pile_classification_total"]
+        elif r.get("pile_classification_total") is None and r.get("pile_classification_single") is not None:
+            r["pile_classification_total"] = r["pile_classification_single"]
+
+
+def _merge_pile_classification_from_saved_workbook(
+    dataset_id: str,
+    records: Sequence[Dict[str, Any]],
+    *,
+    filename_hint: Optional[str] = None,
+) -> None:
+    if not any(
+        r.get("pile_classification_single") is None and r.get("pile_classification_total") is None
+        for r in records
+    ):
+        return
+    path = _get_dataset_workbook_path(dataset_id)
+    if not path:
+        return
+    try:
+        with open(path, "rb") as wb:
+            data = wb.read()
+    except OSError:
+        logger.exception("cannot read workbook for dataset %s", dataset_id)
+        return
+    _merge_pile_classification_from_workbook_bytes(
+        records,
+        data,
+        filename=filename_hint or os.path.basename(path),
+    )
 
 
 def _apply_filters(
@@ -2444,6 +2579,9 @@ def _mapping_overlay_payload(
         "matchedRecordPileNumber": matched_record.get("pile_number") if matched_record else None,
         "matchedRecordDisplayPileNumber": _display_pile_number(matched_record.get("pile_number"), location=matched_record.get("location")) if matched_record else None,
         "pileRemaining": matched_record.get("pile_remaining") if matched_record else None,
+        "pileClassificationSingle": matched_record.get("pile_classification_single") if matched_record else None,
+        "pileClassificationTotal": matched_record.get("pile_classification_total") if matched_record else None,
+        "pileDiameter": matched_record.get("pile_diameter") if matched_record else None,
         "penetrationDepth": matched_record.get("penetration_depth") if matched_record else None,
         "boringDepth": matched_record.get("boring_depth") if matched_record else None,
         "excavationDepth": matched_record.get("excavation_depth") if matched_record else None,
@@ -3159,6 +3297,62 @@ def _build_settlement_summary(
     }
 
 
+def _material_length_key_from_record(record: Dict[str, Any]) -> Optional[str]:
+    """자재 길이별 요약 키(5~15 또는 J16~J25). 프론트 materialLengthKeyFromRow와 동일 규칙."""
+
+    def _to_float(val: Any) -> Optional[float]:
+        if val is None:
+            return None
+        try:
+            x = float(val)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(x):
+            return None
+        return x
+
+    single = _to_float(record.get("pile_classification_single"))
+    if single is not None:
+        s = int(round(single))
+        if 5 <= s <= 15:
+            return str(s)
+    total = _to_float(record.get("pile_classification_total"))
+    if total is not None:
+        t = int(round(total))
+        if 16 <= t <= 25:
+            return f"J{t}"
+        if 5 <= t <= 15:
+            return str(t)
+    return None
+
+
+def _materials_pdam_context_from_latest_records(
+    latest_records: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """도면 원 매칭과 무관하게, PDAM 최신 행 기준 시공 완료 본수·길이·위치 집계(자재 패널용)."""
+    by_loc: Dict[str, int] = {}
+    used_by_length: Dict[str, int] = {}
+    total_installed = 0
+    used_installed_without_length = 0
+    for record in latest_records:
+        if not record.get("installed"):
+            continue
+        total_installed += 1
+        loc = _normalize_location(record.get("location"))
+        by_loc[loc] = by_loc.get(loc, 0) + 1
+        len_key = _material_length_key_from_record(record)
+        if len_key:
+            used_by_length[len_key] = used_by_length.get(len_key, 0) + 1
+        else:
+            used_installed_without_length += 1
+    return {
+        "usedByLength": used_by_length,
+        "totalInstalled": total_installed,
+        "usedInstalledWithoutLength": used_installed_without_length,
+        "installedByLocation": by_loc,
+    }
+
+
 def build_dashboard(
     dataset_id: str,
     *,
@@ -3190,6 +3384,11 @@ def build_dashboard(
         raise ValueError("시공기록 데이터셋을 찾지 못했습니다.")
 
     all_records = [_normalize_dashboard_record(record) for record in _list_records(dataset_id)]
+    _merge_pile_classification_from_saved_workbook(
+        dataset_id,
+        all_records,
+        filename_hint=(str(dataset.get("filename") or "").strip() or None),
+    )
     filter_options = _build_filter_options(all_records)
     resolved_date_from = date_from or filter_options["dateBounds"]["min"]
     resolved_date_to = date_to or filter_options["dateBounds"]["max"]
@@ -3345,6 +3544,7 @@ def build_dashboard(
             "methodMatrix": _build_method_matrix(filtered_records),
         },
         "records": records_for_grid,
+        "materialsPdamContext": _materials_pdam_context_from_latest_records(latest_records),
         "mapping": mapping,
         "diagnostics": _build_mapping_diagnostics(
             circles,

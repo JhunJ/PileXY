@@ -82,6 +82,31 @@ def test_parse_construction_workbook_skips_rows_that_echo_column_headers():
     assert parsed["summary"]["recordCount"] == 2
 
 
+def _sample_workbook_single_length_column_bytes() -> bytes:
+    """단본/합계 2행 대신 '파일길이' 한 열만 있는 PDAM 유사 형식(헤더 2행 — 레이아웃 검출과 동일)."""
+    rows = [
+        ["번호", "시공일", "시공장비", "파일종류", "시공공법", "시공위치", "파일번호", "파일길이(m)", "천공깊이(M)", "관입깊이(M)", "파일잔량(M)", "공삭공(M)"],
+        ["", "", "", "", "", "", "", "", "", "", "", ""],
+        [1, "2025-09-19", "1호기", "PHC", "T4", "영통 101동", 88, 12, 3.7, 4.2, 0.8, 0],
+    ]
+    dataframe = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        dataframe.to_excel(writer, sheet_name="기록지", header=False, index=False)
+    return buffer.getvalue()
+
+
+def test_parse_construction_workbook_maps_single_file_length_column():
+    parsed = construction_reports.parse_construction_workbook(
+        _sample_workbook_single_length_column_bytes(),
+        filename="yeongtong_like.xlsx",
+    )
+    assert parsed["summary"]["recordCount"] == 1
+    first = parsed["records"][0]
+    assert first["pile_classification_single"] == 12.0
+    assert first["pile_classification_total"] == 12.0
+
+
 def test_parse_construction_workbook_extracts_rows():
     parsed = construction_reports.parse_construction_workbook(
         _sample_workbook_bytes(),
@@ -103,6 +128,20 @@ def test_parse_construction_workbook_extracts_rows():
     assert first["pile_classification_total"] == 5.0
     assert first["penetration_depth"] == 4.2
     assert first["pile_remaining"] == 0.8
+
+
+def test_merge_pile_classification_from_workbook_bytes_fills_null_without_db_write():
+    """과거 import로 DB에 단본·합계가 비어 있던 것처럼 보일 때, 저장 엑셀 재파싱으로 메모리만 보강."""
+    wb = _sample_workbook_bytes()
+    parsed = construction_reports.parse_construction_workbook(wb, filename="sample.xlsx")
+    first = parsed["records"][0]
+    stale = dict(first)
+    stale["pile_classification_single"] = None
+    stale["pile_classification_total"] = None
+    rows = [stale]
+    construction_reports._merge_pile_classification_from_workbook_bytes(rows, wb, filename="sample.xlsx")
+    assert rows[0]["pile_classification_single"] == 5.0
+    assert rows[0]["pile_classification_total"] == 5.0
 
 
 def test_import_and_dashboard_match_circles(tmp_path, monkeypatch):

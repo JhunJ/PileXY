@@ -2161,23 +2161,6 @@ function bindEvents() {
     });
   }
 
-  const brdsPresetBtns = document.querySelectorAll("button[data-brds-preset]");
-  brdsPresetBtns.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.getAttribute("data-brds-preset");
-      const ta = document.getElementById("header-brds-extra-question");
-      const text = BRDS_PRESET_QUESTIONS[key];
-      if (ta && text) {
-        const cur = (ta.value || "").trim();
-        ta.value = cur ? `${cur}\n\n${text}` : text;
-      }
-    });
-  });
-  const brdsSubmitBtn = document.getElementById("header-brds-submit-btn");
-  if (brdsSubmitBtn) {
-    brdsSubmitBtn.addEventListener("click", () => void submitBrdsPrugioQuestion());
-  }
-
   if (saveProjectBtn) {
     saveProjectBtn.addEventListener("click", handleSaveProject);
   }
@@ -11527,8 +11510,9 @@ async function handleLoadWork(id, loadBtn) {
     populateBuildingSelect();
     renderPendingNameEditor();
     renderMatchCorrectionsPanel();
-    await refetchLoadWorkCache();
-    syncManualHistoryReuseControlsFromState();
+    void refetchLoadWorkCache().then(() => {
+      syncManualHistoryReuseControlsFromState();
+    });
     updateCanvasSearchAvailability();
     syncMeissaCompareBtnEnabled();
     fitViewToData();

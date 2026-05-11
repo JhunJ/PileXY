@@ -25,8 +25,6 @@
       <button type="button" class="construction-tab is-active" data-tab="status">시공현황</button>
       <button type="button" class="construction-tab" data-tab="settlement">기성정리</button>
       <button type="button" class="construction-tab" data-tab="parcel-review">필지 검토</button>
-      <button type="button" class="construction-tab" data-tab="materials-mgmt">자재관리</button>
-      <button type="button" class="construction-tab" data-tab="billing-mgmt">정산관리</button>
     </div>
     <div class="construction-drawer-body">
       <section class="construction-section construction-tab-panel" data-panel="settings">
@@ -564,24 +562,47 @@
           <pre id="construction-parcel-json" class="construction-manual-debug-pre construction-parcel-json-pre" spellcheck="false">(실행 전)</pre>
         </details>
       </section>
-      <section class="construction-section construction-tab-panel" data-panel="materials-mgmt">
-        <div class="construction-section-title">
-          <span>자재관리</span>
-          <small>입고·출고·현장 재고 등 자재 흐름을 한곳에서 다룰 예정입니다.</small>
-        </div>
-        <p class="construction-placeholder-hint">화면 구성은 준비 중입니다. 상단 <strong>자재</strong> 버튼과 이 탭이 서로 같은 자재관리 영역으로 연결됩니다.</p>
-      </section>
       <section class="construction-section construction-tab-panel" data-panel="billing-mgmt">
         <div class="construction-section-title">
           <span>정산관리</span>
-          <small>기성정리와 별도로 대금·정산 단위를 정리하는 화면을 둘 예정입니다.</small>
+          <small>항타기 호기별 휴무·대기·고장·우천 등 운용 현황을 날짜별로 기록합니다.</small>
         </div>
-        <p class="construction-placeholder-hint">화면 구성은 준비 중입니다.</p>
+        <div class="construction-billing-toolbar">
+          <div class="construction-billing-month-actions">
+            <strong id="construction-billing-current-month" class="construction-billing-current-month">-</strong>
+            <button type="button" id="construction-billing-prev-month" class="ghost">이전 달</button>
+            <button type="button" id="construction-billing-this-month" class="ghost">현재월</button>
+            <button type="button" id="construction-billing-next-month" class="ghost">다음 달</button>
+          </div>
+          <div class="construction-billing-range-controls">
+            <label>시작일<input type="date" id="construction-billing-start-date" class="save-work-input" /></label>
+            <label>종료일<input type="date" id="construction-billing-end-date" class="save-work-input" /></label>
+            <label>호기 수<input type="number" id="construction-billing-rig-count" class="save-work-input" min="1" max="12" value="3" /></label>
+            <button type="button" id="construction-billing-apply-range" class="header-construction-btn">기간 적용</button>
+            <button type="button" id="construction-billing-xlsx-btn" class="header-construction-btn construction-billing-xlsx-btn">엑셀 다운로드</button>
+          </div>
+        </div>
+        <p class="construction-billing-help">
+          일요일과 주요 고정 공휴일은 자동으로 배경색이 표시됩니다. 상태 버튼을 누르고, 필요하면 각 칸의 메모에 자유롭게 내용을 적으세요.
+        </p>
+        <p id="construction-billing-feedback" class="construction-billing-feedback" aria-live="polite"></p>
+        <div class="construction-billing-table-wrap">
+          <table class="construction-billing-table" aria-label="항타기 호기별 운용 현황">
+            <thead>
+              <tr id="construction-billing-head-row">
+                <th class="construction-billing-date-col">날짜</th>
+              </tr>
+            </thead>
+            <tbody id="construction-billing-body">
+              <tr><td colspan="4" class="empty-row">운용 현황표를 준비하는 중입니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
       <section class="construction-section construction-tab-panel" data-panel="manual">
         <div class="construction-section-title">
           <span>매뉴얼</span>
-          <small>기초골조 두께처럼 시공 탭과 분리된 화면입니다. 아이디·비밀번호만 입력한 뒤 「한 번에 가져오기」로 본문과 기본 질문 답을 순서대로 받습니다.</small>
+          <small>기초골조 두께처럼 시공 탭과 분리된 화면입니다. 아이디·비밀번호로 로그인한 뒤 아래 iframe 에서 BRDS 매뉴얼을 사용합니다.</small>
         </div>
         <div class="construction-sync-grid">
           <label>아이디<input type="text" id="header-brds-user-id" class="save-work-input" placeholder="아이디" autocomplete="username" maxlength="200" /></label>
@@ -591,22 +612,6 @@
           <button type="button" id="construction-manual-login-btn" class="header-construction-btn">로그인</button>
           <p id="header-brds-login-feedback" class="construction-login-feedback" aria-live="polite"></p>
         </div>
-        <div class="construction-section-title construction-section-title--compact">
-          <span>자주 쓰는 질문</span>
-        </div>
-        <div class="construction-brds-preset-row" role="group" aria-label="질문 프리셋">
-          <button type="button" class="ghost construction-brds-preset-btn" data-brds-preset="1">① 오시공 보강·절차</button>
-          <button type="button" class="ghost construction-brds-preset-btn" data-brds-preset="2">② 항타 이격·오시공 정의</button>
-        </div>
-        <label class="construction-brds-block-label">추가 질문
-          <textarea id="header-brds-extra-question" class="save-work-input construction-brds-textarea" rows="3" placeholder="추가 질문을 입력하세요..."></textarea>
-        </label>
-        <div class="construction-sync-actions">
-          <button type="button" id="construction-brds-fetch-manual-btn" class="header-construction-btn">한 번에 가져오기</button>
-          <button type="button" id="header-brds-submit-btn" class="header-construction-btn">질문 보내기</button>
-          <a class="ghost construction-brds-external-link" href="https://baronet.daewooenc.com/login.do" target="_blank" rel="noopener noreferrer">웹에서 열기</a>
-        </div>
-        <div id="header-brds-status" class="construction-sync-status" aria-live="polite"></div>
         <div class="construction-section-title construction-section-title--compact">
           <span>웹 매뉴얼 (BRDS)</span>
           <small>「로그인」은 서버에서 Playwright 로 사내 BRDS 에 로그인한 뒤, <strong>역프록시(동일 출처)</strong>로 iframe 을 엽니다. 프론트와 API 가 같은 호스트일 때 쿠키가 가장 잘 붙습니다. 실패 시 바로넷 폼 자동 제출·직접 로그인 화면으로 이어집니다.</small>
@@ -627,16 +632,6 @@
             <button type="button" id="construction-brds-btn-iframe-manual" class="ghost construction-brds-embed-nav-btn" title="아래 iframe에 푸르지오 매뉴얼 주소를 다시 불러옵니다">매뉴얼 iframe</button>
           </div>
         </div>
-        <div class="construction-section-title construction-section-title--compact">
-          <span>가져온 내용</span>
-          <small>매뉴얼 본문·기본 질문 답·「질문 보내기」 결과가 모두 이 한 칸에 이어집니다.</small>
-        </div>
-        <textarea id="header-brds-manual-content" class="save-work-input construction-brds-textarea construction-brds-textarea--tall" rows="14" placeholder="한 번에 가져오기 또는 질문 보내기 결과" spellcheck="false"></textarea>
-        <details id="header-brds-debug-details" class="construction-manual-debug-details">
-          <summary>서버 단계 로그 (디버그)</summary>
-          <label class="construction-manual-debug-toggle"><input type="checkbox" id="header-brds-debug-steps" checked /> 요청 시 단계 수집 (debugTrace)</label>
-          <pre id="header-brds-debug-trace" class="construction-manual-debug-pre" spellcheck="false">(아직 요청 없음)</pre>
-        </details>
       </section>
     </div>
   `;
@@ -657,6 +652,11 @@
   const dashboardPanelTitle = document.getElementById("dashboard-panel-title");
   const dashboardPanelSubtitle = document.getElementById("dashboard-panel-subtitle");
   const dashboardPanelClose = document.getElementById("dashboard-panel-close");
+  const materialsPanel = document.getElementById("materials-panel");
+  const materialsPanelClose = document.getElementById("materials-panel-close");
+  const billingPanel = document.getElementById("billing-panel");
+  const billingPanelClose = document.getElementById("billing-panel-close");
+  const billingPanelBody = document.getElementById("billing-panel-body");
   const constructionUserId = q("#construction-user-id");
   const constructionPassword = q("#construction-password");
   const constructionReportPageUrl = q("#construction-report-page-url");
@@ -782,6 +782,19 @@
   const constructionProjectMeta = q("#construction-project-meta");
   const constructionWorkTitle = q("#construction-work-title");
   const constructionWorkMeta = q("#construction-work-meta");
+  const constructionBillingStartDate = q("#construction-billing-start-date");
+  const constructionBillingEndDate = q("#construction-billing-end-date");
+  const constructionBillingRigCount = q("#construction-billing-rig-count");
+  const constructionBillingApplyRange = q("#construction-billing-apply-range");
+  const constructionBillingCurrentMonth = q("#construction-billing-current-month");
+  const constructionBillingPrevMonth = q("#construction-billing-prev-month");
+  const constructionBillingThisMonth = q("#construction-billing-this-month");
+  const constructionBillingNextMonth = q("#construction-billing-next-month");
+  const constructionBillingXlsxBtn = q("#construction-billing-xlsx-btn");
+  const constructionBillingHeadRow = q("#construction-billing-head-row");
+  const constructionBillingBody = q("#construction-billing-body");
+  const constructionBillingFeedback = q("#construction-billing-feedback");
+  const constructionBillingSection = q('[data-panel="billing-mgmt"]');
   const constructionStatusPanel = q('[data-panel="status"]');
   const constructionAutoMatchedCard = constructionAutoMatchedTable?.closest(".construction-chart-card");
   const constructionDiagnosticIssuesCard = constructionDiagnosticIssues?.closest(".construction-chart-card");
@@ -790,6 +803,12 @@
   }
   if (constructionStatusPanel && constructionDiagnosticIssuesCard && !constructionStatusPanel.contains(constructionDiagnosticIssuesCard)) {
     constructionStatusPanel.appendChild(constructionDiagnosticIssuesCard);
+  }
+  if (billingPanelBody && constructionBillingSection) {
+    billingPanelBody.appendChild(constructionBillingSection);
+    constructionBillingSection.classList.remove("construction-tab-panel");
+    constructionBillingSection.classList.add("construction-billing-standalone-section");
+    constructionBillingSection.classList.add("is-active");
   }
 
   const constructionState = state.construction || (state.construction = {
@@ -811,6 +830,8 @@
     lastSettlementRecordRows: [],
     settlementManualByKey: {},
     settlementDefaults: { blindingThickness: 0.06, headTrimTopLevel: 0.16, remainingBase: 0.5 },
+    billingOperations: { startDate: "", endDate: "", rigCount: 3, entries: {} },
+    billingOperationsStorageKey: "",
     dateGrouping: "month",
     playbackSpeed: 1,
     playbackSteps: [],
@@ -883,6 +904,8 @@
     manualStandaloneMode: false,
     parcelStandaloneMode: false,
     dashboardPanelOpen: false,
+    materialsPanelOpen: false,
+    billingPanelOpen: false,
     activeDashboardTab: "overview",
     foundationGroupsInitialized: false,
     foundationSelectablePolylineCacheKey: "",
@@ -898,6 +921,12 @@
     foundationHatchInsideCirclesRef: null,
     foundationHatchInsideRows: [],
   });
+  if (typeof constructionState.materialsPanelOpen !== "boolean") {
+    constructionState.materialsPanelOpen = false;
+  }
+  if (typeof constructionState.billingPanelOpen !== "boolean") {
+    constructionState.billingPanelOpen = false;
+  }
   if (!constructionState.settlementManualByKey || typeof constructionState.settlementManualByKey !== "object") {
     constructionState.settlementManualByKey = {};
   }
@@ -3063,7 +3092,6 @@
       "foundation-thickness": "기초골조 두께",
       manual: "매뉴얼",
       "parcel-review": "필지 검토",
-      "materials-mgmt": "자재관리",
       "billing-mgmt": "정산관리",
     };
     const subtitles = {
@@ -3071,9 +3099,8 @@
       status: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
       settlement: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
       "foundation-thickness": "기초 골조 두께를 지정해서 기성에 연동합니다.",
-      manual: "로그인·매뉴얼 본문·질문을 한 화면에서 사용합니다.",
+      manual: "로그인 후 iframe 에서 BRDS 매뉴얼을 사용합니다.",
       "parcel-review": "파일 마스터 좌표로 필지 경계를 조회하고 대지 침범을 자동 판정합니다.",
-      "materials-mgmt": "입고·출고·현장 재고 등 자재 흐름을 한곳에서 다룰 예정입니다.",
       "billing-mgmt": "기성정리와 별도로 대금·정산 단위를 정리하는 화면을 둘 예정입니다.",
     };
     constructionDrawerTitle.textContent = titles[tab] || "시공현황";
@@ -3117,9 +3144,76 @@
     constructionState.dashboardPanelOpen = false;
   }
 
+  function closeMaterialsPanel() {
+    if (!materialsPanel) return;
+    materialsPanel.classList.remove("open");
+    materialsPanel.setAttribute("aria-hidden", "true");
+    constructionState.materialsPanelOpen = false;
+  }
+
+  function closeBillingPanel() {
+    if (!billingPanel) return;
+    billingPanel.classList.remove("open");
+    billingPanel.setAttribute("aria-hidden", "true");
+    constructionState.billingPanelOpen = false;
+  }
+
+  async function openMaterialsPanel() {
+    if (!materialsPanel) return;
+    if (constructionState.isOpen) closeConstructionDrawer();
+    if (constructionState.dashboardPanelOpen) closeDashboardPanel();
+    if (constructionState.billingPanelOpen) closeBillingPanel();
+    if (typeof closeVersionComparePanel === "function") closeVersionComparePanel();
+    materialsPanel.classList.add("open");
+    materialsPanel.setAttribute("aria-hidden", "false");
+    constructionState.materialsPanelOpen = true;
+    if (typeof window.pilexySendVirtualPageView === "function") {
+      window.pilexySendVirtualPageView("/pilexy/materials", "자재관리");
+    }
+    if (typeof window.pilexyMaterialsMarkServerCacheStale === "function") {
+      window.pilexyMaterialsMarkServerCacheStale();
+    }
+    const materialsMount = document.getElementById("materials-app-mount");
+    if (materialsMount && !materialsMount.querySelector(".materials-shell")) {
+      materialsMount.innerHTML =
+        '<p class="materials-open-loading" role="status">자재 화면을 불러오는 중…</p>';
+    }
+    // 자재 초기화(번들 로드 + PDAM 대시보드)는 네트워크·대량 렌더가 겹치면 메인 스레드를 오래 잡음 → 패널은 먼저 열고 백그라운드에서 진행
+    if (typeof window.pilexyMaterialsInit === "function") {
+      void window.pilexyMaterialsInit().catch((err) => {
+        console.error(err);
+        if (materialsMount) {
+          materialsMount.innerHTML =
+            '<p class="materials-open-error" role="alert">자재 화면을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.</p>';
+        }
+      });
+    } else if (materialsMount) {
+      materialsMount.innerHTML =
+        '<p class="materials-open-error" role="alert">자재 관리 스크립트(materials.js)가 로드되지 않았습니다.</p>';
+    }
+  }
+
+  function openBillingPanel() {
+    if (!billingPanel) return;
+    if (constructionState.isOpen) closeConstructionDrawer();
+    if (constructionState.dashboardPanelOpen) closeDashboardPanel();
+    if (constructionState.materialsPanelOpen) closeMaterialsPanel();
+    if (typeof closeVersionComparePanel === "function") closeVersionComparePanel();
+    billingPanel.classList.add("open");
+    billingPanel.setAttribute("aria-hidden", "false");
+    constructionState.billingPanelOpen = true;
+    renderBillingOperationsTable();
+    void loadBillingOperationsFromServer({ render: true });
+    if (typeof window.pilexySendVirtualPageView === "function") {
+      window.pilexySendVirtualPageView("/pilexy/billing", "정산관리");
+    }
+  }
+
   function openDashboardPanel(options = {}) {
     if (!dashboardPanel) return;
     if (constructionState.isOpen) closeConstructionDrawer();
+    if (constructionState.materialsPanelOpen) closeMaterialsPanel();
+    if (constructionState.billingPanelOpen) closeBillingPanel();
     if (typeof closeVersionComparePanel === "function") closeVersionComparePanel();
     const nextDash =
       typeof options.dashboardInitialTab === "string" && options.dashboardInitialTab
@@ -3203,6 +3297,9 @@
         });
       });
     }
+    if (tab === "billing-mgmt") {
+      renderBillingOperationsTable();
+    }
     if (typeof window.pilexySendVirtualPageView === "function") {
       const vp = {
         settings: ["/pilexy/construction/settings", "시공 · 설정"],
@@ -3211,7 +3308,6 @@
         "foundation-thickness": ["/pilexy/construction/foundation-thickness", "시공 · 기초골조 두께"],
         manual: ["/pilexy/construction/manual", "시공 · 매뉴얼"],
         "parcel-review": ["/pilexy/construction/parcel-review", "시공 · 필지 검토"],
-        "materials-mgmt": ["/pilexy/construction/materials-mgmt", "시공 · 자재관리"],
         "billing-mgmt": ["/pilexy/construction/billing-mgmt", "시공 · 정산관리"],
       }[tab];
       if (vp) window.pilexySendVirtualPageView(vp[0], vp[1]);
@@ -3221,6 +3317,8 @@
   function openConstructionDrawer(tab, options = {}) {
     constructionState.isOpen = true;
     if (constructionState.dashboardPanelOpen) closeDashboardPanel();
+    if (constructionState.materialsPanelOpen) closeMaterialsPanel();
+    if (constructionState.billingPanelOpen) closeBillingPanel();
     constructionState.foundationStandaloneMode = Boolean(
       options?.foundationStandaloneMode && tab === "foundation-thickness",
     );
@@ -7906,6 +8004,532 @@ function inferOpenRectangleVertices(vertices) {
     constructionSettlementLocationBody.innerHTML = rows.map((row) => `<tr><td>${escape(row.location || "미지정")}</td><td>${row.periodInstalledCount ?? 0}</td><td>${row.cumulativeInstalledCount ?? 0}</td><td>${row.totalPlannedCount ?? "-"}</td><td>${row.progressPercent != null ? `${formatMetric(row.progressPercent, 1)}%` : "-"}</td></tr>`).join("");
   }
 
+  const BILLING_DEFAULT_RIG_COUNT = 3;
+  const BILLING_MAX_RIG_COUNT = 12;
+  const BILLING_OPERATION_STATUSES = [
+    { value: "normal", label: "정상" },
+    { value: "holiday", label: "휴일" },
+    { value: "public_holiday", label: "공휴일" },
+    { value: "rain_all", label: "우천 종일" },
+    { value: "rain_am", label: "우천 오전" },
+    { value: "rain_pm", label: "우천 오후" },
+    { value: "off_am", label: "휴무 오전" },
+    { value: "off_pm", label: "휴무 오후" },
+    { value: "standby", label: "대기" },
+    { value: "breakdown", label: "고장" },
+  ];
+  const BILLING_MAIN_STATUS_OPTIONS = [
+    { key: "normal", label: "정상", status: "normal" },
+    { key: "off", label: "휴무", status: "holiday" },
+    { key: "rain", label: "우천", status: "rain_all" },
+    { key: "standby", label: "대기", status: "standby" },
+    { key: "breakdown", label: "고장", status: "breakdown" },
+  ];
+  const BILLING_SUB_STATUS_OPTIONS = {
+    off: [
+      { value: "holiday", label: "휴일" },
+      { value: "public_holiday", label: "공휴일" },
+    ],
+  };
+  const BILLING_FIXED_HOLIDAYS = {
+    "01-01": "신정",
+    "03-01": "삼일절",
+    "05-05": "어린이날",
+    "06-06": "현충일",
+    "08-15": "광복절",
+    "10-03": "개천절",
+    "10-09": "한글날",
+    "12-25": "성탄절",
+  };
+  const BILLING_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+  let billingServerSaveTimer = null;
+  let billingServerLoadToken = 0;
+
+  function billingPad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function billingDateToken(date) {
+    return `${date.getFullYear()}-${billingPad2(date.getMonth() + 1)}-${billingPad2(date.getDate())}`;
+  }
+
+  function parseBillingDateToken(value) {
+    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function billingMonthRange(baseDate = new Date()) {
+    const year = baseDate.getFullYear();
+    const month = baseDate.getMonth();
+    return {
+      startDate: billingDateToken(new Date(year, month, 1)),
+      endDate: billingDateToken(new Date(year, month + 1, 0)),
+    };
+  }
+
+  function updateBillingMonthButtonLabels() {
+    ensureBillingOperationsLoaded();
+    const start = parseBillingDateToken(constructionState.billingOperations.startDate) || new Date();
+    const end = parseBillingDateToken(constructionState.billingOperations.endDate);
+    const current = `${start.getFullYear()}년 ${start.getMonth() + 1}월`;
+    const range = end && (end.getFullYear() !== start.getFullYear() || end.getMonth() !== start.getMonth())
+      ? ` ~ ${end.getFullYear()}년 ${end.getMonth() + 1}월`
+      : "";
+    if (constructionBillingCurrentMonth) {
+      constructionBillingCurrentMonth.innerHTML = `<span>현재 표시</span><b>${escape(`${current}${range}`)}</b>`;
+    }
+    if (constructionBillingPrevMonth) constructionBillingPrevMonth.textContent = "이전달";
+    if (constructionBillingThisMonth) constructionBillingThisMonth.textContent = "현재월";
+    if (constructionBillingNextMonth) constructionBillingNextMonth.textContent = "다음달";
+  }
+
+  function normalizeBillingRigCount(value) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return BILLING_DEFAULT_RIG_COUNT;
+    return Math.min(BILLING_MAX_RIG_COUNT, Math.max(1, n));
+  }
+
+  function getBillingRigs() {
+    ensureBillingOperationsLoaded();
+    const count = normalizeBillingRigCount(constructionState.billingOperations?.rigCount);
+    return Array.from({ length: count }, (_, idx) => ({ id: `rig${idx + 1}`, label: `${idx + 1}호기` }));
+  }
+
+  function billingStorageKey() {
+    const workId = state.loadedWorkId ? `work:${state.loadedWorkId}` : "";
+    const project = state.loadedWorkMeta?.project
+      || (typeof getActiveProjectName === "function" ? getActiveProjectName() : "")
+      || state.loadedProjectName
+      || "default";
+    return `pilexy.billingOperations.v1:${encodeURIComponent(workId || `project:${project}`)}`;
+  }
+
+  function billingProjectContext() {
+    return getConstructionProjectContext();
+  }
+
+  function normalizeBillingOperations(value) {
+    const fallbackRange = billingMonthRange();
+    const source = value && typeof value === "object" ? value : {};
+    const startDate = parseBillingDateToken(source.startDate) ? source.startDate : fallbackRange.startDate;
+    const endDate = parseBillingDateToken(source.endDate) ? source.endDate : fallbackRange.endDate;
+    const rigCount = normalizeBillingRigCount(source.rigCount);
+    const entries = source.entries && typeof source.entries === "object" ? source.entries : {};
+    return { startDate, endDate, rigCount, entries: { ...entries } };
+  }
+
+  function ensureBillingOperationsLoaded() {
+    const key = billingStorageKey();
+    if (constructionState.billingOperationsStorageKey === key && constructionState.billingOperations) {
+      return;
+    }
+    let parsed = null;
+    try {
+      const raw = localStorage.getItem(key);
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      parsed = null;
+    }
+    constructionState.billingOperationsStorageKey = key;
+    constructionState.billingOperations = normalizeBillingOperations(parsed || constructionState.billingOperations);
+  }
+
+  function saveBillingOperations() {
+    ensureBillingOperationsLoaded();
+    try {
+      localStorage.setItem(
+        constructionState.billingOperationsStorageKey,
+        JSON.stringify(constructionState.billingOperations),
+      );
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = "운용 현황이 자동 저장되었습니다.";
+      }
+    } catch (_) {
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = "브라우저 저장 공간 문제로 자동 저장하지 못했습니다.";
+      }
+    }
+    scheduleBillingServerSave();
+  }
+
+  function scheduleBillingServerSave() {
+    if (billingServerSaveTimer) clearTimeout(billingServerSaveTimer);
+    billingServerSaveTimer = setTimeout(() => {
+      billingServerSaveTimer = null;
+      void pushBillingOperationsToServer();
+    }, 650);
+  }
+
+  async function pushBillingOperationsToServer() {
+    ensureBillingOperationsLoaded();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(billingProjectContext())}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(constructionState.billingOperations),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const saved = await response.json();
+      constructionState.billingOperations = normalizeBillingOperations(saved);
+      try {
+        localStorage.setItem(constructionState.billingOperationsStorageKey, JSON.stringify(constructionState.billingOperations));
+      } catch (_) {
+        /* ignore */
+      }
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = "운용 현황이 서버에 저장되었습니다.";
+      }
+    } catch (error) {
+      console.warn(error);
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = "서버 저장에 실패해 이 브라우저에 임시 저장했습니다.";
+      }
+    }
+  }
+
+  async function loadBillingOperationsFromServer({ render = true } = {}) {
+    ensureBillingOperationsLoaded();
+    const token = ++billingServerLoadToken;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(billingProjectContext())}`);
+      if (!response.ok) throw new Error(await response.text());
+      const serverData = await response.json();
+      if (token !== billingServerLoadToken) return;
+      const serverSaved = Boolean(serverData?.meta?.saved);
+      if (serverSaved) {
+        constructionState.billingOperations = normalizeBillingOperations(serverData);
+        try {
+          localStorage.setItem(constructionState.billingOperationsStorageKey, JSON.stringify(constructionState.billingOperations));
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      if (render) renderBillingOperationsTable();
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = serverSaved
+          ? "서버에 저장된 운용 현황을 불러왔습니다."
+          : "서버 저장본이 없어 새 운용 현황을 시작합니다.";
+      }
+    } catch (error) {
+      console.warn(error);
+      if (render) renderBillingOperationsTable();
+      if (constructionBillingFeedback) {
+        constructionBillingFeedback.textContent = "서버 데이터를 불러오지 못해 이 브라우저 저장본을 사용합니다.";
+      }
+    }
+  }
+
+  function billingDateRows(startDateValue, endDateValue) {
+    const start = parseBillingDateToken(startDateValue);
+    const end = parseBillingDateToken(endDateValue);
+    if (!start || !end || start > end) return [];
+    const rows = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    for (let i = 0; i < 370 && cursor <= end; i += 1) {
+      rows.push(new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate()));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return rows;
+  }
+
+  function billingHolidayInfo(date) {
+    const token = `${billingPad2(date.getMonth() + 1)}-${billingPad2(date.getDate())}`;
+    const fixedHoliday = BILLING_FIXED_HOLIDAYS[token] || "";
+    return {
+      isSunday: date.getDay() === 0,
+      fixedHoliday,
+    };
+  }
+
+  function billingEntryKey(dateToken, rigId) {
+    return `${dateToken}|${rigId}`;
+  }
+
+  function getBillingEntry(dateToken, rigId) {
+    ensureBillingOperationsLoaded();
+    const item = constructionState.billingOperations.entries[billingEntryKey(dateToken, rigId)];
+    return item && typeof item === "object"
+      ? item
+      : { status: "", detail: "", waitDuration: "", contractorFault: false };
+  }
+
+  function billingStatusCategory(status) {
+    if (status === "normal") return "normal";
+    if (status === "holiday" || status === "public_holiday" || status === "off_am" || status === "off_pm") return "off";
+    if (status === "rain_all" || status === "rain_am" || status === "rain_pm") return "rain";
+    if (status === "standby") return "standby";
+    if (status === "breakdown") return "breakdown";
+    return "";
+  }
+
+  function billingRainParts(status) {
+    return {
+      am: status === "rain_all" || status === "rain_am",
+      pm: status === "rain_all" || status === "rain_pm",
+    };
+  }
+
+  function billingRainStatusFromParts(parts) {
+    if (parts.am && parts.pm) return "rain_all";
+    if (parts.am) return "rain_am";
+    if (parts.pm) return "rain_pm";
+    return "rain_all";
+  }
+
+  function billingStatusButtonsHtml(selectedValue) {
+    const category = billingStatusCategory(selectedValue);
+    const main = BILLING_MAIN_STATUS_OPTIONS
+      .map((item) => `<button type="button" class="construction-billing-status-btn${item.key === category ? " is-active" : ""}" data-billing-main="${escape(item.key)}" data-billing-status="${escape(item.status)}">${escape(item.label)}</button>`)
+      .join("");
+    const subOptions = BILLING_SUB_STATUS_OPTIONS[category] || [];
+    const sub = subOptions.length
+      ? `<div class="construction-billing-substatus">${subOptions.map((item) => `<button type="button" class="construction-billing-substatus-btn${item.value === selectedValue ? " is-active" : ""}" data-billing-status="${escape(item.value)}">${escape(item.label)}</button>`).join("")}</div>`
+      : "";
+    const rain = category === "rain"
+      ? (() => {
+          const parts = billingRainParts(selectedValue);
+          return `<div class="construction-billing-substatus"><button type="button" class="construction-billing-substatus-btn${parts.am ? " is-active" : ""}" data-billing-rain-part="am">오전</button><button type="button" class="construction-billing-substatus-btn${parts.pm ? " is-active" : ""}" data-billing-rain-part="pm">오후</button></div>`;
+        })()
+      : "";
+    return `${main}${sub}${rain}`;
+  }
+
+  function billingDetailPlaceholder(status) {
+    if (status === "standby") return "대기 사유";
+    if (status === "breakdown") return "고장 상세내용";
+    if (status === "off_am" || status === "off_pm") return "휴무 내용";
+    if (status === "rain_all" || status === "rain_am" || status === "rain_pm") return "우천 메모";
+    return "메모";
+  }
+
+  function billingStatusLabel(value) {
+    const hit = BILLING_OPERATION_STATUSES.find((item) => item.value === value);
+    return hit ? hit.label : "";
+  }
+
+  function renderBillingOperationCell(dateToken, rig) {
+    const entry = getBillingEntry(dateToken, rig.id);
+    const status = String(entry.status || "");
+    const isStandby = status === "standby";
+    const cellClass = status ? ` construction-billing-cell--${status}` : "";
+    return `
+      <td class="construction-billing-cell${cellClass}" data-billing-date="${dateToken}" data-billing-rig="${rig.id}">
+        <input type="hidden" data-billing-field="status" value="${escape(status)}" />
+        <div class="construction-billing-status-grid" role="group" aria-label="${escape(`${dateToken} ${rig.label} 운용 상태`)}">
+          ${billingStatusButtonsHtml(status)}
+        </div>
+        <div class="construction-billing-extra${isStandby ? "" : " hidden"}" data-billing-extra="standby">
+          <input type="text" class="save-work-input construction-billing-wait-input" data-billing-field="waitDuration" value="${escape(entry.waitDuration || "")}" placeholder="대기 시간" />
+          <label class="construction-billing-fault-check">
+            <input type="checkbox" data-billing-field="contractorFault"${entry.contractorFault ? " checked" : ""} />
+            시공사 귀책
+          </label>
+        </div>
+        <input type="text" class="save-work-input construction-billing-detail-input" data-billing-field="detail" value="${escape(entry.detail || "")}" placeholder="${escape(billingDetailPlaceholder(status))} / 자유 메모" />
+      </td>
+    `;
+  }
+
+  function renderBillingOperationsTable() {
+    if (!constructionBillingBody) return;
+    ensureBillingOperationsLoaded();
+    const ops = constructionState.billingOperations;
+    const rigs = getBillingRigs();
+    if (constructionBillingStartDate) constructionBillingStartDate.value = ops.startDate || "";
+    if (constructionBillingEndDate) constructionBillingEndDate.value = ops.endDate || "";
+    if (constructionBillingRigCount) constructionBillingRigCount.value = String(normalizeBillingRigCount(ops.rigCount));
+    updateBillingMonthButtonLabels();
+    if (constructionBillingHeadRow) {
+      constructionBillingHeadRow.innerHTML = `<th class="construction-billing-date-col">날짜</th>${rigs.map((rig) => `<th>${escape(rig.label)}</th>`).join("")}`;
+    }
+    const table = constructionBillingBody.closest("table");
+    if (table) {
+      table.classList.toggle("construction-billing-table--few-rigs", rigs.length <= 2);
+      table.style.minWidth = rigs.length <= 3 ? "0" : `${6.5 + rigs.length * 8.25}rem`;
+    }
+    const rows = billingDateRows(ops.startDate, ops.endDate);
+    if (!rows.length) {
+      constructionBillingBody.innerHTML = `<tr><td colspan="${rigs.length + 1}" class="empty-row">기간을 확인해 주세요.</td></tr>`;
+      return;
+    }
+    constructionBillingBody.innerHTML = rows.map((date) => {
+      const dateToken = billingDateToken(date);
+      const holiday = billingHolidayInfo(date);
+      const rowClass = [
+        holiday.isSunday ? "construction-billing-row--sunday" : "",
+        holiday.fixedHoliday ? "construction-billing-row--holiday" : "",
+      ].filter(Boolean).join(" ");
+      const holidayLabel = holiday.fixedHoliday || (holiday.isSunday ? "일요일" : "");
+      return `
+        <tr class="${rowClass}">
+          <th scope="row" class="construction-billing-date-cell">
+            <strong>${dateToken}</strong>
+            <span>${BILLING_WEEKDAY_LABELS[date.getDay()]}</span>
+            ${holidayLabel ? `<em>${escape(holidayLabel)}</em>` : ""}
+          </th>
+          ${rigs.map((rig) => renderBillingOperationCell(dateToken, rig)).join("")}
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function setBillingMonth(offset) {
+    ensureBillingOperationsLoaded();
+    const current = parseBillingDateToken(constructionState.billingOperations.startDate) || new Date();
+    const next = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+    constructionState.billingOperations = {
+      ...constructionState.billingOperations,
+      ...billingMonthRange(next),
+    };
+    saveBillingOperations();
+    renderBillingOperationsTable();
+  }
+
+  function applyBillingRangeFromInputs() {
+    ensureBillingOperationsLoaded();
+    const startDate = constructionBillingStartDate?.value || "";
+    const endDate = constructionBillingEndDate?.value || "";
+    const rigCount = normalizeBillingRigCount(constructionBillingRigCount?.value || constructionState.billingOperations.rigCount);
+    if (!parseBillingDateToken(startDate) || !parseBillingDateToken(endDate) || startDate > endDate) {
+      if (constructionBillingFeedback) constructionBillingFeedback.textContent = "시작일과 종료일을 확인해 주세요.";
+      return;
+    }
+    constructionState.billingOperations.startDate = startDate;
+    constructionState.billingOperations.endDate = endDate;
+    constructionState.billingOperations.rigCount = rigCount;
+    saveBillingOperations();
+    renderBillingOperationsTable();
+  }
+
+  function readBillingCellEntry(cell) {
+    const dateToken = cell?.dataset?.billingDate || "";
+    const rigId = cell?.dataset?.billingRig || "";
+    if (!dateToken || !rigId) return;
+    const status = cell.querySelector('[data-billing-field="status"]')?.value || "";
+    const detail = cell.querySelector('[data-billing-field="detail"]')?.value || "";
+    const waitDuration = cell.querySelector('[data-billing-field="waitDuration"]')?.value || "";
+    const contractorFault = Boolean(cell.querySelector('[data-billing-field="contractorFault"]')?.checked);
+    const key = billingEntryKey(dateToken, rigId);
+    if (!status && !detail && !waitDuration && !contractorFault) {
+      delete constructionState.billingOperations.entries[key];
+      return;
+    }
+    constructionState.billingOperations.entries[key] = { status, detail, waitDuration, contractorFault };
+  }
+
+  function billingOperationExportRows() {
+    ensureBillingOperationsLoaded();
+    const ops = constructionState.billingOperations;
+    return billingDateRows(ops.startDate, ops.endDate).map((date) => {
+      const dateToken = billingDateToken(date);
+      const holiday = billingHolidayInfo(date);
+      const row = {
+        dateToken,
+        weekday: BILLING_WEEKDAY_LABELS[date.getDay()],
+        holidayLabel: holiday.fixedHoliday || (holiday.isSunday ? "일요일" : ""),
+      };
+      getBillingRigs().forEach((rig) => {
+        const entry = getBillingEntry(dateToken, rig.id);
+        row[`${rig.id}Status`] = billingStatusLabel(entry.status || "");
+        row[`${rig.id}Wait`] = entry.waitDuration || "";
+        row[`${rig.id}Fault`] = entry.contractorFault ? "시공사 귀책" : "";
+        row[`${rig.id}Detail`] = entry.detail || "";
+      });
+      return row;
+    });
+  }
+
+  async function downloadBillingOperationsXlsx() {
+    const EXCELJS_GLOBAL = typeof globalThis !== "undefined" && globalThis.ExcelJS;
+    if (!EXCELJS_GLOBAL || typeof EXCELJS_GLOBAL.Workbook !== "function") {
+      const errMsg = "엑셀 라이브러리를 불러오지 못했습니다. 페이지를 새로고침 후 다시 시도하세요.";
+      if (constructionBillingFeedback) constructionBillingFeedback.textContent = errMsg;
+      setSyncStatus(errMsg, true);
+      return;
+    }
+    const rows = billingOperationExportRows();
+    if (!rows.length) {
+      const msg = "다운로드할 운용 현황 기간이 없습니다.";
+      if (constructionBillingFeedback) constructionBillingFeedback.textContent = msg;
+      setSyncStatus(msg, true);
+      return;
+    }
+    const wb = new EXCELJS_GLOBAL.Workbook();
+    const ws = wb.addWorksheet("정산관리_운용현황");
+    const columns = [
+      { header: "날짜", key: "dateToken", width: 13 },
+      { header: "요일", key: "weekday", width: 8 },
+      { header: "휴일 구분", key: "holidayLabel", width: 12 },
+    ];
+    getBillingRigs().forEach((rig) => {
+      columns.push(
+        { header: `${rig.label} 상태`, key: `${rig.id}Status`, width: 14 },
+        { header: `${rig.label} 대기 시간`, key: `${rig.id}Wait`, width: 14 },
+        { header: `${rig.label} 귀책`, key: `${rig.id}Fault`, width: 14 },
+        { header: `${rig.label} 내용/메모`, key: `${rig.id}Detail`, width: 26 },
+      );
+    });
+    ws.columns = columns;
+    rows.forEach((row) => ws.addRow(row));
+
+    const title = `정산관리 항타기 운용 현황 (${constructionState.billingOperations.startDate} ~ ${constructionState.billingOperations.endDate})`;
+    ws.insertRow(1, [title]);
+    ws.mergeCells(1, 1, 1, columns.length);
+    ws.getRow(1).height = 24;
+    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: "FF0F172A" } };
+    ws.getCell(1, 1).alignment = { horizontal: "left", vertical: "middle" };
+
+    const headerRow = ws.getRow(2);
+    const thinBorder = {
+      top: { style: "thin", color: { argb: "FFD1D5DB" } },
+      left: { style: "thin", color: { argb: "FFD1D5DB" } },
+      bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+      right: { style: "thin", color: { argb: "FFD1D5DB" } },
+    };
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FF1E3A8A" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = thinBorder;
+    });
+    for (let r = 3; r <= ws.rowCount; r += 1) {
+      const row = ws.getRow(r);
+      const holidayLabel = String(row.getCell(3).value || "");
+      row.eachCell((cell, colNumber) => {
+        cell.border = thinBorder;
+        cell.alignment = {
+          horizontal: colNumber >= 7 && (colNumber - 3) % 4 === 0 ? "left" : "center",
+          vertical: "middle",
+          wrapText: true,
+        };
+        if (holidayLabel) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF1F2" } };
+        }
+      });
+    }
+    ws.views = [{ state: "frozen", xSplit: 3, ySplit: 2 }];
+    ws.autoFilter = {
+      from: { row: 2, column: 1 },
+      to: { row: 2, column: columns.length },
+    };
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${sanitizeDownloadFileBase(`정산관리_운용현황_${constructionState.billingOperations.startDate}_${constructionState.billingOperations.endDate}`)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    const okMsg = "운용 현황표가 XLSX로 저장되었습니다.";
+    if (constructionBillingFeedback) constructionBillingFeedback.textContent = okMsg;
+    setSyncStatus(okMsg, false);
+  }
+
   function renderProjectContext() {
     const eligible = hasSavedWorkContext();
     const projectName = eligible
@@ -8019,7 +8643,6 @@ function inferOpenRectangleVertices(vertices) {
         || constructionState.activeTab === "manual"
         || constructionState.activeTab === "parcel-review"
         || constructionState.activeTab === "foundation-thickness"
-        || constructionState.activeTab === "materials-mgmt"
         || constructionState.activeTab === "billing-mgmt";
       if (!keepDrawerOpen) {
         closeConstructionDrawer();
@@ -8123,6 +8746,13 @@ function inferOpenRectangleVertices(vertices) {
     refreshFoundationPanel();
     updateCircleTable();
     requestRedraw();
+    if (typeof window.pilexyMaterialsRefreshIfOpen === "function") {
+      try {
+        window.pilexyMaterialsRefreshIfOpen();
+      } catch (err) {
+        console.error(err);
+      }
+    }
   }
 
   function getConstructionProjectContext() {
@@ -8584,6 +9214,23 @@ function inferOpenRectangleVertices(vertices) {
     renderProjectContext();
   }
 
+  /**
+   * 자재관리 패널 전용: 시공 드로어를 열지 않아도 PDAM 매핑(circleMappings)을 채운다.
+   * 저장 작업 + 도면 좌표가 있을 때만 동작한다.
+   */
+  async function ensureConstructionDashboardForMaterials() {
+    if (!hasSavedWorkContext()) return false;
+    await refreshDatasets();
+    const ds = constructionDatasetSelect.value || constructionState.activeDatasetId;
+    if (!ds) return false;
+    const cur = constructionState.dashboard;
+    if (cur?.dataset?.id === ds && Array.isArray(cur.mapping?.circleMappings)) {
+      return true;
+    }
+    await refreshDashboard();
+    return true;
+  }
+
   constructionFoundationThicknessBtn.addEventListener("click", async () => {
     openConstructionDrawer("foundation-thickness", { foundationStandaloneMode: true });
     try {
@@ -8628,7 +9275,14 @@ function inferOpenRectangleVertices(vertices) {
   const headerMaterialsBtn = document.getElementById("header-materials-btn");
   if (headerMaterialsBtn) {
     headerMaterialsBtn.addEventListener("click", () => {
-      openConstructionDrawer("materials-mgmt");
+      openMaterialsPanel();
+    });
+  }
+
+  const headerBillingBtn = document.getElementById("header-billing-btn");
+  if (headerBillingBtn) {
+    headerBillingBtn.addEventListener("click", () => {
+      openBillingPanel();
     });
   }
 
@@ -10340,15 +10994,6 @@ function inferOpenRectangleVertices(vertices) {
     });
   }
 
-  const constructionBrdsFetchManualBtn = q("#construction-brds-fetch-manual-btn");
-  if (constructionBrdsFetchManualBtn) {
-    constructionBrdsFetchManualBtn.addEventListener("click", (ev) => {
-      const fn = typeof window !== "undefined" ? window.pilexyRunBrdsManualAutoPipeline : null;
-      if (typeof fn === "function") void fn(ev.currentTarget);
-      else setSyncStatus("매뉴얼 기능을 불러오지 못했습니다. 페이지를 새로고침 해 보세요.", true);
-    });
-  }
-
   constructionDrawerClose.addEventListener("click", closeConstructionDrawer);
   constructionTabButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -10361,9 +11006,106 @@ function inferOpenRectangleVertices(vertices) {
     });
   });
 
+  if (constructionBillingPrevMonth) {
+    constructionBillingPrevMonth.addEventListener("click", () => setBillingMonth(-1));
+  }
+  if (constructionBillingThisMonth) {
+    constructionBillingThisMonth.addEventListener("click", () => {
+      ensureBillingOperationsLoaded();
+      constructionState.billingOperations = {
+        ...constructionState.billingOperations,
+        ...billingMonthRange(new Date()),
+      };
+      saveBillingOperations();
+      renderBillingOperationsTable();
+    });
+  }
+  if (constructionBillingNextMonth) {
+    constructionBillingNextMonth.addEventListener("click", () => setBillingMonth(1));
+  }
+  if (constructionBillingApplyRange) {
+    constructionBillingApplyRange.addEventListener("click", applyBillingRangeFromInputs);
+  }
+  if (constructionBillingRigCount) {
+    constructionBillingRigCount.addEventListener("change", () => {
+      ensureBillingOperationsLoaded();
+      constructionState.billingOperations.rigCount = normalizeBillingRigCount(constructionBillingRigCount.value);
+      saveBillingOperations();
+      renderBillingOperationsTable();
+    });
+  }
+  if (constructionBillingXlsxBtn) {
+    constructionBillingXlsxBtn.addEventListener("click", () => {
+      downloadBillingOperationsXlsx().catch((err) => {
+        console.error(err);
+        const errMsg = "운용 현황표 엑셀 다운로드 중 오류가 발생했습니다.";
+        if (constructionBillingFeedback) constructionBillingFeedback.textContent = errMsg;
+        setSyncStatus(errMsg, true);
+      });
+    });
+  }
+  if (constructionBillingBody) {
+    constructionBillingBody.addEventListener("click", (ev) => {
+      const btn = ev.target?.closest?.("[data-billing-status]");
+      const rainPartBtn = ev.target?.closest?.("[data-billing-rain-part]");
+      const cell = (btn || rainPartBtn)?.closest?.("[data-billing-date][data-billing-rig]");
+      if ((!btn && !rainPartBtn) || !cell) return;
+      const hidden = cell.querySelector('[data-billing-field="status"]');
+      if (hidden) {
+        if (rainPartBtn) {
+          const current = hidden.value || "rain_all";
+          const parts = billingRainParts(current);
+          const part = rainPartBtn.getAttribute("data-billing-rain-part");
+          if (part === "am") parts.am = !parts.am;
+          if (part === "pm") parts.pm = !parts.pm;
+          hidden.value = billingRainStatusFromParts(parts);
+        } else {
+          const mainKey = btn.getAttribute("data-billing-main") || "";
+          const current = hidden.value || "";
+          hidden.value = mainKey && billingStatusCategory(current) === mainKey
+            ? current
+            : (btn.getAttribute("data-billing-status") || "");
+        }
+      }
+      ensureBillingOperationsLoaded();
+      readBillingCellEntry(cell);
+      saveBillingOperations();
+      renderBillingOperationsTable();
+    });
+    constructionBillingBody.addEventListener("change", (ev) => {
+      const field = ev.target?.getAttribute?.("data-billing-field");
+      const cell = ev.target?.closest?.("[data-billing-date][data-billing-rig]");
+      if (!field || !cell) return;
+      ensureBillingOperationsLoaded();
+      readBillingCellEntry(cell);
+      saveBillingOperations();
+      if (field === "status") renderBillingOperationsTable();
+    });
+    constructionBillingBody.addEventListener("input", (ev) => {
+      const field = ev.target?.getAttribute?.("data-billing-field");
+      const cell = ev.target?.closest?.("[data-billing-date][data-billing-rig]");
+      if (!field || !cell || field === "status" || field === "contractorFault") return;
+      ensureBillingOperationsLoaded();
+      readBillingCellEntry(cell);
+      saveBillingOperations();
+    });
+  }
+
   if (dashboardPanelClose && dashboardPanel) {
     dashboardPanelClose.addEventListener("click", () => {
       closeDashboardPanel();
+    });
+  }
+
+  if (materialsPanelClose && materialsPanel) {
+    materialsPanelClose.addEventListener("click", () => {
+      closeMaterialsPanel();
+    });
+  }
+
+  if (billingPanelClose && billingPanel) {
+    billingPanelClose.addEventListener("click", () => {
+      closeBillingPanel();
     });
   }
 
@@ -10376,6 +11118,53 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   window.pilexyCloseDashboardPanel = closeDashboardPanel;
+  window.pilexyCloseMaterialsPanel = closeMaterialsPanel;
+  window.pilexyCloseBillingPanel = closeBillingPanel;
+  window.pilexyOpenMaterialsPanel = openMaterialsPanel;
+  window.pilexyOpenBillingPanel = openBillingPanel;
+  window.pilexyEnsureConstructionDashboardForMaterials = ensureConstructionDashboardForMaterials;
+
+  /** 자재관리 설정 탭: 프로젝트별 PDAM 시공 데이터셋 목록 */
+  window.pilexyFetchConstructionDatasetsList = async function pilexyFetchConstructionDatasetsList() {
+    if (!hasSavedWorkContext()) {
+      return { ok: false, code: "need_work", datasets: [], activeId: "" };
+    }
+    await refreshDatasets();
+    const list = (constructionState.datasets || []).map((d) => ({
+      id: d.id,
+      name: String(d.name || d.filename || d.id || ""),
+      filename: String(d.filename || ""),
+      createdAt: d.createdAt || "",
+      projectContext: d.projectContext || "",
+    }));
+    const activeId =
+      (constructionDatasetSelect && constructionDatasetSelect.value) || constructionState.activeDatasetId || "";
+    return { ok: true, datasets: list, activeId };
+  };
+
+  /** 자재관리 설정 탭: 선택한 데이터셋으로 시공 대시보드(원 매칭·길이별 사용) 갱신 */
+  window.pilexyApplyConstructionDatasetForMaterials = async function pilexyApplyConstructionDatasetForMaterials(datasetId) {
+    if (!hasSavedWorkContext()) {
+      return { ok: false, error: "도면 좌표가 있는 저장 작업을 불러온 뒤 사용할 수 있습니다." };
+    }
+    if (!constructionDatasetSelect) {
+      return { ok: false, error: "시공 패널이 초기화되지 않았습니다. 페이지를 새로고침해 보세요." };
+    }
+    const id = String(datasetId || "").trim();
+    if (!id) return { ok: false, error: "데이터셋을 선택하세요." };
+    await refreshDatasets(id);
+    if (![...constructionDatasetSelect.options].some((o) => o.value === id)) {
+      return {
+        ok: false,
+        error: "목록에 없는 데이터셋입니다. 시공현황에서 PDAM 동기화 또는 엑셀 업로드 후 목록 새로고침을 눌러 보세요.",
+      };
+    }
+    constructionDatasetSelect.value = id;
+    constructionState.activeDatasetId = id;
+    updateDatasetActionButtons();
+    await refreshDashboard();
+    return { ok: true };
+  };
 
   constructionDatasetApply.addEventListener("click", async () => {
     try {
@@ -11100,6 +11889,7 @@ function inferOpenRectangleVertices(vertices) {
   });
 
   renderProjectContext();
+  renderBillingOperationsTable();
   updateConstructionButtonsState();
   updateDatasetActionButtons();
   updateSettlementPreviewButton();
@@ -11111,4 +11901,66 @@ function inferOpenRectangleVertices(vertices) {
   applyDrawerLayoutMode();
   refreshFoundationPanel();
   window.pilexyUpdateConstructionButtonsState = updateConstructionButtonsState;
+
+    window.pilexyGetMaterialsPdamContext = function pilexyGetMaterialsPdamContext() {
+    const dash = constructionState.dashboard;
+    const m = Array.isArray(dash?.mapping?.circleMappings) ? dash.mapping.circleMappings : [];
+    const apiCtx = dash?.materialsPdamContext;
+
+    function materialLengthKeyFromRow(row) {
+      const single = Number(row?.pileClassificationSingle ?? row?.pile_classification_single);
+      if (Number.isFinite(single)) {
+        const s = Math.round(single);
+        if (s >= 5 && s <= 15) return String(s);
+      }
+      const total = Number(row?.pileClassificationTotal ?? row?.pile_classification_total);
+      if (Number.isFinite(total)) {
+        const t = Math.round(total);
+        if (t >= 16 && t <= 25) return `J${t}`;
+        if (t >= 5 && t <= 15) return String(t);
+      }
+      return null;
+    }
+
+    if (apiCtx != null && typeof apiCtx === "object") {
+      const usedByLength = apiCtx.usedByLength && typeof apiCtx.usedByLength === "object" ? { ...apiCtx.usedByLength } : {};
+      const installedByLocation =
+        apiCtx.installedByLocation && typeof apiCtx.installedByLocation === "object" ? { ...apiCtx.installedByLocation } : {};
+      const totalInstalled = Number(apiCtx.totalInstalled);
+      const usedInstalledWithoutLength = Number(apiCtx.usedInstalledWithoutLength);
+      return {
+        circleMappings: m,
+        installedByLocation,
+        totalInstalled: Number.isFinite(totalInstalled) ? totalInstalled : 0,
+        usedByLength,
+        usedInstalledWithoutLength: Number.isFinite(usedInstalledWithoutLength) ? usedInstalledWithoutLength : 0,
+      };
+    }
+
+    const byLoc = {};
+    const usedByLength = {};
+    let totalInstalled = 0;
+    let usedInstalledWithoutLength = 0;
+
+    m.forEach((row) => {
+      if (row?.status !== "installed") return;
+      totalInstalled += 1;
+      const loc = row.locationNormalized || row.circleLocation || "";
+      const k = String(loc || "").trim() || "(미지정)";
+      byLoc[k] = (byLoc[k] || 0) + 1;
+      const lenKey = materialLengthKeyFromRow(row);
+      if (lenKey) {
+        usedByLength[lenKey] = (usedByLength[lenKey] || 0) + 1;
+      } else {
+        usedInstalledWithoutLength += 1;
+      }
+    });
+    return {
+      circleMappings: m,
+      installedByLocation: byLoc,
+      totalInstalled,
+      usedByLength,
+      usedInstalledWithoutLength,
+    };
+  };
 })();
