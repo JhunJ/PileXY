@@ -479,12 +479,23 @@
     return cementTonEstimatesForMeter(cementPlanWeightedMeter());
   }
 
-  function cementOrderedTf() {
-    return (bundle.cementLedger || []).reduce((a, r) => a + (Number(r.orderTf) || 0), 0);
+  /** 행별 입고(tf) — 예전 데이터는 발주·반입 중 채워진 쪽을 사용, 이후에는 동일 값으로 유지 */
+  function cementLedgerRowIntakeTf(c) {
+    if (!c) return 0;
+    const r = Number(c.receiptTf);
+    const o = Number(c.orderTf);
+    const rOk = Number.isFinite(r);
+    const oOk = Number.isFinite(o);
+    if (rOk && r !== 0) return r;
+    if (oOk && o !== 0) return o;
+    if (rOk) return r;
+    if (oOk) return o;
+    return 0;
   }
 
-  function cementReceiptTf() {
-    return (bundle.cementLedger || []).reduce((a, r) => a + (Number(r.receiptTf) || 0), 0);
+  /** 시멘트 벌크 표·요약용 입고(tf) 합계 (발주·반입 통합) */
+  function cementIntakeTfTotal() {
+    return (bundle.cementLedger || []).reduce((a, r) => a + cementLedgerRowIntakeTf(r), 0);
   }
 
   /** fullRender 전 스크롤 스냅샷(우측 aside·본문·넓은 표 셸은 innerHTML 후 노드가 바뀌므로 좌표만 보관) */
@@ -581,12 +592,11 @@
     const cementEst = cementEstimatesPair();
     const cementMode = bundle.cementPresets?.mode === "detail" ? "detail" : "tonPerMPhi";
     const reqTon = cementMode === "detail" ? cementEst.detailTf : cementEst.tonPerMPhi;
-    const ordTf = cementOrderedTf();
-    const recTf = cementReceiptTf();
-    const unOrd = Math.max(0, reqTon - ordTf);
+    const intakeTfTotal = cementIntakeTfTotal();
+    const unOrd = Math.max(0, reqTon - intakeTfTotal);
     const cementPdamEst = cementTonEstimatesForMeter(cementPdamWeightedMeter());
     const pdamCementReqTon = cementMode === "detail" ? cementPdamEst.detailTf : cementPdamEst.tonPerMPhi;
-    const cementBulkRemainTf = recTf - pdamCementReqTon;
+    const cementBulkRemainTf = intakeTfTotal - pdamCementReqTon;
     const cementPdamModeLabel = cementMode === "detail" ? "상세" : "Φ별 ton/m";
     const cementRemainClass = cementBulkRemainTf < -0.0005 ? "materials-cement-remain--warn" : "";
 
@@ -783,41 +793,37 @@
           </dl>
         </div>
         <div class="materials-cement-bulk-strip materials-cement-bulk-strip--calc">
-          <p class="materials-cement-bulk-strip-title">반입 누적 대비 잔량</p>
+          <p class="materials-cement-bulk-strip-title">입고 누적 대비 잔량</p>
           <dl class="materials-cement-bulk-kv">
             <div class="materials-cement-bulk-kv-row">
-              <dt>반입 누적</dt>
-              <dd><strong>${recTf.toFixed(3)}</strong> tf</dd>
+              <dt>입고 누적</dt>
+              <dd><strong>${intakeTfTotal.toFixed(3)}</strong> tf</dd>
             </div>
             <div class="materials-cement-bulk-kv-row">
               <dt>위 예상</dt>
               <dd><strong>${pdamCementReqTon.toFixed(3)}</strong> tf</dd>
             </div>
             <div class="materials-cement-bulk-kv-row materials-cement-bulk-kv-row--emph">
-              <dt title="반입 누적 − 위 예상">잔량</dt>
+              <dt title="입고 누적 − 위 예상">잔량</dt>
               <dd><strong class="${cementRemainClass}">${cementBulkRemainTf.toFixed(3)}</strong> tf</dd>
             </div>
           </dl>
-          <p class="materials-cement-bulk-foot">벌크 반입 누적에서 PDAM 기준 예상 사용량을 뺀 값입니다.</p>
+          <p class="materials-cement-bulk-foot">벌크 입고 누적에서 PDAM 기준 예상 사용량을 뺀 값입니다.</p>
         </div>
       </div>
       <div class="materials-cement-summary-strip" role="note" aria-label="시멘트 누적 요약">
         <table class="materials-cement-summary-table">
           <tbody>
             <tr>
-              <th scope="row">발주 누적</th>
-              <td><strong class="materials-cement-summary-num">${ordTf.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
-            </tr>
-            <tr>
-              <th scope="row">반입 누적</th>
-              <td><strong class="materials-cement-summary-num">${recTf.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
+              <th scope="row">입고 누적</th>
+              <td><strong class="materials-cement-summary-num">${intakeTfTotal.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
             </tr>
             <tr>
               <th scope="row">필요<span class="materials-cement-summary-sub">(추정)</span></th>
               <td><strong class="materials-cement-summary-num">${reqTon.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
             </tr>
             <tr class="materials-cement-summary-row--em">
-              <th scope="row">미발주<span class="materials-cement-summary-sub" title="필요(추정) − 발주 누적">(필요−발주)</span></th>
+              <th scope="row">미발주<span class="materials-cement-summary-sub" title="필요(추정) − 입고 누적">(필요−입고)</span></th>
               <td><strong class="materials-cement-summary-num">${unOrd.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
             </tr>
           </tbody>
@@ -826,7 +832,7 @@
       <div class="materials-cement-ledger-stack">
         <div class="materials-table-shell materials-table-shell--cement-bulk">
           <table class="construction-records-table materials-cement-table">
-            <thead class="materials-compact-thead"><tr><th class="materials-cement-th-idx" scope="col" title="순번">#</th><th title="발주요청일">요청</th><th title="입고일">입고</th><th title="발주(tf)">발주</th><th title="반입(tf)">반입</th><th>비고</th><th class="materials-cement-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
+            <thead class="materials-compact-thead"><tr><th class="materials-cement-th-idx" scope="col" title="순번">#</th><th title="발주 요청일">요청</th><th title="현장 입고일">입고일</th><th title="해당 행 시멘트 입고량(tf)">입고(tf)</th><th title="위에서부터 이 행까지 입고(tf) 합">입고누계</th><th>비고</th><th class="materials-cement-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
             <tbody id="materials-tbody-cement"></tbody>
           </table>
         </div>
@@ -1873,26 +1879,37 @@
   function renderCement() {
     const tb = document.getElementById("materials-tbody-cement");
     if (!tb) return;
-    tb.innerHTML = (bundle.cementLedger || [])
-      .map(
-        (c, i) => `
+    const ledger = bundle.cementLedger || [];
+    let run = 0;
+    tb.innerHTML = ledger
+      .map((c, i) => {
+        const v = cementLedgerRowIntakeTf(c);
+        run += v;
+        const vDisp = Number.isFinite(v) ? v : 0;
+        return `
       <tr>
         <td class="materials-cement-td-idx">${i + 1}</td>
         <td><input type="date" class="save-work-input materials-date-inp" data-cem="${i}" data-f="requestDate" value="${escapeHtml(toDateInputValue(c.requestDate))}" /></td>
         <td><input type="date" class="save-work-input materials-date-inp" data-cem="${i}" data-f="arrivalDate" value="${escapeHtml(toDateInputValue(c.arrivalDate))}" /></td>
-        <td><input type="number" step="0.001" class="save-work-input" data-cem="${i}" data-f="orderTf" value="${Number(c.orderTf) || 0}" /></td>
-        <td><input type="number" step="0.001" class="save-work-input" data-cem="${i}" data-f="receiptTf" value="${Number(c.receiptTf) || 0}" /></td>
+        <td><input type="number" step="0.001" class="save-work-input" data-cem="${i}" data-f="intakeTf" value="${vDisp}" /></td>
+        <td class="materials-cement-td-cum" title="1행부터 이 행까지 입고(tf) 합"><span class="materials-cement-cum-val">${run.toFixed(3)}</span><span class="materials-cement-cum-unit"> tf</span></td>
         <td><input class="save-work-input" data-cem="${i}" data-f="note" value="${escapeHtml(c.note)}" /></td>
         <td class="materials-cement-td-del"><button type="button" class="ghost materials-cement-del-btn" data-del-cem="${i}" aria-label="이 행 삭제" title="삭제">×</button></td>
-      </tr>`,
-      )
+      </tr>`;
+      })
       .join("");
     tb.querySelectorAll("input[data-cem]").forEach((inp) => {
       inp.addEventListener("change", () => {
         const i = Number(inp.dataset.cem);
         const c = bundle.cementLedger[i];
         if (!c) return;
-        c[inp.dataset.f] = inp.type === "number" ? Number(inp.value) : inp.value;
+        if (inp.dataset.f === "intakeTf") {
+          const n = inp.type === "number" ? Number(inp.value) || 0 : 0;
+          c.orderTf = n;
+          c.receiptTf = n;
+        } else {
+          c[inp.dataset.f] = inp.type === "number" ? Number(inp.value) : inp.value;
+        }
         scheduleSave();
         fullRender();
       });
