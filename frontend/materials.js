@@ -1805,15 +1805,23 @@
     if (!tb) return;
     tb.innerHTML = (bundle.damageReturns || [])
       .map(
-        (d, i) => `
-      <tr>
+        (d, i) => {
+          const supClass = supplierRowToneClass(d.supplierId);
+          const lenRaw = d.lengthM;
+          const lenDisp =
+            lenRaw === "" || lenRaw === null || lenRaw === undefined || (typeof lenRaw === "number" && !Number.isFinite(lenRaw))
+              ? ""
+              : String(lenRaw);
+          return `
+      <tr class="materials-damage-row ${supClass}">
         <td>${i + 1}</td>
         <td class="materials-damage-td-date"><input type="date" class="save-work-input materials-date-inp materials-damage-date-inp" data-dmg="${i}" data-f="date" value="${escapeHtml(toDateInputValue(d.date))}" /></td>
-        <td><select class="save-work-select" data-dmg="${i}" data-f="supplierId">${supOpts}</select></td>
-        <td><input type="number" class="save-work-input" data-dmg="${i}" data-f="lengthM" value="${Number(d.lengthM) || ""}" step="1" min="0" /></td>
+        <td class="materials-damage-td-supplier"><select class="save-work-select" data-dmg="${i}" data-f="supplierId">${supOpts}</select></td>
+        <td><input type="number" class="save-work-input" data-dmg="${i}" data-f="lengthM" value="${escapeHtml(lenDisp)}" step="1" min="0" placeholder="" /></td>
         <td><input class="save-work-input" data-dmg="${i}" data-f="note" value="${escapeHtml(d.note)}" /></td>
         <td class="materials-damage-td-del"><button type="button" class="ghost materials-damage-del-btn" data-del-dmg="${i}" aria-label="이 행 삭제" title="삭제">×</button></td>
-      </tr>`,
+      </tr>`;
+        },
       )
       .join("");
     tb.querySelectorAll("select[data-dmg]").forEach((sel) => {
@@ -1821,14 +1829,22 @@
       sel.addEventListener("change", () => {
         bundle.damageReturns[Number(sel.dataset.dmg)].supplierId = sel.value;
         scheduleSave();
+        fullRender();
       });
     });
     tb.querySelectorAll("input[data-dmg]").forEach((inp) => {
       inp.addEventListener("change", () => {
         const i = Number(inp.dataset.dmg);
-        const d = bundle.damageReturns[i];
-        if (!d) return;
-        d[inp.dataset.f] = inp.type === "number" ? Number(inp.value) : inp.value;
+        const row = bundle.damageReturns[i];
+        if (!row) return;
+        const f = inp.dataset.f;
+        if (inp.type === "number" && f === "lengthM" && String(inp.value).trim() === "") {
+          row.lengthM = "";
+        } else if (inp.type === "number") {
+          row[f] = Number(inp.value) || 0;
+        } else {
+          row[f] = inp.value;
+        }
         scheduleSave();
         fullRender();
       });
@@ -2128,10 +2144,11 @@
       bundle.damageReturns.push({
         id: rid(),
         date: "",
-        supplierId: (bundle.suppliers[0] && bundle.suppliers[0].id) || "",
-        lengthM: 12,
+        supplierId: "",
+        lengthM: "",
         note: "",
       });
+      scheduleSave();
       fullRender();
     });
     document.getElementById("materials-add-cement")?.addEventListener("click", () => {

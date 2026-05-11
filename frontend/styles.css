@@ -2592,40 +2592,53 @@ body {
   transition: background-color 0.12s ease;
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--0 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--0 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--0 > td {
   background-color: rgba(66, 165, 245, 0.11);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--1 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--1 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--1 > td {
   background-color: rgba(129, 199, 132, 0.14);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--2 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--2 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--2 > td {
   background-color: rgba(255, 183, 77, 0.14);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--3 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--3 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--3 > td {
   background-color: rgba(171, 140, 230, 0.14);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--4 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--4 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--4 > td {
   background-color: rgba(240, 128, 128, 0.12);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--5 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--5 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--5 > td {
   background-color: rgba(128, 222, 234, 0.16);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--6 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--6 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--6 > td {
   background-color: rgba(255, 213, 128, 0.18);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--7 > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--7 > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--7 > td {
   background-color: rgba(186, 104, 200, 0.12);
 }
 
-.materials-receipt-table tbody tr.materials-rcpt-sup--na > td {
+.materials-receipt-table tbody tr.materials-rcpt-sup--na > td,
+.materials-damage-table tbody tr.materials-rcpt-sup--na > td {
   background-color: rgba(120, 130, 145, 0.06);
+}
+
+.materials-damage-table tbody tr.materials-damage-row > td {
+  transition: background-color 0.12s ease;
 }
 
 .materials-receipt-table tbody tr > td.materials-rcpt-qty-td--filled {
