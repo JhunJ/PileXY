@@ -2807,10 +2807,10 @@ body {
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4) {
   width: 1%;
-  max-width: 4.25rem;
-  min-width: 2.75rem;
-  padding-inline: 0.15rem;
-  font-size: 0.68rem;
+  max-width: 4.55rem;
+  min-width: 2.95rem;
+  padding-inline: 0.18rem;
+  font-size: 0.69rem;
   vertical-align: middle;
   white-space: nowrap;
 }
@@ -2818,7 +2818,7 @@ body {
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) {
   width: 1%;
   min-width: 0;
-  max-width: 4rem;
+  max-width: 4.35rem;
   vertical-align: middle;
 }
 
@@ -2826,11 +2826,11 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  max-width: 3.65rem;
+  max-width: 3.95rem;
   margin: 0 auto;
   display: block;
-  padding: 0.12rem 0.18rem;
-  font-size: 0.68rem;
+  padding: 0.13rem 0.2rem;
+  font-size: 0.69rem;
   text-align: center;
 }
 
