@@ -2742,7 +2742,7 @@ body {
   overflow-y: visible;
 }
 
-.materials-grid__aside .materials-table-shell .construction-records-table {
+.materials-grid__aside .materials-table-shell .construction-records-table:not(.materials-supplier-rcpt-table) {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -2805,46 +2805,44 @@ body {
   overflow: visible;
 }
 
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4) {
-  width: 1%;
-  max-width: 4.55rem;
-  min-width: 2.95rem;
-  padding-inline: 0.18rem;
-  font-size: 0.69rem;
+/* 입고(tf) · 입고누계 — 동일 열 폭 */
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(5) {
+  box-sizing: border-box;
+  width: 5.4rem;
+  min-width: 5.4rem;
+  max-width: 5.4rem;
+  padding-inline: 0.2rem;
   vertical-align: middle;
   white-space: nowrap;
 }
 
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) {
-  width: 1%;
-  min-width: 0;
-  max-width: 4.35rem;
-  vertical-align: middle;
-}
-
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) .save-work-input {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  max-width: 3.95rem;
-  margin: 0 auto;
-  display: block;
-  padding: 0.13rem 0.2rem;
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5) {
   font-size: 0.69rem;
-  text-align: center;
 }
 
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(5),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td.materials-cement-td-cum {
-  width: auto;
-  min-width: 4.85rem;
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   font-size: 0.72rem;
   color: #0c4a6e;
-  vertical-align: middle;
-  white-space: nowrap;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) .save-work-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 auto;
+  display: block;
+  padding: 0.13rem 0.18rem;
+  font-size: 0.69rem;
+  text-align: center;
 }
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-cement-cum-unit {
@@ -2962,18 +2960,20 @@ body {
 .materials-grid__aside .materials-supplier-rcpt-table {
   width: max-content;
   min-width: 100%;
+  max-width: none;
   table-layout: auto;
   font-size: 0.7rem;
-  border-collapse: separate;
+  border-collapse: collapse;
   border-spacing: 0;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table th,
 .materials-grid__aside .materials-supplier-rcpt-table td {
-  padding: 0.28rem 0.32rem;
+  padding: 0.26rem 0.28rem;
   box-sizing: border-box;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  border: 1px solid #e2e8f0;
+  overflow-wrap: normal;
+  word-break: normal;
   vertical-align: middle;
 }
 
@@ -2991,13 +2991,13 @@ body {
   left: 0;
   z-index: 2;
   background: #fff;
-  box-shadow: 3px 0 6px rgba(15, 23, 42, 0.06);
+  box-shadow: 2px 0 0 rgba(15, 23, 42, 0.05);
   text-align: left;
-  white-space: normal;
+  white-space: nowrap;
   min-width: 7rem;
-  max-width: min(18rem, 42vw);
+  max-width: none;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.15;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table thead .materials-srcpt-th-name {
@@ -3026,11 +3026,13 @@ body {
   color: #0c4a6e;
   min-width: 4.25rem;
   padding-inline: 0.4rem;
+  overflow: visible;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-m,
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-total-m {
-  min-width: 5.75rem;
+  min-width: 6.5rem;
+  max-width: none;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-join-col {
