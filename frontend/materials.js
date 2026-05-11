@@ -914,6 +914,175 @@
     });
   }
 
+  function ensureReceiptQtyKeys(r) {
+    if (!r) return;
+    if (!r.qtyByLength) r.qtyByLength = {};
+    LENS.forEach((L) => {
+      const k = String(L);
+      if (r.qtyByLength[k] == null) r.qtyByLength[k] = 0;
+    });
+    getJoinLengthRows().forEach((j) => {
+      if (r.qtyByLength[j.key] == null) r.qtyByLength[j.key] = 0;
+    });
+  }
+
+  function receiptRowTotalPieces(r) {
+    if (!r) return 0;
+    let n = 0;
+    LENS.forEach((L) => {
+      n += Number(r.qtyByLength && r.qtyByLength[String(L)]) || 0;
+    });
+    getJoinLengthRows().forEach((j) => {
+      n += Number(r.qtyByLength && r.qtyByLength[j.key]) || 0;
+    });
+    return n;
+  }
+
+  function receiptPasteColumnsSpec() {
+    const cols = [
+      { kind: "date", f: "requestDate" },
+      { kind: "date", f: "arrivalDate" },
+      { kind: "supplier", f: "supplierId" },
+      { kind: "int", f: "amTrucks" },
+      { kind: "int", f: "pmTrucks" },
+    ];
+    LENS.forEach((L) => cols.push({ kind: "qty", key: String(L) }));
+    getJoinLengthRows().forEach((j) => cols.push({ kind: "qty", key: j.key }));
+    cols.push({ kind: "note", f: "note" });
+    return cols;
+  }
+
+  function getReceiptPasteStartColIndex(activeEl) {
+    if (!activeEl || !activeEl.dataset) return -1;
+    const f = activeEl.dataset.f;
+    if (f === "requestDate") return 0;
+    if (f === "arrivalDate") return 1;
+    if (f === "supplierId") return 2;
+    if (f === "amTrucks") return 3;
+    if (f === "pmTrucks") return 4;
+    if (activeEl.dataset.len != null) {
+      const k = String(activeEl.dataset.len);
+      return receiptPasteColumnsSpec().findIndex((c) => c.kind === "qty" && c.key === k);
+    }
+    if (activeEl.dataset.join != null) {
+      const k = String(activeEl.dataset.join);
+      return receiptPasteColumnsSpec().findIndex((c) => c.kind === "qty" && c.key === k);
+    }
+    if (f === "note") return receiptPasteColumnsSpec().findIndex((c) => c.kind === "note");
+    return -1;
+  }
+
+  function matchSupplierIdFromPaste(text) {
+    const t = String(text ?? "").trim();
+    if (!t) return "";
+    const list = bundle.suppliers || [];
+    const byId = list.find((s) => String(s.id) === t);
+    if (byId) return String(byId.id);
+    const exact = list.find((s) => String(s.name || "").trim() === t);
+    if (exact) return String(exact.id);
+    const low = t.toLowerCase();
+    const loose = list.find((s) => String(s.name || "").toLowerCase().includes(low) || low.includes(String(s.name || "").toLowerCase()));
+    return loose ? String(loose.id) : "";
+  }
+
+  function parsePastedReceiptDate(raw) {
+    const s = String(raw ?? "").trim();
+    if (!s) return "";
+    const lo = parseDateLoose(s);
+    if (lo) return lo;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 20000 && n < 65000) {
+      const epoch = Date.UTC(1899, 11, 30);
+      const d = new Date(epoch + Math.round(n) * 86400000);
+      if (!Number.isNaN(d.getTime())) {
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      }
+    }
+    return "";
+  }
+
+  function applyReceiptPasteOneCell(r, col, raw) {
+    const rawStr = String(raw ?? "");
+    if (col.kind === "note") {
+      const v = rawStr.replace(/\r/g, "").replace(/^\uFEFF/, "").trim();
+      if (v === String(r.note ?? "")) return false;
+      r.note = v;
+      return true;
+    }
+    if (col.kind === "supplier") {
+      const id = matchSupplierIdFromPaste(rawStr);
+      if (!id || id === String(r.supplierId ?? "")) return false;
+      r.supplierId = id;
+      return true;
+    }
+    if (col.kind === "date") {
+      const v = parsePastedReceiptDate(rawStr);
+      if (!v || v === String(r[col.f] ?? "")) return false;
+      r[col.f] = v;
+      return true;
+    }
+    if (col.kind === "int") {
+      const v = parseMatrixPasteCell(rawStr);
+      if (v === null) return false;
+      const cur = Number(r[col.f]) || 0;
+      if (v === cur) return false;
+      r[col.f] = v;
+      return true;
+    }
+    if (col.kind === "qty") {
+      const v = parseMatrixPasteCell(rawStr);
+      if (v === null) return false;
+      if (!r.qtyByLength) r.qtyByLength = {};
+      if (Number(r.qtyByLength[col.key]) === v) return false;
+      r.qtyByLength[col.key] = v;
+      return true;
+    }
+    return false;
+  }
+
+  function onReceiptsTablePaste(e) {
+    const tbody = e.currentTarget;
+    if (!(tbody instanceof HTMLElement) || tbody.id !== "materials-tbody-receipts") return;
+    const text = e.clipboardData?.getData("text/plain");
+    if (!text || !matrixPasteLooksLikeGrid(text)) return;
+    const active = document.activeElement;
+    if (!tbody.contains(active)) return;
+    const startCol = getReceiptPasteStartColIndex(active);
+    if (startCol < 0) return;
+    const startRcpt = Number(active.dataset?.rcpt);
+    if (!Number.isFinite(startRcpt)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const grid = matrixPasteTrimTrailingEmptyCols(parseExcelPastedGrid(text));
+    const spec = receiptPasteColumnsSpec();
+    let changed = false;
+    grid.forEach((pasteRow, dr) => {
+      const ri = startRcpt + dr;
+      const r = bundle.receipts[ri];
+      if (!r) return;
+      ensureReceiptQtyKeys(r);
+      if (!Array.isArray(pasteRow)) return;
+      pasteRow.forEach((cell, dc) => {
+        const ci = startCol + dc;
+        if (ci >= spec.length) return;
+        if (applyReceiptPasteOneCell(r, spec[ci], cell)) changed = true;
+      });
+    });
+    if (changed) {
+      scheduleSave();
+      fullRender();
+    }
+  }
+
+  function supplierRowToneClass(supplierId) {
+    const raw = String(supplierId ?? "").trim();
+    if (!raw) return "materials-rcpt-sup--na";
+    const idx = (bundle.suppliers || []).findIndex((s) => String(s.id) === raw);
+    if (idx < 0) return "materials-rcpt-sup--na";
+    return `materials-rcpt-sup--${idx % 8}`;
+  }
+
   function renderTruckRules() {
     const tb = document.getElementById("materials-tbody-truck");
     if (!tb) return;
@@ -945,9 +1114,18 @@
     const thead = document.getElementById("materials-thead-receipts");
     const tbody = document.getElementById("materials-tbody-receipts");
     if (!thead || !tbody) return;
+    const joinRows = getJoinLengthRows();
     const nLen = LENS.length;
-    const lenGroup = `<th colspan="${nLen}" class="materials-rcpt-len-group" title="길이별 본수(5~15m)">본수 (m)</th>`;
-    const lenSub = LENS.map((L) => `<th class="materials-len-col" title="${L}m">${L}</th>`).join("");
+    const nJoin = joinRows.length;
+    const lenGroup = `<th colspan="${nLen + nJoin}" class="materials-rcpt-len-group" title="5~15m 및 단본 이음(J총연장) 본수">본수 (m)</th>`;
+    const lenSub =
+      LENS.map((L) => `<th class="materials-len-col" title="${L}m">${L}</th>`).join("") +
+      joinRows
+        .map(
+          (j) =>
+            `<th class="materials-len-col materials-len-col--join" title="단본 이음 ${j.totalM}m (${j.label})">${escapeHtml(j.key)}</th>`,
+        )
+        .join("");
     thead.innerHTML = `<tr>
       <th rowspan="2" title="순번">#</th>
       <th rowspan="2" title="발주요청일">요청</th>
@@ -956,24 +1134,38 @@
       <th rowspan="2" title="오전 대수">오전</th>
       <th rowspan="2" title="오후 대수">오후</th>
       ${lenGroup}
+      <th rowspan="2" class="materials-rcpt-th-sum" title="이 행 길이·이음 본수 합계">Σ</th>
       <th rowspan="2" title="비고">메모</th>
       <th rowspan="2" class="materials-th-del" title="행 삭제">삭제</th>
     </tr><tr>${lenSub}</tr>`;
     tbody.innerHTML = (bundle.receipts || [])
       .map((r, i) => {
         if (!inFilterRange(r.requestDate) && !inFilterRange(r.arrivalDate)) return "";
+        ensureReceiptQtyKeys(r);
+        const supClass = supplierRowToneClass(r.supplierId);
         const qcells = LENS.map((L) => {
-          const v = (r.qtyByLength && r.qtyByLength[String(L)]) || 0;
-          return `<td><input type="number" min="0" step="1" class="save-work-input materials-cell-inp" data-rcpt="${i}" data-len="${L}" value="${v}" /></td>`;
+          const v = Number(r.qtyByLength && r.qtyByLength[String(L)]) || 0;
+          const fill = v > 0 ? " materials-rcpt-qty-td--filled" : "";
+          return `<td class="materials-rcpt-qty-td${fill}"><input type="number" min="0" step="1" class="save-work-input materials-cell-inp" data-rcpt="${i}" data-len="${L}" value="${v}" /></td>`;
         }).join("");
-        return `<tr>
+        const jcells = joinRows
+          .map((j) => {
+            const v = Number(r.qtyByLength && r.qtyByLength[j.key]) || 0;
+            const fill = v > 0 ? " materials-rcpt-qty-td--filled" : "";
+            return `<td class="materials-rcpt-qty-td materials-rcpt-qty-td--join${fill}"><input type="number" min="0" step="1" class="save-work-input materials-cell-inp" data-rcpt="${i}" data-join="${escapeHtml(j.key)}" value="${v}" title="${j.totalM}m 이음" /></td>`;
+          })
+          .join("");
+        const rowSum = receiptRowTotalPieces(r);
+        return `<tr class="materials-rcpt-row ${supClass}">
           <td>${i + 1}</td>
           <td><input type="date" class="save-work-input materials-date-inp" data-rcpt="${i}" data-f="requestDate" value="${escapeHtml(toDateInputValue(r.requestDate))}" /></td>
           <td><input type="date" class="save-work-input materials-date-inp" data-rcpt="${i}" data-f="arrivalDate" value="${escapeHtml(toDateInputValue(r.arrivalDate))}" /></td>
-          <td><select class="save-work-select" data-rcpt="${i}" data-f="supplierId">${supOpts}</select></td>
+          <td class="materials-rcpt-td-supplier"><select class="save-work-select" data-rcpt="${i}" data-f="supplierId">${supOpts}</select></td>
           <td><input type="number" min="0" class="save-work-input materials-am-pm-inp" data-rcpt="${i}" data-f="amTrucks" value="${Number(r.amTrucks) || 0}" /></td>
           <td><input type="number" min="0" class="save-work-input materials-am-pm-inp" data-rcpt="${i}" data-f="pmTrucks" value="${Number(r.pmTrucks) || 0}" /></td>
           ${qcells}
+          ${jcells}
+          <td class="materials-rcpt-row-sum" title="이 행 본수 합(5~15m + 이음)"><span class="materials-rcpt-row-sum-num">${rowSum}</span></td>
           <td><input class="save-work-input" data-rcpt="${i}" data-f="note" value="${escapeHtml(r.note)}" /></td>
           <td><button type="button" class="ghost" data-del-rcpt="${i}">삭제</button></td>
         </tr>`;
@@ -985,18 +1177,22 @@
         const i = Number(sel.dataset.rcpt);
         bundle.receipts[i].supplierId = sel.value;
         scheduleSave();
+        fullRender();
       });
     });
     tbody.querySelectorAll("input[data-rcpt]").forEach((inp) => {
       inp.addEventListener("change", () => {
         const i = Number(inp.dataset.rcpt);
-        const r = bundle.receipts[i];
-        if (!r) return;
+        const row = bundle.receipts[i];
+        if (!row) return;
         if (inp.dataset.len) {
-          if (!r.qtyByLength) r.qtyByLength = {};
-          r.qtyByLength[String(inp.dataset.len)] = Number(inp.value) || 0;
+          if (!row.qtyByLength) row.qtyByLength = {};
+          row.qtyByLength[String(inp.dataset.len)] = Number(inp.value) || 0;
+        } else if (inp.dataset.join) {
+          if (!row.qtyByLength) row.qtyByLength = {};
+          row.qtyByLength[String(inp.dataset.join)] = Number(inp.value) || 0;
         } else if (inp.dataset.f) {
-          r[inp.dataset.f] = inp.type === "number" ? Number(inp.value) : inp.value;
+          row[inp.dataset.f] = inp.type === "number" ? Number(inp.value) : inp.value;
         }
         scheduleSave();
         fullRender();
@@ -1010,6 +1206,7 @@
         fullRender();
       });
     });
+    tbody.addEventListener("paste", onReceiptsTablePaste, true);
   }
 
   function matrixColumnKeys() {
@@ -1887,6 +2084,9 @@
       LENS.forEach((L) => {
         q[String(L)] = 0;
       });
+      getJoinLengthRows().forEach((j) => {
+        q[j.key] = 0;
+      });
       bundle.receipts.push({
         id: rid(),
         requestDate: isoToday(),
@@ -1907,6 +2107,9 @@
       LENS.forEach((L) => {
         const k = String(L);
         q[k] = Number(src.qtyByLength && src.qtyByLength[k]) || 0;
+      });
+      getJoinLengthRows().forEach((j) => {
+        q[j.key] = Number(src.qtyByLength && src.qtyByLength[j.key]) || 0;
       });
       arr.push({
         id: rid(),

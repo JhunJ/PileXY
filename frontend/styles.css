@@ -2571,7 +2571,74 @@ body {
 }
 
 .materials-receipt-table {
-  min-width: 1040px;
+  min-width: 1180px;
+}
+
+.materials-receipt-table .materials-rcpt-th-sum,
+.materials-receipt-table .materials-rcpt-row-sum {
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.76rem;
+  white-space: nowrap;
+  padding: 0.22rem 0.35rem;
+  vertical-align: middle;
+}
+
+.materials-receipt-table .materials-rcpt-row-sum-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-row > td {
+  transition: background-color 0.12s ease;
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--0 > td {
+  background-color: rgba(66, 165, 245, 0.11);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--1 > td {
+  background-color: rgba(129, 199, 132, 0.14);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--2 > td {
+  background-color: rgba(255, 183, 77, 0.14);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--3 > td {
+  background-color: rgba(171, 140, 230, 0.14);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--4 > td {
+  background-color: rgba(240, 128, 128, 0.12);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--5 > td {
+  background-color: rgba(128, 222, 234, 0.16);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--6 > td {
+  background-color: rgba(255, 213, 128, 0.18);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--7 > td {
+  background-color: rgba(186, 104, 200, 0.12);
+}
+
+.materials-receipt-table tbody tr.materials-rcpt-sup--na > td {
+  background-color: rgba(120, 130, 145, 0.06);
+}
+
+.materials-receipt-table tbody tr > td.materials-rcpt-qty-td--filled {
+  background-color: rgba(255, 171, 64, 0.38) !important;
+}
+
+.materials-receipt-table tbody tr > td.materials-rcpt-qty-td--join.materials-rcpt-qty-td--filled {
+  background-color: rgba(186, 104, 200, 0.32) !important;
+}
+
+.materials-receipt-table tbody tr > td.materials-rcpt-row-sum {
+  background-color: rgba(33, 40, 52, 0.06) !important;
+  font-weight: 800;
 }
 
 .materials-cell-inp {
