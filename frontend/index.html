@@ -26,6 +26,22 @@
           </div>
         </div>
         <div class="header-actions">
+          <div class="header-action-group header-action-group--hide-sm">
+            <span class="header-action-group-label">대시보드</span>
+            <div class="header-action-group-buttons">
+              <button type="button" id="header-dashboard-btn" class="header-construction-btn" title="대시보드 전용 패널을 엽니다.">
+                대시보드
+              </button>
+            </div>
+          </div>
+          <div class="header-action-group header-action-group--hide-sm">
+            <span class="header-action-group-label">자재</span>
+            <div class="header-action-group-buttons">
+              <button type="button" id="header-materials-btn" class="header-construction-btn" title="시공 패널의 자재관리 탭을 엽니다.">
+                자재
+              </button>
+            </div>
+          </div>
           <div class="header-action-group">
             <span class="header-action-group-label">시공</span>
             <div class="header-action-group-buttons">
@@ -294,6 +310,41 @@
                 <div id="version-compare-excel-summary" class="version-compare-excel-summary"></div>
                 <div id="version-compare-excel-issues" class="version-compare-excel-issues"></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="dashboard-panel" class="dashboard-panel" aria-hidden="true">
+        <div class="dashboard-card">
+          <div class="dashboard-header">
+            <div class="dashboard-header-text">
+              <strong id="dashboard-panel-title">대시보드 · 개요</strong>
+              <p id="dashboard-panel-subtitle" class="dashboard-subtitle">
+                프로젝트·공정 요약 등을 한 화면에서 볼 수 있도록 구성할 예정입니다.
+              </p>
+            </div>
+            <button type="button" id="dashboard-panel-close" class="ghost" aria-label="닫기">닫기</button>
+          </div>
+          <div class="dashboard-body">
+            <div class="dashboard-subtab-strip" role="tablist" aria-label="대시보드 탭">
+              <button type="button" class="dashboard-subtab is-active" data-dashboard-tab="overview">개요</button>
+              <button type="button" class="dashboard-subtab" data-dashboard-tab="reports">보고</button>
+            </div>
+            <div class="dashboard-main">
+              <section class="construction-section dashboard-section is-active" data-dashboard-panel="overview">
+                <div class="construction-section-title">
+                  <span>개요</span>
+                  <small>프로젝트·공정 요약을 한눈에 볼 수 있도록 구성할 예정입니다.</small>
+                </div>
+                <p class="construction-placeholder-hint">화면 구성은 준비 중입니다. 위 탭으로 보고 화면을 전환할 수 있습니다.</p>
+              </section>
+              <section class="construction-section dashboard-section" data-dashboard-panel="reports">
+                <div class="construction-section-title">
+                  <span>보고</span>
+                  <small>표·보내기·주기 보고를 둘 예정입니다.</small>
+                </div>
+                <p class="construction-placeholder-hint">화면 구성은 준비 중입니다.</p>
+              </section>
             </div>
           </div>
         </div>

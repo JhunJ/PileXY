@@ -12065,6 +12065,7 @@ function countByBuilding(data) {
 
 function openVersionComparePanel() {
   if (!versionComparePanel) return;
+  if (typeof window.pilexyCloseDashboardPanel === "function") window.pilexyCloseDashboardPanel();
   versionComparePanel.classList.add("open");
   versionComparePanel.setAttribute("aria-hidden", "false");
   closeVersionCompareExcelModal();

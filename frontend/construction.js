@@ -25,6 +25,8 @@
       <button type="button" class="construction-tab is-active" data-tab="status">시공현황</button>
       <button type="button" class="construction-tab" data-tab="settlement">기성정리</button>
       <button type="button" class="construction-tab" data-tab="parcel-review">필지 검토</button>
+      <button type="button" class="construction-tab" data-tab="materials-mgmt">자재관리</button>
+      <button type="button" class="construction-tab" data-tab="billing-mgmt">정산관리</button>
     </div>
     <div class="construction-drawer-body">
       <section class="construction-section construction-tab-panel" data-panel="settings">
@@ -562,6 +564,20 @@
           <pre id="construction-parcel-json" class="construction-manual-debug-pre construction-parcel-json-pre" spellcheck="false">(실행 전)</pre>
         </details>
       </section>
+      <section class="construction-section construction-tab-panel" data-panel="materials-mgmt">
+        <div class="construction-section-title">
+          <span>자재관리</span>
+          <small>입고·출고·현장 재고 등 자재 흐름을 한곳에서 다룰 예정입니다.</small>
+        </div>
+        <p class="construction-placeholder-hint">화면 구성은 준비 중입니다. 상단 <strong>자재</strong> 버튼과 이 탭이 서로 같은 자재관리 영역으로 연결됩니다.</p>
+      </section>
+      <section class="construction-section construction-tab-panel" data-panel="billing-mgmt">
+        <div class="construction-section-title">
+          <span>정산관리</span>
+          <small>기성정리와 별도로 대금·정산 단위를 정리하는 화면을 둘 예정입니다.</small>
+        </div>
+        <p class="construction-placeholder-hint">화면 구성은 준비 중입니다.</p>
+      </section>
       <section class="construction-section construction-tab-panel" data-panel="manual">
         <div class="construction-section-title">
           <span>매뉴얼</span>
@@ -637,6 +653,10 @@
   const constructionTabStrip = q(".construction-tab-strip");
   const constructionTabButtons = qa(".construction-tab");
   const constructionTabPanels = qa(".construction-tab-panel");
+  const dashboardPanel = document.getElementById("dashboard-panel");
+  const dashboardPanelTitle = document.getElementById("dashboard-panel-title");
+  const dashboardPanelSubtitle = document.getElementById("dashboard-panel-subtitle");
+  const dashboardPanelClose = document.getElementById("dashboard-panel-close");
   const constructionUserId = q("#construction-user-id");
   const constructionPassword = q("#construction-password");
   const constructionReportPageUrl = q("#construction-report-page-url");
@@ -862,6 +882,8 @@
     foundationStandaloneMode: false,
     manualStandaloneMode: false,
     parcelStandaloneMode: false,
+    dashboardPanelOpen: false,
+    activeDashboardTab: "overview",
     foundationGroupsInitialized: false,
     foundationSelectablePolylineCacheKey: "",
     foundationSelectablePolylineCache: [],
@@ -3041,6 +3063,8 @@
       "foundation-thickness": "기초골조 두께",
       manual: "매뉴얼",
       "parcel-review": "필지 검토",
+      "materials-mgmt": "자재관리",
+      "billing-mgmt": "정산관리",
     };
     const subtitles = {
       settings: "PDAM 기록지를 현재 프로젝트와 연결해서 시공 흐름과 월별 기성까지 확인합니다.",
@@ -3049,11 +3073,63 @@
       "foundation-thickness": "기초 골조 두께를 지정해서 기성에 연동합니다.",
       manual: "로그인·매뉴얼 본문·질문을 한 화면에서 사용합니다.",
       "parcel-review": "파일 마스터 좌표로 필지 경계를 조회하고 대지 침범을 자동 판정합니다.",
+      "materials-mgmt": "입고·출고·현장 재고 등 자재 흐름을 한곳에서 다룰 예정입니다.",
+      "billing-mgmt": "기성정리와 별도로 대금·정산 단위를 정리하는 화면을 둘 예정입니다.",
     };
     constructionDrawerTitle.textContent = titles[tab] || "시공현황";
     if (constructionDrawerSubtitle) {
       constructionDrawerSubtitle.textContent = subtitles[tab] || subtitles.status;
     }
+  }
+
+  function setDashboardTab(subTab) {
+    if (!dashboardPanel) return;
+    const id = subTab === "reports" ? "reports" : "overview";
+    constructionState.activeDashboardTab = id;
+    dashboardPanel.querySelectorAll(".dashboard-subtab").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.dashboardTab === id);
+    });
+    dashboardPanel.querySelectorAll(".dashboard-section").forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.dashboardPanel === id);
+    });
+    const titles = { overview: "개요", reports: "보고" };
+    const desc = {
+      overview: "프로젝트·공정 요약 등을 한 화면에서 볼 수 있도록 구성할 예정입니다.",
+      reports: "표·보내기·주기 보고를 둘 예정입니다.",
+    };
+    if (dashboardPanelTitle) {
+      dashboardPanelTitle.textContent = `대시보드 · ${titles[id] || titles.overview}`;
+    }
+    if (dashboardPanelSubtitle) {
+      dashboardPanelSubtitle.textContent = desc[id] || desc.overview;
+    }
+    if (typeof window.pilexySendVirtualPageView === "function") {
+      const label = id === "reports" ? "대시보드 · 보고" : "대시보드 · 개요";
+      const path = id === "reports" ? "/pilexy/dashboard/reports" : "/pilexy/dashboard/overview";
+      window.pilexySendVirtualPageView(path, label);
+    }
+  }
+
+  function closeDashboardPanel() {
+    if (!dashboardPanel) return;
+    dashboardPanel.classList.remove("open");
+    dashboardPanel.setAttribute("aria-hidden", "true");
+    constructionState.dashboardPanelOpen = false;
+  }
+
+  function openDashboardPanel(options = {}) {
+    if (!dashboardPanel) return;
+    if (constructionState.isOpen) closeConstructionDrawer();
+    if (typeof closeVersionComparePanel === "function") closeVersionComparePanel();
+    const nextDash =
+      typeof options.dashboardInitialTab === "string" && options.dashboardInitialTab
+        ? options.dashboardInitialTab
+        : constructionState.activeDashboardTab || "overview";
+    constructionState.activeDashboardTab = nextDash === "reports" ? "reports" : "overview";
+    dashboardPanel.classList.add("open");
+    dashboardPanel.setAttribute("aria-hidden", "false");
+    constructionState.dashboardPanelOpen = true;
+    setDashboardTab(constructionState.activeDashboardTab);
   }
 
   function applyDrawerLayoutMode() {
@@ -3135,6 +3211,8 @@
         "foundation-thickness": ["/pilexy/construction/foundation-thickness", "시공 · 기초골조 두께"],
         manual: ["/pilexy/construction/manual", "시공 · 매뉴얼"],
         "parcel-review": ["/pilexy/construction/parcel-review", "시공 · 필지 검토"],
+        "materials-mgmt": ["/pilexy/construction/materials-mgmt", "시공 · 자재관리"],
+        "billing-mgmt": ["/pilexy/construction/billing-mgmt", "시공 · 정산관리"],
       }[tab];
       if (vp) window.pilexySendVirtualPageView(vp[0], vp[1]);
     }
@@ -3142,6 +3220,7 @@
 
   function openConstructionDrawer(tab, options = {}) {
     constructionState.isOpen = true;
+    if (constructionState.dashboardPanelOpen) closeDashboardPanel();
     constructionState.foundationStandaloneMode = Boolean(
       options?.foundationStandaloneMode && tab === "foundation-thickness",
     );
@@ -3158,6 +3237,7 @@
     constructionState.isOpen = false;
     constructionDrawer.classList.remove("open");
     constructionDrawer.setAttribute("aria-hidden", "true");
+    applyDrawerLayoutMode();
   }
 
   function fillSelect(select, options, value, placeholder, mapOption) {
@@ -7935,9 +8015,12 @@ function inferOpenRectangleVertices(vertices) {
         constructionState.manualStandaloneMode
         || constructionState.foundationStandaloneMode
         || constructionState.parcelStandaloneMode
+        || constructionState.dashboardPanelOpen
         || constructionState.activeTab === "manual"
         || constructionState.activeTab === "parcel-review"
-        || constructionState.activeTab === "foundation-thickness";
+        || constructionState.activeTab === "foundation-thickness"
+        || constructionState.activeTab === "materials-mgmt"
+        || constructionState.activeTab === "billing-mgmt";
       if (!keepDrawerOpen) {
         closeConstructionDrawer();
       }
@@ -8539,6 +8622,20 @@ function inferOpenRectangleVertices(vertices) {
   if (constructionParcelReviewHeaderBtn) {
     constructionParcelReviewHeaderBtn.addEventListener("click", () => {
       openConstructionDrawer("parcel-review", { parcelStandaloneMode: true });
+    });
+  }
+
+  const headerMaterialsBtn = document.getElementById("header-materials-btn");
+  if (headerMaterialsBtn) {
+    headerMaterialsBtn.addEventListener("click", () => {
+      openConstructionDrawer("materials-mgmt");
+    });
+  }
+
+  const headerDashboardBtn = document.getElementById("header-dashboard-btn");
+  if (headerDashboardBtn && dashboardPanel) {
+    headerDashboardBtn.addEventListener("click", () => {
+      openDashboardPanel();
     });
   }
 
@@ -10263,6 +10360,22 @@ function inferOpenRectangleVertices(vertices) {
       renderProjectContext();
     });
   });
+
+  if (dashboardPanelClose && dashboardPanel) {
+    dashboardPanelClose.addEventListener("click", () => {
+      closeDashboardPanel();
+    });
+  }
+
+  if (dashboardPanel) {
+    dashboardPanel.querySelectorAll(".dashboard-subtab").forEach((button) => {
+      button.addEventListener("click", () => {
+        setDashboardTab(button.dataset.dashboardTab);
+      });
+    });
+  }
+
+  window.pilexyCloseDashboardPanel = closeDashboardPanel;
 
   constructionDatasetApply.addEventListener("click", async () => {
     try {
