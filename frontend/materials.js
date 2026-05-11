@@ -729,7 +729,7 @@
 
     <section class="materials-block">
       <h3 class="materials-h3" title="길이별 집계">길이별 요약</h3>
-      <p class="construction-placeholder-hint materials-block-intro-hint">반입=입고표 합계(기간 필터) · 사용=시공 완료(PDAM 매핑, 파일구분 단본·합계 m) · 미발주=계획−반입${pdamOrphanLine} · <strong>단본 이음</strong> 본수는 <strong>단본 이음 규격</strong>에서 정한 두 구간(m)을 동별 계획의 총연장 열에 반영해 표시합니다.</p>
+      <p class="construction-placeholder-hint materials-block-intro-hint">반입=기간 내 입고 합 · 사용=PDAM 시공 완료(단본·합계 m) · 미발주=계획−반입 · 단본 이음=규격의 두 구간(m)으로 총연장 본수를 길이 열에 나눔${pdamOrphanLine}</p>
       <div class="materials-table-shell">
         <table class="construction-records-table materials-summary-table">
           <thead><tr><th>길이</th><th>계획</th><th>반입</th><th title="PDAM 시공 완료 본수(파일구분 단본 또는 합계 m)">사용</th><th title="파손·반출 합">파손</th><th>재고</th><th title="계획−반입">미발주</th></tr></thead>
@@ -740,7 +740,6 @@
 
     <section class="materials-block">
       <h3 class="materials-h3" title="입고·발주 표와 동일 기간 필터">업체별 말뚝·파일 발주 현황</h3>
-      <p class="construction-placeholder-hint materials-block-intro-hint">필터 기간에 포함된 <strong>입고·발주</strong> 행만 합산합니다. 열은 길이(m)별 본수(단본 이음 본수는 10m·이음 길이 열에 각각 합산), <strong>Σ본·총M</strong>은 실제 말뚝 본수·연장(m) 기준입니다.</p>
       <div class="materials-table-shell materials-table-shell--supplier-rcpt">
         <table class="construction-records-table materials-supplier-rcpt-table" id="materials-table-by-supplier">
           <thead id="materials-thead-by-supplier"></thead>
