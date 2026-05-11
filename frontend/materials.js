@@ -669,7 +669,7 @@
             ${cementMode === "detail" ? '<span class="materials-cement-pick-badge">요약·미발주에 적용</span>' : '<span class="materials-cement-pick-hint">클릭하여 선택</span>'}
           </button>
         </div>
-        <p class="construction-placeholder-hint materials-cement-req-line">가중 연장(계획 기준) 약 <strong>${cementEst.totalMeter.toFixed(2)}</strong> m · 적용값 <strong id="materials-cement-req">${reqTon.toFixed(3)}</strong> tf</p>
+        <p class="construction-placeholder-hint materials-cement-req-line">계획 반영 연장(m) 약 <strong>${cementEst.totalMeter.toFixed(2)}</strong> m · 적용값 <strong id="materials-cement-req">${reqTon.toFixed(3)}</strong> tf</p>
       </div>
     </div>
   </div>
@@ -766,7 +766,7 @@
           <p class="materials-cement-bulk-strip-title">PDAM 시공 · 길이별 사용 기준</p>
           <dl class="materials-cement-bulk-kv">
             <div class="materials-cement-bulk-kv-row">
-              <dt>가중 연장</dt>
+              <dt title="PDAM 시공 완료 기준, 길이(m)×본수(및 단본 이음 총연장)를 합산한 값">시공 연장 합계(m)</dt>
               <dd><strong>${cementPdamEst.totalMeter.toFixed(2)}</strong> m</dd>
             </div>
             <div class="materials-cement-bulk-kv-row">
@@ -794,13 +794,6 @@
           <p class="materials-cement-bulk-foot">벌크 반입 누적에서 PDAM 기준 예상 사용량을 뺀 값입니다.</p>
         </div>
       </div>
-      <div class="materials-table-shell materials-table-shell--cement-bulk">
-        <table class="construction-records-table materials-cement-table">
-          <thead class="materials-compact-thead"><tr><th title="발주요청일">요청</th><th title="입고일">입고</th><th title="발주(tf)">발주</th><th title="반입(tf)">반입</th><th>비고</th><th class="materials-cement-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
-          <tbody id="materials-tbody-cement"></tbody>
-        </table>
-      </div>
-      <button type="button" class="ghost" id="materials-add-cement">행 추가</button>
       <div class="materials-cement-summary-strip" role="note" aria-label="시멘트 누적 요약">
         <table class="materials-cement-summary-table">
           <tbody>
@@ -822,6 +815,15 @@
             </tr>
           </tbody>
         </table>
+      </div>
+      <div class="materials-cement-ledger-stack">
+        <div class="materials-table-shell materials-table-shell--cement-bulk">
+          <table class="construction-records-table materials-cement-table">
+            <thead class="materials-compact-thead"><tr><th class="materials-cement-th-idx" scope="col" title="순번">#</th><th title="발주요청일">요청</th><th title="입고일">입고</th><th title="발주(tf)">발주</th><th title="반입(tf)">반입</th><th>비고</th><th class="materials-cement-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
+            <tbody id="materials-tbody-cement"></tbody>
+          </table>
+        </div>
+        <button type="button" class="ghost" id="materials-add-cement">행 추가</button>
       </div>
     </section>
 
@@ -1868,6 +1870,7 @@
       .map(
         (c, i) => `
       <tr>
+        <td class="materials-cement-td-idx">${i + 1}</td>
         <td><input type="date" class="save-work-input materials-date-inp" data-cem="${i}" data-f="requestDate" value="${escapeHtml(toDateInputValue(c.requestDate))}" /></td>
         <td><input type="date" class="save-work-input materials-date-inp" data-cem="${i}" data-f="arrivalDate" value="${escapeHtml(toDateInputValue(c.arrivalDate))}" /></td>
         <td><input type="number" step="0.001" class="save-work-input" data-cem="${i}" data-f="orderTf" value="${Number(c.orderTf) || 0}" /></td>

@@ -2755,53 +2755,90 @@ body {
   min-width: 0;
 }
 
-/* 시멘트 벌크: 패널 폭 안에 맞춤 — 가로 스크롤 없이 요청·입고 열을 가능한 한 좁게 */
+/* 시멘트 벌크 입력표: 세로 스크롤 + 패널 폭 안 맞춤 */
 .materials-grid__aside .materials-table-shell--cement-bulk {
-  overflow-x: hidden;
+  overflow-x: auto;
+  overflow-y: auto;
   max-width: 100%;
+  max-height: min(260px, 42vh);
+  -webkit-overflow-scrolling: touch;
 }
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
 }
 
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(1),
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(1),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f1f5f9;
+  box-shadow: 0 1px 0 #e2e8f0;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th.materials-cement-th-idx,
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td.materials-cement-td-idx {
+  width: 2rem;
+  min-width: 2rem;
+  max-width: 2.35rem;
+  padding: 0.22rem 0.1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 0.72rem;
+  color: #64748b;
+  vertical-align: middle;
+}
+
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(2),
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(2) {
-  width: 14%;
-  min-width: 0;
-  max-width: 8.5rem;
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(2),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(3),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(3) {
+  width: auto;
+  min-width: 10.25rem;
+  max-width: none;
   white-space: nowrap;
   vertical-align: middle;
+  overflow: visible;
 }
 
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(3),
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(3),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4),
-.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) {
-  width: 10%;
-  min-width: 0;
-  vertical-align: middle;
-}
-
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(5) {
-  width: 38%;
-  min-width: 0;
+  width: auto;
+  min-width: 4.75rem;
   vertical-align: middle;
+}
+
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(6),
+.materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(6) {
+  width: auto;
+  min-width: 6rem;
+  vertical-align: middle;
+}
+
+.materials-cement-ledger-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-date-inp {
   box-sizing: border-box;
-  min-width: 0;
+  min-width: 9.5rem;
   width: 100%;
-  max-width: 100%;
-  padding: 0.18rem 0.22rem;
-  font-size: 0.7rem;
+  max-width: none;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.74rem;
+  overflow: visible;
 }
 
 /* 파손·반출: 순번·삭제 열 축소, 일자·날짜 입력 확대, 삭제 버튼 가로 한 줄 */
@@ -3553,7 +3590,7 @@ body {
 }
 
 .materials-cement-summary-strip {
-  margin-top: 0.55rem;
+  margin-top: 0.5rem;
   padding: 0.45rem 0.55rem 0.5rem;
   border-radius: 10px;
   background: #fffbeb;
