@@ -493,6 +493,7 @@
     const aside = document.querySelector("#materials-panel .materials-grid__aside");
     const settingsShell = document.querySelector("#materials-panel .materials-table-shell--settings");
     const truckShell = document.querySelector("#materials-panel .materials-table-shell--truck");
+    const cementBulkShell = document.querySelector("#materials-panel .materials-table-shell--cement-bulk");
     const wideShells = Array.from(
       document.querySelectorAll("#materials-panel .materials-table-shell--wide, #materials-panel .materials-table-shell--supplier-rcpt"),
     ).map((el) => ({
@@ -504,6 +505,7 @@
       aside: aside ? { top: aside.scrollTop, left: aside.scrollLeft } : null,
       settingsShell: settingsShell ? { top: settingsShell.scrollTop, left: settingsShell.scrollLeft } : null,
       truckShell: truckShell ? { top: truckShell.scrollTop, left: truckShell.scrollLeft } : null,
+      cementBulkShell: cementBulkShell ? { top: cementBulkShell.scrollTop, left: cementBulkShell.scrollLeft } : null,
       wideShells,
       winY: window.scrollY,
       winX: window.scrollX,
@@ -531,6 +533,11 @@
     if (truckShell && snap.truckShell) {
       truckShell.scrollTop = snap.truckShell.top;
       truckShell.scrollLeft = snap.truckShell.left;
+    }
+    const cementBulkShell = document.querySelector("#materials-panel .materials-table-shell--cement-bulk");
+    if (cementBulkShell && snap.cementBulkShell) {
+      cementBulkShell.scrollTop = snap.cementBulkShell.top;
+      cementBulkShell.scrollLeft = snap.cementBulkShell.left;
     }
     const wides = Array.from(
       document.querySelectorAll("#materials-panel .materials-table-shell--wide, #materials-panel .materials-table-shell--supplier-rcpt"),

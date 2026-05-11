@@ -2760,7 +2760,7 @@ body {
   overflow-x: auto;
   overflow-y: auto;
   max-width: 100%;
-  max-height: min(260px, 42vh);
+  max-height: min(340px, 54vh);
   -webkit-overflow-scrolling: touch;
 }
 
