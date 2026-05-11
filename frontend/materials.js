@@ -1771,7 +1771,7 @@
     if (!thead || !tbody) return;
     const rows = aggregateReceiptsBySupplier();
     const lenTh = LENS.map((L) => `<th title="${L}m">${L}</th>`).join("");
-    thead.innerHTML = `<tr><th class="materials-srcpt-th-name" scope="col">업체</th>${lenTh}<th scope="col" title="본수 합계">Σ본</th><th scope="col" title="본수×길이 합계(m)">총M</th></tr>`;
+    thead.innerHTML = `<tr><th class="materials-srcpt-th-name" scope="col">업체</th>${lenTh}<th class="materials-srcpt-num materials-srcpt-th-total-p" scope="col" title="본수 합계">Σ본</th><th class="materials-srcpt-num materials-srcpt-th-total-m" scope="col" title="본수×길이 합계(m)">총M</th></tr>`;
 
     const nCol = 1 + LENS.length + 2;
     if (!rows.length) {

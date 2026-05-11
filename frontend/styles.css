@@ -2887,14 +2887,25 @@ body {
   min-width: 100%;
   table-layout: auto;
   font-size: 0.7rem;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table th,
 .materials-grid__aside .materials-supplier-rcpt-table td {
-  padding: 0.26rem 0.2rem;
+  padding: 0.28rem 0.32rem;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: middle;
+}
+
+/* 길이·Σ본·총M 등 숫자 칸만 한 줄(가로 스크롤로 전체 표시) */
+.materials-grid__aside .materials-supplier-rcpt-table thead th:not(.materials-srcpt-th-name),
+.materials-grid__aside .materials-supplier-rcpt-table td.materials-srcpt-num {
   white-space: nowrap;
+  word-break: normal;
   overflow-wrap: normal;
-  word-break: keep-all;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-name,
@@ -2905,9 +2916,11 @@ body {
   background: #fff;
   box-shadow: 3px 0 6px rgba(15, 23, 42, 0.06);
   text-align: left;
-  min-width: 5.5rem;
-  max-width: 10rem;
+  white-space: normal;
+  min-width: 7rem;
+  max-width: min(18rem, 42vw);
   font-weight: 700;
+  line-height: 1.25;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table thead .materials-srcpt-th-name {
@@ -2924,13 +2937,23 @@ body {
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-num {
   text-align: center;
   font-variant-numeric: tabular-nums;
-  min-width: 1.85rem;
+  min-width: 2rem;
+  padding-inline: 0.35rem;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-p,
-.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-m {
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-m,
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-total-p,
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-total-m {
   font-weight: 800;
   color: #0c4a6e;
+  min-width: 4.25rem;
+  padding-inline: 0.4rem;
+}
+
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-total-m,
+.materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-th-total-m {
+  min-width: 5.75rem;
 }
 
 .materials-grid__aside .materials-supplier-rcpt-table .materials-srcpt-join-col {
