@@ -2742,7 +2742,7 @@ body {
   overflow-y: visible;
 }
 
-.materials-grid__aside .materials-table-shell .construction-records-table:not(.materials-supplier-rcpt-table) {
+.materials-grid__aside .materials-table-shell .construction-records-table:not(.materials-supplier-rcpt-table):not(.materials-cement-table) {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -2798,11 +2798,11 @@ body {
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(3),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(3) {
   width: auto;
-  min-width: 11rem;
+  min-width: 13rem;
   max-width: none;
   white-space: nowrap;
   vertical-align: middle;
-  overflow: visible;
+  overflow: hidden;
 }
 
 /* 입고(tf) · 입고누계 — 동일 열 폭 */
@@ -2871,12 +2871,12 @@ body {
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-date-inp {
   box-sizing: border-box;
-  min-width: 10.5rem;
+  display: block;
+  min-width: 0;
   width: 100%;
-  max-width: none;
+  max-width: 100%;
   padding: 0.18rem 0.28rem;
   font-size: 0.72rem;
-  overflow: visible;
 }
 
 /* 파손·반출: 순번·삭제 열 축소, 일자·날짜 입력 확대, 삭제 버튼 가로 한 줄 */
