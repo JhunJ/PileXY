@@ -1412,7 +1412,8 @@
           rowSum += v;
           colByLen[String(L)] += v;
           const dis = bname === "(동 없음)" ? "disabled" : "";
-          return `<td><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${L}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
+          const fill = v > 0 ? " materials-matrix-qty-td--filled" : "";
+          return `<td class="materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${L}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
         }).join("");
         const jtds = joinRows.map(({ key }, ji) => {
           const v = Number(plan[key]) || 0;
@@ -1420,7 +1421,8 @@
           colByJoin[key] += v;
           const dis = bname === "(동 없음)" ? "disabled" : "";
           const ci = LENS.length + ji;
-          return `<td class="materials-matrix-col--join"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${escapeHtml(key)}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
+          const fill = v > 0 ? " materials-matrix-qty-td--filled materials-matrix-qty-td--join-filled" : "";
+          return `<td class="materials-matrix-col--join materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${escapeHtml(key)}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
         }).join("");
         grand += rowSum;
         return `<tr><th>${escapeHtml(bname)}</th>${tds}${jtds}<td class="materials-matrix-row-sum">${rowSum}</td></tr>`;
