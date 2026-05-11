@@ -2798,7 +2798,7 @@ body {
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(3),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(3) {
   width: auto;
-  min-width: 9rem;
+  min-width: 7.75rem;
   max-width: none;
   white-space: nowrap;
   vertical-align: middle;
@@ -2808,14 +2808,14 @@ body {
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(4),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td:nth-child(4) {
   width: auto;
-  min-width: 4.75rem;
+  min-width: 3.85rem;
   vertical-align: middle;
 }
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table th:nth-child(5),
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table td.materials-cement-td-cum {
   width: auto;
-  min-width: 5.75rem;
+  min-width: 4.85rem;
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -2851,11 +2851,11 @@ body {
 
 .materials-grid__aside .materials-table-shell--cement-bulk .materials-cement-table .materials-date-inp {
   box-sizing: border-box;
-  min-width: 8.5rem;
+  min-width: 7.25rem;
   width: 100%;
   max-width: none;
-  padding: 0.18rem 0.28rem;
-  font-size: 0.72rem;
+  padding: 0.16rem 0.22rem;
+  font-size: 0.7rem;
   overflow: visible;
 }
 
