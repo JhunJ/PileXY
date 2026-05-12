@@ -415,6 +415,8 @@ def extract_circle_like_polylines(
     for polyline in modelspace.query("LWPOLYLINE"):
         if not isinstance(polyline, LWPolyline):
             continue
+        if _skip_graphic_entity(doc, polyline):
+            continue
         if not polyline.closed:
             continue
         points = [(x, y) for x, y, *_ in polyline.get_points("xy")]
@@ -603,6 +605,35 @@ def _mtext_plain_content(entity: MText) -> str:
         return (getattr(entity, "text", None) or "").strip()
 
 
+def _layer_hidden(doc: Any, layer_name: Optional[str]) -> bool:
+    """레이어 꺼짐·전역 동결이면 캔버스에 안 보이는 것과 동일하게 수집에서 제외."""
+    name = (layer_name or "").strip() or "0"
+    try:
+        layer = doc.layers.get(name)
+    except ezdxf.DXFTableEntryError:
+        return False
+    try:
+        return bool(layer.is_off() or layer.is_frozen())
+    except Exception:
+        return False
+
+
+def _skip_graphic_entity(doc: Any, entity: Any) -> bool:
+    """숨김 레이어 또는 엔티티 단위 비표시(invisible)면 True."""
+    try:
+        ln = entity.dxf.layer
+    except Exception:
+        ln = "0"
+    if _layer_hidden(doc, ln):
+        return True
+    try:
+        if bool(entity.dxf.get("invisible", 0)):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def parse_dxf_entities(
     file_path: str,
     text_height_min: float,
@@ -628,6 +659,8 @@ def parse_dxf_entities(
     ) -> None:
         nonlocal circle_seq, text_seq, poly_seq
         for entity in layout:
+            if _skip_graphic_entity(doc, entity):
+                continue
             dxftype = entity.dxftype()
             if dxftype == "CIRCLE":
                 circle = entity  # type: Circle

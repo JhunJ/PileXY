@@ -7591,7 +7591,7 @@ function inferOpenRectangleVertices(vertices) {
     return text ? `${text} 기성 정리` : "기성 정리";
   }
 
-  function appendGapjiWorksheet(workbook, summaryRows, monthPart, detailSheetName, detailLastRow) {
+  function appendGapjiWorksheet(workbook, summaryRows, monthPart, detailSheetName, detailFirstDataRow, detailLastRow) {
     const ws = workbook.addWorksheet("갑지");
     const methodSet = new Set();
     summaryRows.forEach((row) => {
@@ -7671,10 +7671,12 @@ function inferOpenRectangleVertices(vertices) {
 
     const summaryLabelRow = ws.rowCount + 2;
     ws.getCell(summaryLabelRow, 1).value = "전체 잔량 합계 (m)";
-    if (Number.isFinite(Number(detailLastRow)) && Number(detailLastRow) >= 2) {
+    const firstR = Number(detailFirstDataRow);
+    const lastR = Number(detailLastRow);
+    if (Number.isFinite(firstR) && Number.isFinite(lastR) && lastR >= firstR) {
       const safeSheetName = String(detailSheetName || "기성정리표").replace(/'/g, "''");
       ws.getCell(summaryLabelRow, 2).value = {
-        formula: `IFERROR(SUM('${safeSheetName}'!R2:R${Number(detailLastRow)}),0)`,
+        formula: `IFERROR(SUM('${safeSheetName}'!R${firstR}:R${lastR}),0)`,
       };
     } else {
       ws.getCell(summaryLabelRow, 2).value = 0;
@@ -7710,23 +7712,47 @@ function inferOpenRectangleVertices(vertices) {
     try {
       const wb = new EXCELJS_GLOBAL.Workbook();
       const ws = wb.addWorksheet("기성정리표");
-      ws.columns = getSettlementTableHeaderXlsx().map((header) => ({ header, width: 14 }));
-      ws.getRow(1).height = 52;
+      const SETTLEMENT_XLSX_PARAM_COUNT = 3;
+      const SETTLEMENT_XLSX_GAP_AFTER_PARAMS = 1;
+      const settlementXlsxHeaderRow = SETTLEMENT_XLSX_PARAM_COUNT + SETTLEMENT_XLSX_GAP_AFTER_PARAMS + 1;
+      const settlementXlsxFirstDataRow = settlementXlsxHeaderRow + 1;
+      const { blindingThickness, headTrimTopLevel, remainingBase } = getSettlementDefaults();
+      ws.addRow(["버림콘 두께 (m)", blindingThickness]);
+      ws.addRow(["두부정리 상단레벨 (m)", headTrimTopLevel]);
+      ws.addRow(["잔량기준 (m)", remainingBase]);
+      ws.addRow([]);
+      ws.addRow(getSettlementTableHeaderXlsx());
+      ws.getRow(settlementXlsxHeaderRow).height = 52;
       const summaryByLocation = new Map();
       const parkingUnifiedXlsx = getSingleParkingOutlineNorm();
+      const parseSettlementDisplayNumber = (text) => {
+        const s = String(text ?? "").trim().replace(/,/g, "");
+        if (!s || s === "-") return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+      };
       rows.forEach((enriched, rowIndex) => {
         const rowData = settlementRecordRowData(enriched, rowIndex);
-        const startElevation = Number.isFinite(Number(enriched?.startEl)) ? Number(enriched.startEl) : null;
+        const startElevation = Number.isFinite(Number(enriched?.startEl))
+          ? Number(enriched.startEl)
+          : parseSettlementDisplayNumber(rowData.cells[6]);
         const penetrationDepth = Number.isFinite(Number(enriched?.record?.penetration_depth))
           ? Number(enriched.record.penetration_depth)
-          : null;
+          : parseSettlementDisplayNumber(rowData.cells[7]);
         const pileRemaining = Number.isFinite(Number(enriched?.record?.pile_remaining))
           ? Number(enriched.record.pile_remaining)
-          : null;
+          : parseSettlementDisplayNumber(rowData.cells[9]);
         const excavationDepth = Number.isFinite(Number(enriched?.record?.excavation_depth))
           ? Number(enriched.record.excavation_depth)
-          : null;
-        const remainingBaseExpr = Number(rowData.remainingBase || 0).toFixed(6);
+          : parseSettlementDisplayNumber(rowData.cells[10]);
+        const foundationTopForExcel =
+          rowData.foundationTop != null && Number.isFinite(Number(rowData.foundationTop))
+            ? Number(rowData.foundationTop)
+            : parseSettlementDisplayNumber(rowData.cells[11]);
+        const foundationThicknessForExcel =
+          rowData.foundationThickness != null && Number.isFinite(Number(rowData.foundationThickness))
+            ? Number(rowData.foundationThickness)
+            : parseSettlementDisplayNumber(rowData.cells[12]);
         const added = ws.addRow([
           rowData.cells[0],
           rowData.cells[1],
@@ -7739,9 +7765,9 @@ function inferOpenRectangleVertices(vertices) {
           null,
           pileRemaining,
           excavationDepth,
-          rowData.foundationTop,
-          rowData.foundationThickness,
-          rowData.blindingThickness,
+          foundationTopForExcel,
+          foundationThicknessForExcel,
+          null,
           null,
           null,
           null,
@@ -7751,6 +7777,7 @@ function inferOpenRectangleVertices(vertices) {
         added.getCell(9).value = {
           formula: `IFERROR(IF(OR(G${added.number}="",H${added.number}=""),"",ROUND(G${added.number}-H${added.number},3)),"")`,
         };
+        added.getCell(14).value = { formula: "$B$1" };
         const pitOffset = Number.isFinite(Number(rowData.elevatorPitOffsetM)) ? Number(rowData.elevatorPitOffsetM) : 0;
         const pitOffsetExpr = pitOffset.toFixed(6);
         added.getCell(15).value = {
@@ -7760,11 +7787,17 @@ function inferOpenRectangleVertices(vertices) {
           formula: `IFERROR(IF(OR(L${added.number}="",M${added.number}="",N${added.number}="",I${added.number}=""),"",ROUND((L${added.number}-${pitOffsetExpr}-M${added.number}-N${added.number})-I${added.number},3)),"")`,
         };
         added.getCell(17).value = {
-          formula: `IFERROR(IF(P${added.number}="","",ROUND(P${added.number}+${remainingBaseExpr},3)),"")`,
+          formula: `IFERROR(IF(P${added.number}="","",ROUND(P${added.number}+$B$3,3)),"")`,
         };
         added.getCell(18).value = {
           formula: `IFERROR(IF(OR(H${added.number}="",J${added.number}="",Q${added.number}=""),"",ROUND(MAX(0,(H${added.number}+J${added.number})-Q${added.number}),3)),"")`,
         };
+        [[7, "0.000"], [8, "0.00"], [10, "0.00"], [11, "0.00"], [12, "0.000"], [13, "0.000"]].forEach(([col, fmt]) => {
+          const cell = added.getCell(col);
+          if (cell.value != null && cell.value !== "" && typeof cell.value !== "object") {
+            cell.numFmt = fmt;
+          }
+        });
 
         const location = recordLocationForPdamMatch(enriched?.record?.location, parkingUnifiedXlsx);
         const method = String(enriched?.record?.construction_method || "미분류").trim() || "미분류";
@@ -7789,12 +7822,48 @@ function inferOpenRectangleVertices(vertices) {
         bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
         right: { style: "thin", color: { argb: "FFD1D5DB" } },
       };
+      const paramOutlineColor = { argb: "FF94A3B8" };
+      const paramOutlineBorder = { style: "medium", color: paramOutlineColor };
+      const paramLabelFills = [
+        { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } },
+        { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0FDF4" } },
+        { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF7ED" } },
+      ];
+      const paramValueCol = 2;
+      for (let pr = 1; pr <= SETTLEMENT_XLSX_PARAM_COUNT; pr += 1) {
+        const paramRow = ws.getRow(pr);
+        paramRow.height = 22;
+        const labelFill = paramLabelFills[pr - 1];
+        for (let c = 1; c <= paramValueCol; c += 1) {
+          const cell = paramRow.getCell(c);
+          const isLabel = c === 1;
+          const isValue = c === 2;
+          if (isLabel) {
+            cell.fill = labelFill;
+            cell.font = { bold: true, color: { argb: "FF334155" } };
+            cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+          } else {
+            cell.font = { color: { argb: "FF0F172A" } };
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+            cell.numFmt = "0.00";
+          }
+          cell.border = {
+            top: pr === 1 ? paramOutlineBorder : thinBorder.top,
+            bottom: pr === SETTLEMENT_XLSX_PARAM_COUNT ? paramOutlineBorder : thinBorder.bottom,
+            left: isLabel ? paramOutlineBorder : thinBorder.left,
+            right: isValue ? paramOutlineBorder : thinBorder.right,
+          };
+        }
+      }
       for (let r = 1; r <= ws.rowCount; r += 1) {
+        if (r <= SETTLEMENT_XLSX_PARAM_COUNT) continue;
         const row = ws.getRow(r);
         for (let c = 1; c <= 19; c += 1) {
           const cell = row.getCell(c);
           cell.border = thinBorder;
-          if (r === 1) {
+          if (r === SETTLEMENT_XLSX_PARAM_COUNT + SETTLEMENT_XLSX_GAP_AFTER_PARAMS) {
+            cell.alignment = { horizontal: "center", vertical: "middle" };
+          } else if (r === settlementXlsxHeaderRow) {
             cell.font = { bold: true, color: { argb: "FF1E3A8A" } };
             cell.fill = headerFill;
             cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
@@ -7806,7 +7875,7 @@ function inferOpenRectangleVertices(vertices) {
           }
         }
       }
-      ws.getColumn(1).width = 14;
+      ws.getColumn(1).width = 22;
       ws.getColumn(2).width = 11;
       ws.getColumn(3).width = 11;
       ws.getColumn(4).width = 11;
@@ -7828,7 +7897,8 @@ function inferOpenRectangleVertices(vertices) {
       const monthPart = constructionSettlementMonth?.value?.trim();
       const detailLastRow = ws.rowCount;
       const summaryRows = Array.from(summaryByLocation.values()).sort((a, b) => a.location.localeCompare(b.location, "ko"));
-      appendGapjiWorksheet(wb, summaryRows, monthPart, ws.name, detailLastRow);
+      appendGapjiWorksheet(wb, summaryRows, monthPart, ws.name, settlementXlsxFirstDataRow, detailLastRow);
+      ws.views = [{ state: "frozen", ySplit: settlementXlsxHeaderRow, topLeftCell: `A${settlementXlsxFirstDataRow}`, activeCell: `A${settlementXlsxFirstDataRow}` }];
       const base = monthPart ? `기성정리표_${monthPart}` : "기성정리표";
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
