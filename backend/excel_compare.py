@@ -23,6 +23,14 @@ def _cell_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _excel_cell_preview(value: Any, max_len: int = 48) -> str:
+    """건너뜀 목록 등에 넣을 짧은 원문 표시."""
+    t = _cell_text(value)
+    if len(t) > max_len:
+        return f"{t[: max_len - 1]}…"
+    return t
+
+
 def _column_letter(index: int) -> str:
     current = index + 1
     letters: List[str] = []
@@ -88,15 +96,37 @@ def _normalize_building(value: Any) -> str:
 
 
 def _normalize_excel_building_key(value: Any) -> str:
-    """시트명·동 컬럼과 도면 building_name을 동일 키로 맞춤 (예: t4, T 4 → T4)."""
+    """시트명·동 컬럼과 도면 building_name을 동일 키로 맞춤.
+
+    타워크레인: T4, t 4, T4동, TC4, TC4동 → 호기 숫자 기준으로 T4 로 통일(매칭 텍스트 T4-1 / TC4-1 과 짝).
+    """
     text = _normalize_building(value)
     if not text or text == DEFAULT_BUILDING_NAME:
         return text
     compact = re.sub(r"\s+", "", text)
-    m = re.match(r"(?i)^T(\d+)$", compact)
+    m_tc = re.match(r"(?i)^TC(\d+)(?:동)?$", compact)
+    if m_tc:
+        return f"T{int(m_tc.group(1))}"
+    m = re.match(r"(?i)^T(\d+)(?:동)?$", compact)
     if m:
         return f"T{int(m.group(1))}"
     return text
+
+
+def _leading_dong_int_from_building_name(value: Any) -> Optional[int]:
+    """숫자+동 형태(101동, 10)에서 선행 동 번호만 추출. 타워·주차장 등은 None."""
+    text = _normalize_building(value)
+    if not text or text == DEFAULT_BUILDING_NAME:
+        return None
+    compact = re.sub(r"\s+", "", text)
+    if re.match(r"(?i)^T\d", compact) or re.match(r"(?i)^TC\d", compact):
+        return None
+    if _is_parking_building_name(text):
+        return None
+    m = re.match(r"^(\d+)(?:동)?$", compact)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 def _is_parking_building_name(value: Any) -> bool:
@@ -139,6 +169,9 @@ def _normalize_number(value: Any) -> str:
             # 8-15-2 → 파일측 토큰 15-2 (동 접두 제거, 프론트 formatDisplayedPileNumber·동-번호 파싱과 동일)
             return "-".join(parts[1:])
         a, b = parts[0], parts[1]
+        # 한 자리-한 자리(예: 2-2, 3-5)는 동-번호 분리가 아니라 파일번호 통째 표기로 본다.
+        if len(a) == 1 and len(b) == 1:
+            return f"{a}-{b}"
         na, nb = int(a), int(b)
         if (len(a) <= 2 or na <= 9) and len(b) >= 2:
             return str(nb)
@@ -154,6 +187,136 @@ def _normalize_number(value: Any) -> str:
         except ValueError:
             return raw
     return raw
+
+
+def _compact_digit_hyphen_token(value: Any) -> str:
+    """번호 셀·매칭텍스트에서 공백·유니코드 대시를 제거한 하이픈 연결 토큰."""
+    raw = _cell_text(value)
+    if not raw:
+        return ""
+    t = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw)
+    return re.sub(r"\s+", "", t)
+
+
+def _leading_dong_digit_chain_split(compact: str) -> Optional[Tuple[int, str]]:
+    """
+    전부 숫자인 하이픈 3구간 이상(예: 112-116-2)이면 앞을 동 번호, 뒤를 파일 토큰으로 본다.
+    _normalize_number 가 116-2 로 줄인 경우와 짝을 맞춘다.
+    """
+    if not compact or "-" not in compact:
+        return None
+    parts = compact.split("-")
+    if len(parts) < 3 or not all(p.isdigit() for p in parts):
+        return None
+    return int(parts[0]), "-".join(parts[1:])
+
+
+def _dong_building_key_suffixes(dong: int) -> List[str]:
+    """엑셀·윤곽에서 흔한 동 표기 — 112동 / 112."""
+    return [f"{dong}동", str(dong)]
+
+
+def _dedupe_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    seen = set()
+    out: List[Tuple[str, str]] = []
+    for bk, pid in pairs:
+        t = (bk, pid)
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def _circle_lookup_entry_pairs(circle: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """(building_key, pile_token) — 원을 엑셀 (동키, 번호)로 조회할 때 쓰는 키 목록.
+
+    - 삼중 번호(112-116-2) 등은 _leading_dong_digit_chain_split 과 짝.
+    - CAD 텍스트가 1-2 한 자리쌍이면 뒷자리만(엑셀 단순 번호) 추가.
+    - 10-1 처럼 앞이 전체 동 번호와 같으면(10동) 또는 끝부분만 같으면(110동+10-1, 111동+11-1 …)
+      엑셀 시트/동 열의 전체 동명 + 말뚝 번호와 맞춘다.
+    - 엑셀 쪽 동은 시트명 또는 사용자가 지정한 동 컬럼으로 이미 확정되며, 여기서는 **원의 building_name·matched_text**
+      (도면에서 온 값)만으로 별칭을 만든다.
+    """
+    if not isinstance(circle, dict):
+        return []
+    matched = circle.get("matched_text")
+    if not isinstance(matched, dict):
+        return []
+    pile_norm = _normalize_number(matched.get("text"))
+    if not pile_norm:
+        return []
+    base_bn = _normalize_excel_building_key(circle.get("building_name"))
+    pairs: List[Tuple[str, str]] = [(base_bn, pile_norm)]
+    trip = _leading_dong_digit_chain_split(_compact_digit_hyphen_token(matched.get("text")))
+    if trip:
+        d0, rest = trip
+        if rest == pile_norm:
+            for suf in _dong_building_key_suffixes(d0):
+                pairs.append((_normalize_excel_building_key(suf), rest))
+    # 화면 표기 "1-1"·"1-2"(한 자리-한 자리): 앞은 구역/그리드, 뒤가 동 내 파일 번호인 경우가 많음.
+    # 엑셀은 "1","2"만 적는 경우가 있어 뒤쪽 숫자로도 같은 원을 찾을 수 있게 한다. (전체 "1-2" 키는 pile_norm에 이미 있음)
+    compact = _compact_digit_hyphen_token(matched.get("text"))
+    mm = re.fullmatch(r"(\d)-(\d)", compact) if compact else None
+    if mm:
+        suf = mm.group(2)
+        if suf:
+            pairs.append((base_bn, suf))
+    # "10-1" = 10동 1번: 앞 세그먼트가 동 번호·뒤가 말뚝 번호. 엑셀은 시트 10동 + 번호 1.
+    # "10-1" + building 110동: 화면에 동 번호 끝자리만(10) 붙이는 표기 ↔ 엑셀 110동 + 번호 1.
+    # 한 자리-한 자리(1-2)는 위 mm에서만 처리.
+    m2 = re.fullmatch(r"(\d+)-(\d+)", compact) if compact else None
+    if m2:
+        a_digits, b_digits = m2.group(1), m2.group(2)
+        if not (len(a_digits) == 1 and len(b_digits) == 1):
+            dong_prefix = int(a_digits)
+            pile_suffix = str(int(b_digits))
+            bd_dong = _leading_dong_int_from_building_name(circle.get("building_name"))
+            bd_str = str(bd_dong) if bd_dong is not None else ""
+
+            if bd_dong is not None and bd_dong == dong_prefix:
+                pairs.append((base_bn, pile_suffix))
+            elif bd_dong is not None and bd_str.endswith(a_digits) and dong_prefix != bd_dong:
+                pairs.append((base_bn, pile_suffix))
+
+            if bd_dong is None:
+                for suf in _dong_building_key_suffixes(dong_prefix):
+                    pairs.append((_normalize_excel_building_key(suf), pile_suffix))
+            elif bd_dong == dong_prefix:
+                for suf in _dong_building_key_suffixes(dong_prefix):
+                    pairs.append((_normalize_excel_building_key(suf), pile_suffix))
+            elif bd_dong is not None and bd_str.endswith(a_digits) and dong_prefix != bd_dong:
+                for suf in _dong_building_key_suffixes(bd_dong):
+                    pairs.append((_normalize_excel_building_key(suf), pile_suffix))
+    return _dedupe_pairs(pairs)
+
+
+def _excel_row_lookup_pairs(building_name: str, number_raw: Any, number_norm: str) -> List[Tuple[str, str]]:
+    """엑셀 한 행에서 조회할 (동키, 파일토큰) 후보.
+
+    - 번호 열에 T4-1 / TC4-7 처럼 **타워 전체 표기**가 있으면 **호기 T4 + 파일 번호 1**로만 조회한다.
+      (시트명이 다른 동이어도 T4호기 1번과 매칭 — 엑셀에 흔한 형식)
+    - 그 외에는 시트명/동 열 + 정규화 번호, 삼중 112-116-2 동 접두 처리.
+    """
+    pairs: List[Tuple[str, str]] = []
+    raw = str(number_raw or "").strip()
+    raw = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw)
+    raw = re.sub(r"\s+", "", raw)
+    tower_m = re.fullmatch(r"(?i)(T|TC)(\d+)-(\d+)", raw)
+    if tower_m:
+        tower_bn = _normalize_excel_building_key(f"T{int(tower_m.group(2))}")
+        pile_tok = str(int(tower_m.group(3)))
+        pairs.append((tower_bn, pile_tok))
+    elif number_norm:
+        pairs.append((_normalize_excel_building_key(building_name), number_norm))
+
+    trip = _leading_dong_digit_chain_split(_compact_digit_hyphen_token(number_raw))
+    if trip and number_norm:
+        d0, rest = trip
+        if rest == number_norm:
+            for suf in _dong_building_key_suffixes(d0):
+                pairs.append((_normalize_excel_building_key(suf), rest))
+    return _dedupe_pairs(pairs)
 
 
 def _number_aliases(value: Any) -> List[str]:
@@ -212,9 +375,8 @@ def _build_circle_lookup(circles: Iterable[Dict[str, Any]]) -> Dict[Tuple[str, s
     for circle in circles or []:
         if not isinstance(circle, dict):
             continue
-        building_name = _normalize_excel_building_key(circle.get("building_name"))
-        for alias in _number_aliases(_match_number(circle)):
-            lookup[(building_name, alias)].append(circle)
+        for bk, pile_token in _circle_lookup_entry_pairs(circle):
+            lookup[(bk, pile_token)].append(circle)
     return lookup
 
 
@@ -228,23 +390,36 @@ def _excel_cad_axis_distance(circle: Dict[str, Any], excel_x: float, excel_y: fl
 def _pick_best_circle(
     lookup: Dict[Tuple[str, str], List[Dict[str, Any]]],
     building_name: str,
-    number: str,
+    number_raw: Any,
+    number_normalized: str,
     x: float,
     y: float,
     *,
     single_parking_building: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
-    normalized_building = _normalize_excel_building_key(building_name)
-    for alias in _number_aliases(number):
-        candidates.extend(lookup.get((normalized_building, alias), []))
+    seen: set[str] = set()
+
+    def _append_from_bucket(bucket: List[Dict[str, Any]]) -> None:
+        for circle in bucket:
+            cid = str(circle.get("id", "") or "")
+            key = cid or str(id(circle))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(circle)
+
+    pairs = _excel_row_lookup_pairs(building_name, number_raw, number_normalized)
+    for bk, pile_token in pairs:
+        _append_from_bucket(lookup.get((bk, pile_token), []))
+
     if (
         not candidates
         and single_parking_building
-        and _is_parking_building_name(normalized_building)
+        and _is_parking_building_name(_normalize_excel_building_key(building_name))
     ):
-        for alias in _number_aliases(number):
-            candidates.extend(lookup.get((single_parking_building, alias), []))
+        for pile_token in {pid for _bk, pid in pairs}:
+            _append_from_bucket(lookup.get((single_parking_building, pile_token), []))
     if not candidates:
         return None
     return min(candidates, key=lambda circle: _excel_cad_axis_distance(circle, x, y))
@@ -254,6 +429,9 @@ def _empty_summary() -> Dict[str, int]:
     return {
         "totalRows": 0,
         "skippedRows": 0,
+        "skippedMissingNumber": 0,
+        "skippedInvalidX": 0,
+        "skippedInvalidY": 0,
         "matchBoth": 0,
         "matchOldOnly": 0,
         "matchNewOnly": 0,
@@ -454,15 +632,65 @@ def _compare_single_sheet(
 
     summary = _empty_summary()
     issues: List[Dict[str, Any]] = []
+    skipped_details: List[Dict[str, Any]] = []
     single_parking_building_a = _single_parking_building_name(lookup_a)
     single_parking_building_b = _single_parking_building_name(lookup_b)
 
     for data_index, row in df.iterrows():
-        number = _normalize_number(row.get(resolved_number_column))
+        building_ctx = (
+            _cell_text(row.get(resolved_building_column))
+            if building_source_mode == BUILDING_SOURCE_COLUMN and resolved_building_column
+            else sheet_name
+        )
+        number_raw = row.get(resolved_number_column)
+        number = _normalize_number(number_raw)
         x = _parse_float(row.get(resolved_x_column))
         y = _parse_float(row.get(resolved_y_column))
-        if not number or x is None or y is None:
+        excel_row_1based = int(data_index) + header_row + 1
+        if not number:
+            summary["skippedMissingNumber"] += 1
             summary["skippedRows"] += 1
+            skipped_details.append(
+                {
+                    "sheetName": sheet_name,
+                    "excelRow": excel_row_1based,
+                    "reason": "missing-number",
+                    "buildingContext": building_ctx,
+                    "numberRaw": _excel_cell_preview(number_raw),
+                    "xRaw": _excel_cell_preview(row.get(resolved_x_column)),
+                    "yRaw": _excel_cell_preview(row.get(resolved_y_column)),
+                }
+            )
+            continue
+        if x is None:
+            summary["skippedInvalidX"] += 1
+            summary["skippedRows"] += 1
+            skipped_details.append(
+                {
+                    "sheetName": sheet_name,
+                    "excelRow": excel_row_1based,
+                    "reason": "invalid-x",
+                    "buildingContext": building_ctx,
+                    "numberRaw": _excel_cell_preview(number_raw),
+                    "xRaw": _excel_cell_preview(row.get(resolved_x_column)),
+                    "yRaw": _excel_cell_preview(row.get(resolved_y_column)),
+                }
+            )
+            continue
+        if y is None:
+            summary["skippedInvalidY"] += 1
+            summary["skippedRows"] += 1
+            skipped_details.append(
+                {
+                    "sheetName": sheet_name,
+                    "excelRow": excel_row_1based,
+                    "reason": "invalid-y",
+                    "buildingContext": building_ctx,
+                    "numberRaw": _excel_cell_preview(number_raw),
+                    "xRaw": _excel_cell_preview(row.get(resolved_x_column)),
+                    "yRaw": _excel_cell_preview(row.get(resolved_y_column)),
+                }
+            )
             continue
 
         if building_source_mode == BUILDING_SOURCE_COLUMN:
@@ -475,6 +703,7 @@ def _compare_single_sheet(
         circle_a = _pick_best_circle(
             lookup_a,
             building_name,
+            number_raw,
             number,
             x,
             y,
@@ -483,6 +712,7 @@ def _compare_single_sheet(
         circle_b = _pick_best_circle(
             lookup_b,
             building_name,
+            number_raw,
             number,
             x,
             y,
@@ -555,6 +785,7 @@ def _compare_single_sheet(
         },
         "summary": summary,
         "issues": issues,
+        "skippedDetails": skipped_details,
     }
 
 
@@ -596,6 +827,7 @@ def compare_excel_workbook(
 
     aggregate_summary = _empty_summary()
     aggregate_issues: List[Dict[str, Any]] = []
+    aggregate_skipped: List[Dict[str, Any]] = []
     sheet_summaries: List[Dict[str, Any]] = []
 
     for current_sheet_name in selected_sheet_names:
@@ -648,11 +880,13 @@ def compare_excel_workbook(
                 "buildingSourceMode": result["buildingSourceMode"],
                 "resolvedColumns": result["resolvedColumns"],
                 "summary": result["summary"],
+                "skippedDetails": result.get("skippedDetails") or [],
             }
         )
         for key, value in result["summary"].items():
             aggregate_summary[key] += int(value or 0)
         aggregate_issues.extend(result["issues"])
+        aggregate_skipped.extend(result.get("skippedDetails") or [])
 
     return {
         "sheetName": selected_sheet_names[0],
@@ -668,5 +902,6 @@ def compare_excel_workbook(
         "sheetSummaries": sheet_summaries,
         "summary": aggregate_summary,
         "issues": aggregate_issues,
+        "skippedDetails": aggregate_skipped,
         "coordTolerance": coord_tolerance,
     }

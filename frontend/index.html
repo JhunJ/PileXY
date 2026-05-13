@@ -306,7 +306,13 @@
               <div class="version-compare-excel-workspace">
                 <div id="version-compare-excel-preview" class="version-compare-excel-preview"></div>
                 <div id="version-compare-excel-summary" class="version-compare-excel-summary"></div>
+                <div class="version-compare-excel-export-row">
+                  <button type="button" id="version-compare-excel-download" class="ghost" disabled>
+                    비교 결과 표 다운로드 (XLSX)
+                  </button>
+                </div>
                 <div id="version-compare-excel-issues" class="version-compare-excel-issues"></div>
+                <div id="version-compare-excel-skipped" class="version-compare-excel-skipped" aria-live="polite"></div>
               </div>
             </div>
           </div>
@@ -1661,10 +1667,11 @@
     <script src="/frontend/pilexy-session.js?v=1"></script>
     <script src="/frontend/api-json-helpers.js?v=1"></script>
     <script src="/frontend/app.js?v=202604248clean1"></script>
+    <!-- 자재: app.js 직후 로드 — 앞선 CDN/시공 스크립트 오류로 materials.js가 스킵되는 일 방지 -->
+    <script src="/frontend/materials.js?v=202605154b"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="/frontend/construction.js?v=202605154"></script>
-    <script src="/frontend/materials.js?v=202605154"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/meissa-compare.js?v=202604201"></script>
   </body>

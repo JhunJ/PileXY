@@ -3204,7 +3204,7 @@
       });
     } else if (materialsMount) {
       materialsMount.innerHTML =
-        '<p class="materials-open-error" role="alert">자재 관리 스크립트(materials.js)가 로드되지 않았습니다.</p>';
+        '<p class="materials-open-error" role="alert">자재 스크립트(materials.js)가 실행되지 않았습니다. F12 → <strong>Console</strong>·<strong>Network</strong>에서 앞선 스크립트 오류나 materials.js 404 여부를 확인한 뒤, 캐시 없이 새로고침(Ctrl+F5)해 보세요.</p>';
     }
   }
 

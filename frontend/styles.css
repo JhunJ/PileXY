@@ -8593,7 +8593,8 @@ td {
 .version-compare-excel-sidebar-card,
 .version-compare-excel-preview,
 .version-compare-excel-summary,
-.version-compare-excel-issues {
+.version-compare-excel-issues,
+.version-compare-excel-skipped {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
@@ -8750,8 +8751,21 @@ td {
 
 .version-compare-excel-preview,
 .version-compare-excel-summary,
-.version-compare-excel-issues {
+.version-compare-excel-issues,
+.version-compare-excel-skipped {
   padding: 0.95rem;
+}
+
+.version-compare-excel-export-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0 0.95rem 0.35rem;
+  min-width: 0;
+}
+
+.version-compare-excel-export-row .ghost:disabled {
+  opacity: 0.45;
 }
 
 .version-compare-excel-preview-header {
@@ -8798,6 +8812,34 @@ td {
   overflow: auto;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
+}
+
+.version-compare-excel-skipped {
+  margin-top: 0.35rem;
+}
+
+.version-compare-excel-skipped-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.version-compare-excel-skipped-hint,
+.version-compare-excel-skipped-more {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.version-compare-excel-skipped-more {
+  margin-top: 0.55rem;
+  margin-bottom: 0;
+  color: #64748b;
+}
+
+.version-compare-excel-table-wrap--skipped {
+  max-height: min(42vh, 360px);
 }
 
 .version-compare-excel-table {
@@ -8978,6 +9020,14 @@ td {
 .version-compare-excel-summary-card strong {
   font-size: 1.1rem;
   color: #0f172a;
+}
+
+.version-compare-excel-summary-foot {
+  display: block;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #64748b;
+  font-weight: 400;
 }
 
 @media (max-width: 1240px) {

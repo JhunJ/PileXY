@@ -1,7 +1,11 @@
 # Public Hostnames in Cloudflare Zero Trust must include each hostname below for the same tunnel.
+#
+# pilexy.yeobaekstudio.com → 백엔드(uvicorn)가 실제로 열려 있는 주소와 같아야 합니다.
+# - 터널과 백엔드가 같은 PC: 보통 http://127.0.0.1:3001 (localhost 가 ::1 만 가리키면 실패할 수 있음)
+# - 터널은 다른 PC, 백엔드는 LAN(예: 172.23.x.x): 아래처럼 백엔드 PC의 IP·포트로 지정
 ingress:
   - hostname: pilexy1.yeobaekstudio.com
-    service: http://localhost:8001
+    service: http://127.0.0.1:8001
   - hostname: pilexy.yeobaekstudio.com
-    service: http://localhost:3001
+    service: http://172.23.22.110:3001
   - service: http_status:404

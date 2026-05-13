@@ -355,6 +355,8 @@ const versionCompareExcelStatus = document.getElementById("version-compare-excel
 const versionCompareExcelPreview = document.getElementById("version-compare-excel-preview");
 const versionCompareExcelSummary = document.getElementById("version-compare-excel-summary");
 const versionCompareExcelIssues = document.getElementById("version-compare-excel-issues");
+const versionCompareExcelSkipped = document.getElementById("version-compare-excel-skipped");
+const versionCompareExcelDownload = document.getElementById("version-compare-excel-download");
 const matchCorrectionsCount = document.getElementById("match-corrections-count");
 const matchCorrectionsList = document.getElementById("match-corrections-list");
 const manualHistoryReuseToggle = document.getElementById("manual-history-reuse-toggle");
@@ -2398,6 +2400,12 @@ function bindEvents() {
       }
     });
   }
+  if (versionCompareExcelDownload) {
+    versionCompareExcelDownload.addEventListener("click", () => {
+      if (!versionCompareExcelLastResult) return;
+      void downloadVersionCompareExcelIssuesExport();
+    });
+  }
   if (versionCompareExcelFile) {
     versionCompareExcelFile.addEventListener("change", async () => {
       resetVersionCompareExcelInspectState();
@@ -3356,7 +3364,7 @@ async function handleUpload(event) {
     setTimeout(() => setPhase("idle"), 600);
     state.lastUploadedFileName = file ? file.name : "";
     if (state.circles?.length > 0) {
-      setUploadStatus("처리 완료. CSV/XLSX 다운로드 버튼을 눌러 저장할 수 있습니다.");
+      setUploadStatus("처리 완료. XLSX 다운로드 버튼을 눌러 저장할 수 있습니다.");
     } else {
       setUploadStatus("CAD 처리 완료. 현재 필터에 맞는 원이 없습니다.");
     }
@@ -12724,6 +12732,10 @@ function resetVersionCompareExcelCompareResult() {
   if (versionCompareExcelIssues) {
     versionCompareExcelIssues.innerHTML = "";
   }
+  if (versionCompareExcelSkipped) {
+    versionCompareExcelSkipped.innerHTML = "";
+  }
+  updateVersionCompareExcelDownloadButton();
   updateVersionCompareExcelApplyState();
 }
 
@@ -13161,6 +13173,457 @@ async function inspectVersionCompareExcelFile() {
   }
 }
 
+function updateVersionCompareExcelDownloadButton() {
+  const btn = versionCompareExcelDownload || document.getElementById("version-compare-excel-download");
+  if (!btn) return;
+  btn.disabled = !versionCompareExcelLastResult;
+}
+
+function versionCompareExcelPickIssueDistance(issue) {
+  if (issue?.newCircle?.distance != null && Number.isFinite(Number(issue.newCircle.distance))) {
+    return Number(issue.newCircle.distance);
+  }
+  if (issue?.oldCircle?.distance != null && Number.isFinite(Number(issue.oldCircle.distance))) {
+    return Number(issue.oldCircle.distance);
+  }
+  return null;
+}
+
+function versionCompareExcelIssueRowKindLabel(issue) {
+  const status = String(issue?.status || "");
+  if (status === "coord-mismatch") {
+    const dist = versionCompareExcelPickIssueDistance(issue);
+    if (dist != null && dist >= VERSION_COMPARE_EXCEL_SEVERE_DIFF_THRESHOLD) return "차이큼";
+    return "차이작음";
+  }
+  if (status.startsWith("missing-")) return "누락";
+  return "기타";
+}
+
+function versionCompareExcelIssueRowFillArgb(kind) {
+  if (kind === "차이큼") return "FFFECACA";
+  if (kind === "차이작음") return "FFFEF9C3";
+  if (kind === "누락") return "FFE0F2FE";
+  return "FFF8FAFC";
+}
+
+function versionCompareExcelExportNumeric(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function versionCompareExcelSanitizeDownloadStem(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").replace(/\s{2,}/g, " ").slice(0, 80).trim();
+}
+
+/** 요약·시트별 건너뜀 행: 번호/X/Y 중 무엇 때문에 제외됐는지 (백엔드 skipped* 필드). */
+function formatVersionCompareExcelSkipDetail(summary) {
+  const total = Number(summary?.skippedRows ?? 0) || 0;
+  if (!total) return "";
+  const n = Number(summary?.skippedMissingNumber ?? 0) || 0;
+  const x = Number(summary?.skippedInvalidX ?? 0) || 0;
+  const y = Number(summary?.skippedInvalidY ?? 0) || 0;
+  const parts = [];
+  if (n) parts.push(`번호 없음·해석 불가 ${n}행`);
+  if (x) parts.push(`X 비어있거나 숫자 아님 ${x}행`);
+  if (y) parts.push(`Y 비어있거나 숫자 아님 ${y}행`);
+  if (parts.length) return parts.join(" · ");
+  return "비교에 쓰지 않은 행(번호·X·Y가 모두 채워진 행만 집계) — 상세 유형은 서버 반영 후 재비교하면 표시됩니다.";
+}
+
+function formatVersionCompareExcelSkipReasonKo(reason) {
+  if (reason === "missing-number") return "번호 없음·해석 불가";
+  if (reason === "invalid-x") return "X 비어있거나 숫자 아님";
+  if (reason === "invalid-y") return "Y 비어있거나 숫자 아님";
+  return String(reason || "-");
+}
+
+function renderVersionCompareExcelSkippedPanel(result) {
+  if (!versionCompareExcelSkipped) return;
+  const list = Array.isArray(result?.skippedDetails) ? result.skippedDetails : [];
+  if (!list.length) {
+    versionCompareExcelSkipped.innerHTML = "";
+    return;
+  }
+  const cap = 800;
+  const rows = list.slice(0, cap);
+  const more = list.length - rows.length;
+  versionCompareExcelSkipped.innerHTML = `
+    <h4 class="version-compare-excel-skipped-title">건너뛴 행 (${list.length}건)</h4>
+    <p class="version-compare-excel-skipped-hint">번호·X·Y 중 비어 있거나 숫자로 읽을 수 없어 좌표 비교에서 제외된 엑셀 행입니다.</p>
+    <div class="version-compare-excel-table-wrap version-compare-excel-table-wrap--skipped">
+      <table class="version-compare-excel-table">
+        <thead>
+          <tr>
+            <th>시트명</th>
+            <th>엑셀 행</th>
+            <th>사유</th>
+            <th>동(시트·또는 동 열)</th>
+            <th>번호(원문)</th>
+            <th>X(원문)</th>
+            <th>Y(원문)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+            <tr>
+              <td>${escapeHtml(row.sheetName || "-")}</td>
+              <td class="row-index">${escapeHtml(String(row.excelRow ?? "-"))}</td>
+              <td>${escapeHtml(formatVersionCompareExcelSkipReasonKo(row.reason))}</td>
+              <td>${escapeHtml(row.buildingContext || "-")}</td>
+              <td>${escapeHtml(row.numberRaw || "")}</td>
+              <td>${escapeHtml(row.xRaw || "")}</td>
+              <td>${escapeHtml(row.yRaw || "")}</td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    ${more > 0 ? `<p class="version-compare-excel-skipped-more">표에는 앞 ${cap}건만 표시했습니다. (나머지 ${more}건 — XLSX 다운로드 시 전체 포함)</p>` : ""}
+  `;
+}
+
+async function downloadVersionCompareExcelIssuesExport() {
+  if (!versionCompareExcelLastResult) return;
+  const ExcelJSLib = typeof globalThis !== "undefined" ? globalThis.ExcelJS : null;
+  if (!ExcelJSLib?.Workbook) {
+    setVersionCompareExcelStatus("엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.", true);
+    return;
+  }
+  const result = versionCompareExcelLastResult;
+  const options = versionCompareExcelLastRenderOptions || {};
+  const summary = result.summary || {};
+  const sheetSummaries = Array.isArray(result.sheetSummaries) ? result.sheetSummaries : [];
+  const labels = result.versionLabels || { old: "이전 버전", new: "현재 버전" };
+  const singleVersion = Boolean(options.singleVersion);
+  const targetLabel = options.targetLabel || labels.new || "현재 버전";
+  const issues = Array.isArray(result.issues) ? result.issues : [];
+
+  const statusLabel = singleVersion
+    ? {
+      "match-both": `${targetLabel} 일치`,
+      "match-old-only": `${targetLabel} 일치`,
+      "match-new-only": `${targetLabel} 일치`,
+      "missing-both": `${targetLabel} 누락`,
+      "missing-old": `${targetLabel} 누락`,
+      "missing-new": `${targetLabel} 누락`,
+      "coord-mismatch": "좌표 불일치",
+    }
+    : {
+      "match-old-only": `${labels.old}만 일치`,
+      "match-new-only": `${labels.new}만 일치`,
+      "missing-both": "양쪽 누락",
+      "missing-old": `${labels.old} 누락`,
+      "missing-new": `${labels.new} 누락`,
+      "coord-mismatch": "좌표 불일치",
+    };
+
+  const thinBorder = {
+    top: { style: "thin", color: { argb: "FFD1D5DB" } },
+    left: { style: "thin", color: { argb: "FFD1D5DB" } },
+    bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+    right: { style: "thin", color: { argb: "FFD1D5DB" } },
+  };
+  const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+
+  try {
+    const wb = new ExcelJSLib.Workbook();
+    wb.creator = "PileXY";
+    wb.created = new Date();
+
+    const wsSum = wb.addWorksheet("요약", { views: [{ state: "frozen", ySplit: 1 }] });
+    wsSum.mergeCells(1, 1, 1, 2);
+    const titleCell = wsSum.getCell(1, 1);
+    titleCell.value = "엑셀 좌표 비교 요약";
+    titleCell.font = { bold: true, size: 14, color: { argb: "FF0F172A" } };
+    titleCell.alignment = { vertical: "middle" };
+    wsSum.getRow(1).height = 26;
+
+    const kvPairs = [];
+    if (singleVersion) {
+      kvPairs.push(["엑셀 유효 행", summary.totalRows ?? 0]);
+      kvPairs.push(["건너뜀 (합계)", summary.skippedRows ?? 0]);
+      const sn = Number(summary.skippedMissingNumber ?? 0) || 0;
+      const sx = Number(summary.skippedInvalidX ?? 0) || 0;
+      const sy = Number(summary.skippedInvalidY ?? 0) || 0;
+      if (sn) kvPairs.push(["  └ 번호 없음·해석 불가", sn]);
+      if (sx) kvPairs.push(["  └ X 비어있거나 숫자 아님", sx]);
+      if (sy) kvPairs.push(["  └ Y 비어있거나 숫자 아님", sy]);
+      kvPairs.push([`${targetLabel} 일치`, summary.matchBoth ?? 0]);
+      kvPairs.push([`${targetLabel} 누락`, summary.missingBoth ?? 0]);
+      kvPairs.push(["좌표 불일치", summary.coordMismatch ?? 0]);
+    } else {
+      kvPairs.push(["엑셀 유효 행", summary.totalRows ?? 0]);
+      kvPairs.push(["건너뜀 (합계)", summary.skippedRows ?? 0]);
+      const sn2 = Number(summary.skippedMissingNumber ?? 0) || 0;
+      const sx2 = Number(summary.skippedInvalidX ?? 0) || 0;
+      const sy2 = Number(summary.skippedInvalidY ?? 0) || 0;
+      if (sn2) kvPairs.push(["  └ 번호 없음·해석 불가", sn2]);
+      if (sx2) kvPairs.push(["  └ X 비어있거나 숫자 아님", sx2]);
+      if (sy2) kvPairs.push(["  └ Y 비어있거나 숫자 아님", sy2]);
+      kvPairs.push(["양쪽 일치", summary.matchBoth ?? 0]);
+      kvPairs.push([`${labels.old}만 일치`, summary.matchOldOnly ?? 0]);
+      kvPairs.push([`${labels.new}만 일치`, summary.matchNewOnly ?? 0]);
+      kvPairs.push([`${labels.old} 누락`, summary.missingOld ?? 0]);
+      kvPairs.push([`${labels.new} 누락`, summary.missingNew ?? 0]);
+      kvPairs.push(["양쪽 누락", summary.missingBoth ?? 0]);
+      kvPairs.push(["좌표 불일치", summary.coordMismatch ?? 0]);
+    }
+
+    let rowIdx = 3;
+    kvPairs.forEach(([k, v]) => {
+      const row = wsSum.getRow(rowIdx);
+      row.getCell(1).value = k;
+      row.getCell(2).value = v;
+      row.getCell(1).border = thinBorder;
+      row.getCell(2).border = thinBorder;
+      row.getCell(1).alignment = { vertical: "middle" };
+      row.getCell(2).alignment = { horizontal: "right", vertical: "middle" };
+      rowIdx += 1;
+    });
+    wsSum.getColumn(1).width = 30;
+    wsSum.getColumn(2).width = 14;
+
+    if (sheetSummaries.length > 1) {
+      rowIdx += 1;
+      const sec = wsSum.getRow(rowIdx);
+      sec.getCell(1).value = "시트별 요약";
+      sec.getCell(1).font = { bold: true, size: 12, color: { argb: "FF0F172A" } };
+      rowIdx += 1;
+      const hdr = wsSum.getRow(rowIdx);
+      const sheetHdr = singleVersion
+        ? ["시트명", "유효행", "일치", "누락", "좌표불일치"]
+        : ["시트명", "유효행", "양쪽일치", `${labels.old}만`, `${labels.new}만`, "좌표불일치"];
+      sheetHdr.forEach((h, i) => {
+        const c = hdr.getCell(i + 1);
+        c.value = h;
+        c.font = { bold: true, color: { argb: "FF1E3A8A" } };
+        c.fill = headerFill;
+        c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        c.border = thinBorder;
+      });
+      rowIdx += 1;
+      sheetSummaries.forEach((sh) => {
+        const s0 = sh.summary || {};
+        const r = wsSum.getRow(rowIdx);
+        const vals = singleVersion
+          ? [sh.sheetName || "-", s0.totalRows ?? 0, s0.matchBoth ?? 0, s0.missingBoth ?? 0, s0.coordMismatch ?? 0]
+          : [
+            sh.sheetName || "-",
+            s0.totalRows ?? 0,
+            s0.matchBoth ?? 0,
+            s0.matchOldOnly ?? 0,
+            s0.matchNewOnly ?? 0,
+            s0.coordMismatch ?? 0,
+          ];
+        vals.forEach((v, i) => {
+          const c = r.getCell(i + 1);
+          c.value = v;
+          c.border = thinBorder;
+          c.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
+        });
+        rowIdx += 1;
+      });
+    }
+
+    const wsDet = wb.addWorksheet("상세");
+    const detailHeaders = singleVersion
+      ? [
+        "분류",
+        "시트명",
+        "엑셀행",
+        "상태코드",
+        "상태",
+        "동",
+        "파일번호",
+        "엑셀X",
+        "엑셀Y",
+        `${targetLabel}_X`,
+        `${targetLabel}_Y`,
+        "거리",
+        "매칭번호",
+      ]
+      : [
+        "분류",
+        "시트명",
+        "엑셀행",
+        "상태코드",
+        "상태",
+        "동",
+        "파일번호",
+        "엑셀X",
+        "엑셀Y",
+        `${labels.old}_X`,
+        `${labels.old}_Y`,
+        `${labels.old}_거리`,
+        `${labels.old}_매칭번호`,
+        `${labels.new}_X`,
+        `${labels.new}_Y`,
+        `${labels.new}_거리`,
+        `${labels.new}_매칭번호`,
+      ];
+    const colCount = detailHeaders.length;
+
+    wsDet.mergeCells(1, 1, 1, colCount);
+    const detTitle = wsDet.getCell(1, 1);
+    detTitle.value = "비교 이슈 상세 (전체 행)";
+    detTitle.font = { bold: true, size: 14, color: { argb: "FF0F172A" } };
+    detTitle.alignment = { vertical: "middle" };
+    wsDet.getRow(1).height = 24;
+
+    const hdrRow = wsDet.getRow(2);
+    detailHeaders.forEach((h, i) => {
+      const c = hdrRow.getCell(i + 1);
+      c.value = h;
+      c.font = { bold: true, color: { argb: "FF1E3A8A" } };
+      c.fill = headerFill;
+      c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      c.border = thinBorder;
+    });
+    hdrRow.height = 22;
+
+    issues.forEach((issue, i) => {
+      const r = wsDet.getRow(3 + i);
+      const kind = versionCompareExcelIssueRowKindLabel(issue);
+      const st = String(issue?.status || "");
+      const stKo = statusLabel[st] || st || "-";
+      const fillArgb = versionCompareExcelIssueRowFillArgb(kind);
+      const rowFill = { type: "pattern", pattern: "solid", fgColor: { argb: fillArgb } };
+      const setCell = (col, value, opts = {}) => {
+        const cell = r.getCell(col);
+        cell.value = value;
+        cell.border = thinBorder;
+        cell.fill = rowFill;
+        cell.alignment = { vertical: "middle", ...(opts.alignment || {}) };
+        if (opts.numFmt) cell.numFmt = opts.numFmt;
+      };
+      if (singleVersion) {
+        const c = issue.newCircle || issue.oldCircle;
+        setCell(1, kind, { alignment: { horizontal: "center" } });
+        setCell(2, issue.sheetName ?? "", { alignment: { horizontal: "left" } });
+        setCell(3, issue.excelRow ?? "", { alignment: { horizontal: "center" } });
+        setCell(4, st, { alignment: { horizontal: "center" } });
+        setCell(5, stKo, { alignment: { horizontal: "left" } });
+        setCell(6, issue.buildingName ?? "", { alignment: { horizontal: "left" } });
+        setCell(7, issue.number ?? "", { alignment: { horizontal: "center" } });
+        setCell(8, versionCompareExcelExportNumeric(issue.excelX), { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(9, versionCompareExcelExportNumeric(issue.excelY), { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(10, c ? versionCompareExcelExportNumeric(c.x) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(11, c ? versionCompareExcelExportNumeric(c.y) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(12, c ? versionCompareExcelExportNumeric(c.distance) : null, { alignment: { horizontal: "right" }, numFmt: "0.000" });
+        setCell(13, c?.number ?? "", { alignment: { horizontal: "center" } });
+      } else {
+        const o = issue.oldCircle;
+        const n = issue.newCircle;
+        setCell(1, kind, { alignment: { horizontal: "center" } });
+        setCell(2, issue.sheetName ?? "", { alignment: { horizontal: "left" } });
+        setCell(3, issue.excelRow ?? "", { alignment: { horizontal: "center" } });
+        setCell(4, st, { alignment: { horizontal: "center" } });
+        setCell(5, stKo, { alignment: { horizontal: "left" } });
+        setCell(6, issue.buildingName ?? "", { alignment: { horizontal: "left" } });
+        setCell(7, issue.number ?? "", { alignment: { horizontal: "center" } });
+        setCell(8, versionCompareExcelExportNumeric(issue.excelX), { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(9, versionCompareExcelExportNumeric(issue.excelY), { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(10, o ? versionCompareExcelExportNumeric(o.x) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(11, o ? versionCompareExcelExportNumeric(o.y) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(12, o ? versionCompareExcelExportNumeric(o.distance) : null, { alignment: { horizontal: "right" }, numFmt: "0.000" });
+        setCell(13, o?.number ?? "", { alignment: { horizontal: "center" } });
+        setCell(14, n ? versionCompareExcelExportNumeric(n.x) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(15, n ? versionCompareExcelExportNumeric(n.y) : null, { alignment: { horizontal: "right" }, numFmt: "0.###" });
+        setCell(16, n ? versionCompareExcelExportNumeric(n.distance) : null, { alignment: { horizontal: "right" }, numFmt: "0.000" });
+        setCell(17, n?.number ?? "", { alignment: { horizontal: "center" } });
+      }
+    });
+
+    const widths = singleVersion
+      ? [10, 14, 8, 12, 14, 10, 10, 12, 12, 12, 12, 10, 10]
+      : [10, 14, 8, 12, 14, 10, 10, 12, 12, 12, 12, 10, 10, 12, 12, 10, 10];
+    widths.forEach((w, i) => {
+      wsDet.getColumn(i + 1).width = w;
+    });
+
+    if (issues.length) {
+      wsDet.autoFilter = {
+        from: { row: 2, column: 1 },
+        to: { row: 2, column: colCount },
+      };
+    }
+    wsDet.views = [{ state: "frozen", ySplit: 2, topLeftCell: "A3", activeCell: "A3" }];
+
+    const skippedList = Array.isArray(result.skippedDetails) ? result.skippedDetails : [];
+    if (skippedList.length) {
+      const wsSkip = wb.addWorksheet("건너뜀", { views: [{ state: "frozen", ySplit: 1 }] });
+      wsSkip.mergeCells(1, 1, 1, 7);
+      const skipTitle = wsSkip.getCell(1, 1);
+      skipTitle.value = `건너뛴 행 (${skippedList.length}건) — 번호·X·Y 해석 실패`;
+      skipTitle.font = { bold: true, size: 12, color: { argb: "FF0F172A" } };
+      skipTitle.alignment = { vertical: "middle" };
+      wsSkip.getRow(1).height = 22;
+      const skipHdrRow = wsSkip.getRow(2);
+      const skipHdr = ["시트명", "엑셀행", "사유", "동(시트·또는 동열)", "번호(원문)", "X(원문)", "Y(원문)"];
+      skipHdr.forEach((h, i) => {
+        const c = skipHdrRow.getCell(i + 1);
+        c.value = h;
+        c.font = { bold: true, color: { argb: "FF1E3A8A" } };
+        c.fill = headerFill;
+        c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        c.border = thinBorder;
+      });
+      skipHdrRow.height = 22;
+      skippedList.forEach((sk, i) => {
+        const r = wsSkip.getRow(3 + i);
+        const vals = [
+          sk.sheetName ?? "",
+          sk.excelRow ?? "",
+          formatVersionCompareExcelSkipReasonKo(sk.reason),
+          sk.buildingContext ?? "",
+          sk.numberRaw ?? "",
+          sk.xRaw ?? "",
+          sk.yRaw ?? "",
+        ];
+        vals.forEach((v, j) => {
+          const cell = r.getCell(j + 1);
+          cell.value = v;
+          cell.border = thinBorder;
+          cell.alignment = { vertical: "middle", horizontal: j === 0 || j === 3 || j >= 4 ? "left" : "center" };
+        });
+      });
+      [16, 10, 22, 20, 18, 14, 14].forEach((w, i) => {
+        wsSkip.getColumn(i + 1).width = w;
+      });
+      wsSkip.autoFilter = {
+        from: { row: 2, column: 1 },
+        to: { row: 2, column: 7 },
+      };
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    const projectStem = versionCompareExcelSanitizeDownloadStem(getActiveProjectName());
+    const fileBase = projectStem ? `엑셀좌표비교_${projectStem}_${stamp}` : `엑셀좌표비교_${stamp}`;
+    anchor.href = url;
+    anchor.download = `${fileBase}.xlsx`;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setVersionCompareExcelStatus("XLSX 파일을 저장했습니다.", false);
+  } catch (err) {
+    console.error(err);
+    setVersionCompareExcelStatus("XLSX 저장에 실패했습니다.", true);
+  }
+}
+
 function renderVersionCompareExcelResult(result, options = {}) {
   if (!versionCompareExcelSummary || !versionCompareExcelIssues) return;
   versionCompareExcelLastResult = result;
@@ -13170,17 +13633,19 @@ function renderVersionCompareExcelResult(result, options = {}) {
   const labels = result.versionLabels || { old: "이전 버전", new: "현재 버전" };
   const singleVersion = Boolean(options.singleVersion);
   const targetLabel = options.targetLabel || labels.new || "현재 버전";
+  const skipRows = Number(summary.skippedRows ?? 0) || 0;
+  const skipFoot = skipRows ? formatVersionCompareExcelSkipDetail(summary) : "";
   const cards = singleVersion
     ? [
       { label: "엑셀 유효 행", value: summary.totalRows ?? 0 },
-      { label: "건너뜀", value: summary.skippedRows ?? 0 },
+      { label: "건너뜀", value: skipRows, foot: skipFoot || undefined },
       { label: `${targetLabel} 일치`, value: summary.matchBoth ?? 0 },
       { label: `${targetLabel} 누락`, value: summary.missingBoth ?? 0 },
       { label: "좌표 불일치", value: summary.coordMismatch ?? 0 },
     ]
     : [
       { label: "엑셀 유효 행", value: summary.totalRows ?? 0 },
-      { label: "건너뜀", value: summary.skippedRows ?? 0 },
+      { label: "건너뜀", value: skipRows, foot: skipFoot || undefined },
       { label: "양쪽 일치", value: summary.matchBoth ?? 0 },
       { label: `${labels.old}만 일치`, value: summary.matchOldOnly ?? 0 },
       { label: `${labels.new}만 일치`, value: summary.matchNewOnly ?? 0 },
@@ -13195,22 +13660,29 @@ function renderVersionCompareExcelResult(result, options = {}) {
         <div class="version-compare-excel-summary-card">
           <span>${escapeHtml(card.label)}</span>
           <strong>${card.value}</strong>
+          ${card.foot ? `<small class="version-compare-excel-summary-foot">${escapeHtml(card.foot)}</small>` : ""}
         </div>
       `).join("")}
     </div>
     ${sheetSummaries.length > 1 ? `
       <div class="version-compare-excel-sheet-summary-list">
-        ${sheetSummaries.map((sheet) => `
+        ${sheetSummaries.map((sheet) => {
+          const sh = sheet.summary || {};
+          const sk = Number(sh.skippedRows ?? 0) || 0;
+          const skTitle = sk ? escapeHtml(formatVersionCompareExcelSkipDetail(sh)) : "";
+          return `
           <div class="version-compare-excel-sheet-summary-item">
             <strong>${escapeHtml(sheet.sheetName || "-")}</strong>
-            <span>유효 ${sheet.summary?.totalRows ?? 0}</span>
-            <span>${singleVersion ? "일치" : "양쪽"} ${sheet.summary?.matchBoth ?? 0}</span>
+            <span>유효 ${sh.totalRows ?? 0}</span>
+            <span${skTitle ? ` title="${skTitle}"` : ""}>건너뜀 ${sk}</span>
+            <span>${singleVersion ? "일치" : "양쪽"} ${sh.matchBoth ?? 0}</span>
             ${singleVersion
-              ? `<span>누락 ${sheet.summary?.missingBoth ?? 0}</span>`
-              : `<span>${escapeHtml(labels.old)}만 ${sheet.summary?.matchOldOnly ?? 0}</span><span>${escapeHtml(labels.new)}만 ${sheet.summary?.matchNewOnly ?? 0}</span>`}
-            <span>불일치 ${sheet.summary?.coordMismatch ?? 0}</span>
+              ? `<span>누락 ${sh.missingBoth ?? 0}</span>`
+              : `<span>${escapeHtml(labels.old)}만 ${sh.matchOldOnly ?? 0}</span><span>${escapeHtml(labels.new)}만 ${sh.matchNewOnly ?? 0}</span>`}
+            <span>불일치 ${sh.coordMismatch ?? 0}</span>
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
     ` : ""}
   `;
@@ -13236,8 +13708,7 @@ function renderVersionCompareExcelResult(result, options = {}) {
   const issues = Array.isArray(result.issues) ? result.issues : [];
   if (!issues.length) {
     versionCompareExcelIssues.innerHTML = '<div class="empty-row">불일치 항목이 없습니다.</div>';
-    return;
-  }
+  } else {
   const pickIssueDistance = (issue) => {
     if (issue?.newCircle?.distance != null && Number.isFinite(Number(issue.newCircle.distance))) {
       return Number(issue.newCircle.distance);
@@ -13333,6 +13804,9 @@ function renderVersionCompareExcelResult(result, options = {}) {
       </table>
     </div>
   `;
+  }
+  renderVersionCompareExcelSkippedPanel(result);
+  updateVersionCompareExcelDownloadButton();
 }
 
 async function runVersionCompareExcelCompare() {
