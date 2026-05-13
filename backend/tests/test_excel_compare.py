@@ -139,6 +139,14 @@ def test_compare_excel_workbook_treats_hyphen_number_as_suffix_sequence() -> Non
     assert result["summary"]["coordMismatch"] == 0
 
 
+def test_normalize_number_triple_hyphen_pile_suffix() -> None:
+    from backend.excel_compare import _normalize_number
+
+    assert _normalize_number("8-15-2") == "15-2"
+    assert _normalize_number("8-15") == "15"
+    assert _normalize_number("15-2") == "15-2"
+
+
 def test_compare_excel_workbook_matches_only_same_coordinate_number() -> None:
     rows = [
         ["building", "number", "X", "Y"],

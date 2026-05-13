@@ -26,6 +26,8 @@ class DxfPileLabelCollectionTest(unittest.TestCase):
     def test_rejects_non_pile_noise(self) -> None:
         self.assertIsNone(pile_label_for_collection("PHC"))
         self.assertIsNone(pile_label_for_collection("PART"))
+        self.assertIsNone(pile_label_for_collection("PIT"))
+        self.assertFalse(foundation_pf_only_flag("PIT"))
         self.assertIsNone(pile_label_for_collection("T4-1a"))
         self.assertIsNone(pile_label_for_collection("TC4-1a"))
         self.assertIsNone(pile_label_for_collection("TA-1"))

@@ -133,9 +133,20 @@ def _normalize_number(value: Any) -> str:
     tower_m = re.fullmatch(r"(?i)(T|TC)(\d+)-(\d+)", raw)
     if tower_m:
         return str(int(tower_m.group(3)))
+    parts = raw.split("-")
+    if len(parts) >= 2 and all(p.isdigit() for p in parts):
+        if len(parts) >= 3:
+            # 8-15-2 → 파일측 토큰 15-2 (동 접두 제거, 프론트 formatDisplayedPileNumber·동-번호 파싱과 동일)
+            return "-".join(parts[1:])
+        a, b = parts[0], parts[1]
+        na, nb = int(a), int(b)
+        if (len(a) <= 2 or na <= 9) and len(b) >= 2:
+            return str(nb)
+        if len(b) == 1 and len(a) >= 2:
+            return f"{a}-{b}"
+        return str(nb)
     hyphen_match = re.fullmatch(r"(\d+)-(\d+)", raw)
     if hyphen_match:
-        # 동-번호 표기는 뒤 번호를 실제 파일 번호로 본다. (예: 1-1 -> 1)
         return str(int(hyphen_match.group(2)))
     if raw.endswith(".0"):
         try:

@@ -121,7 +121,7 @@ def _leading_pf_collectible(compact: str) -> bool:
     if _leading_pf_ascii(compact) is None:
         return False
     u = _ascii_fold_pf_compact(compact).upper()
-    if u in ("PHC", "PART"):
+    if u in ("PHC", "PART", "PIT"):
         return False
     return True
 

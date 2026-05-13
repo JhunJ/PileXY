@@ -4019,21 +4019,59 @@ function normalizePileTextHyphens(value) {
   return String(value ?? "").replace(/\u2212|\u2013|\u2014/g, "-");
 }
 
-/** 첫 번째 `-` 기준: 앞쪽 숫자=동키, 뒤쪽 첫 숫자 그룹=파일 번호 */
+/** 첫 세그먼트=동키(숫자), 이후=파일 토큰(예: 15, 15-2). 전부 숫자·하이픈일 때만 동-번호로 인정. */
 function parseHyphenPileText(matchedText) {
-  const s = normalizePileTextHyphens(String(matchedText ?? "").replace(/\s+/g, "")).trim();
-  /** T/TC4-1 형은 타워(호기-파일). 앞에 T/TC 없이 4-1만 있으면 동-번호 */
-  if (/^(?:T|TC)\d+-\d+$/i.test(s)) {
-    return { hasHyphen: false, dongKey: null, seqNum: NaN };
+  const empty = { hasHyphen: false, dongKey: null, seqNum: NaN, seqToken: null };
+  const s0 = normalizePileTextHyphens(String(matchedText ?? "").replace(/\s+/g, "")).trim();
+  if (!s0) return { ...empty };
+  if (/^(?:T|TC)\d+-\d+$/i.test(s0)) return { ...empty };
+  const parts = s0.split("-").filter(Boolean);
+  if (parts.length < 2) return { ...empty };
+  if (!parts.every((part) => /^\d+$/.test(part))) return { ...empty };
+
+  if (parts.length >= 3) {
+    const dongKey = parseInt(parts[0], 10);
+    const seqToken = parts.slice(1).join("-");
+    const head = seqToken.match(/^\d+/)?.[0];
+    const seqNum = head ? parseInt(head, 10) : NaN;
+    return { hasHyphen: true, dongKey, seqNum, seqToken };
   }
-  const idx = s.indexOf("-");
-  if (idx < 0) return { hasHyphen: false, dongKey: null, seqNum: NaN };
-  const leftDigits = s.slice(0, idx).replace(/\D/g, "");
-  const rightRaw = s.slice(idx + 1);
-  const rm = rightRaw.match(/\d+/);
-  const dongKey = leftDigits.length ? parseInt(leftDigits, 10) : null;
-  const seqNum = rm ? parseInt(rm[0], 10) : NaN;
-  return { hasHyphen: true, dongKey, seqNum };
+  const [a, b] = parts;
+  const na = parseInt(a, 10);
+  const nb = parseInt(b, 10);
+  if ((a.length <= 2 || na <= 9) && b.length >= 2) {
+    return { hasHyphen: true, dongKey: na, seqNum: nb, seqToken: b };
+  }
+  if (b.length === 1 && a.length >= 2) {
+    const seqToken = `${a}-${b}`;
+    return { hasHyphen: true, dongKey: null, seqNum: na, seqToken };
+  }
+  return { hasHyphen: true, dongKey: na, seqNum: nb, seqToken: b };
+}
+
+/** 동-번호 집계: 토큰 Set(문자열)으로 maxNum·missing 계산 — 부번호(15-2)가 있으면 빠진 번호 목록은 생략 */
+function finalizeHyphenSummaryFromTokenSet(tokenSet) {
+  const tokenStrs = [...tokenSet].map(String);
+  const allNumericSimple = tokenStrs.length > 0 && tokenStrs.every((t) => /^\d+$/.test(t));
+  if (allNumericSimple) {
+    const nums = tokenStrs.map((t) => parseInt(t, 10));
+    const maxNum = Math.max(...nums);
+    const missing = [];
+    for (let n = 1; n <= maxNum; n++) {
+      if (!tokenSet.has(String(n))) missing.push(n);
+    }
+    return { maxNum, missing };
+  }
+  const maxNum =
+    tokenStrs.length > 0
+      ? Math.max(
+          ...tokenStrs.map((t) => {
+            const m = t.match(/^\d+/);
+            return m ? parseInt(m[0], 10) : 0;
+          }),
+        )
+      : 0;
+  return { maxNum, missing: [] };
 }
 
 /** 예: T4-1, TC4-1 — 앞에 T/TC가 있을 때만 타워(호기-번호). 4-1만 있으면 타워가 아님(동-번호) */
@@ -4125,9 +4163,9 @@ function getSameBuildingNumberGroupKey(circle) {
   }
   if (state.filter?.pileNumberHyphenFormat) {
     const p = parseHyphenPileText(mt);
-    if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+    if (p.hasHyphen && p.seqToken != null && p.seqToken !== "" && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
       const dk = p.dongKey != null ? p.dongKey : "X";
-      return `${bname}\0${dk}-${p.seqNum}`;
+      return `${bname}\0${dk}-${p.seqToken}`;
     }
   }
   const num = getEffectivePileSequenceNumber(mt);
@@ -4141,8 +4179,8 @@ function getSameBuildingDuplicateDisplayLabel(circle) {
   if (t0.isTower) return `${t0.prefix || "TC"}${t0.craneNum}-${t0.seqNum}`;
   if (state.filter?.pileNumberHyphenFormat) {
     const p = parseHyphenPileText(mt);
-    if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
-      return p.dongKey != null ? `${p.dongKey}-${p.seqNum}` : `?-${p.seqNum}`;
+    if (p.hasHyphen && p.seqToken != null && p.seqToken !== "" && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      return p.dongKey != null ? `${p.dongKey}-${p.seqToken}` : p.seqToken;
     }
   }
   const n = getEffectivePileSequenceNumber(mt);
@@ -4211,17 +4249,17 @@ function computeHyphenStyleBuildingSummary(hyphen) {
       if (!p.hasHyphen) {
         const fb = getMatchedTextNumber(mt);
         if (Number.isInteger(fb) && fb >= 1) {
-          bucket.numSet.add(fb);
+          bucket.numSet.add(String(fb));
           bucket.pileCount += 1;
         } else {
           bucket.invalidFormatCount += 1;
         }
         return;
       }
-      if (!Number.isInteger(p.seqNum) || p.seqNum < 1) {
+      if (!Number.isInteger(p.seqNum) || p.seqNum < 1 || p.seqToken == null || p.seqToken === "") {
         const fb = getMatchedTextNumber(mt);
         if (Number.isInteger(fb) && fb >= 1) {
-          bucket.numSet.add(fb);
+          bucket.numSet.add(String(fb));
           bucket.pileCount += 1;
         } else {
           bucket.invalidFormatCount += 1;
@@ -4231,7 +4269,7 @@ function computeHyphenStyleBuildingSummary(hyphen) {
       if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
         bucket.mismatchCount += 1;
       }
-      bucket.numSet.add(p.seqNum);
+      bucket.numSet.add(String(p.seqToken));
       bucket.pileCount += 1;
       return;
     }
@@ -4251,6 +4289,21 @@ function computeHyphenStyleBuildingSummary(hyphen) {
         craneNum: null,
         maxNum: 0,
         missing: [],
+        pileCount,
+        mismatchCount: hyphen ? mismatchCount : 0,
+        invalidFormatCount: hyphen ? invalidFormatCount : 0,
+        hyphenMode: hyphen,
+        towerMode: false,
+      });
+      return;
+    }
+    if (hyphen) {
+      const { maxNum, missing } = finalizeHyphenSummaryFromTokenSet(numSet);
+      result.push({
+        buildingName,
+        craneNum: null,
+        maxNum,
+        missing,
         pileCount,
         mismatchCount: hyphen ? mismatchCount : 0,
         invalidFormatCount: hyphen ? invalidFormatCount : 0,
@@ -4320,17 +4373,17 @@ function computeBuildingSeqSummaryTowerAndHyphenTogether() {
     if (!p.hasHyphen) {
       const fb = getMatchedTextNumber(mt);
       if (Number.isInteger(fb) && fb >= 1) {
-        bucket.numSet.add(fb);
+        bucket.numSet.add(String(fb));
         bucket.pileCount += 1;
       } else {
         bucket.invalidFormatCount += 1;
       }
       return;
     }
-    if (!Number.isInteger(p.seqNum) || p.seqNum < 1) {
+    if (!Number.isInteger(p.seqNum) || p.seqNum < 1 || p.seqToken == null || p.seqToken === "") {
       const fb = getMatchedTextNumber(mt);
       if (Number.isInteger(fb) && fb >= 1) {
-        bucket.numSet.add(fb);
+        bucket.numSet.add(String(fb));
         bucket.pileCount += 1;
       } else {
         bucket.invalidFormatCount += 1;
@@ -4340,7 +4393,7 @@ function computeBuildingSeqSummaryTowerAndHyphenTogether() {
     if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
       bucket.mismatchCount += 1;
     }
-    bucket.numSet.add(p.seqNum);
+    bucket.numSet.add(String(p.seqToken));
     bucket.pileCount += 1;
   });
   const hyphenRows = [];
@@ -4361,11 +4414,7 @@ function computeBuildingSeqSummaryTowerAndHyphenTogether() {
       });
       return;
     }
-    const maxNum = Math.max(...numSet);
-    const missing = [];
-    for (let n = 1; n <= maxNum; n++) {
-      if (!numSet.has(n)) missing.push(n);
-    }
+    const { maxNum, missing } = finalizeHyphenSummaryFromTokenSet(numSet);
     hyphenRows.push({
       buildingName,
       craneNum: null,
@@ -4406,7 +4455,13 @@ function computeBuildingSeqSummary() {
       if (t.isTower) {
         rowKey = `${name}\0TC${t.craneNum}`;
         craneNum = t.craneNum;
-      } else if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      } else if (
+        p.hasHyphen
+        && p.seqToken != null
+        && p.seqToken !== ""
+        && Number.isInteger(p.seqNum)
+        && p.seqNum >= 1
+      ) {
         const dk = p.dongKey != null ? p.dongKey : "X";
         rowKey = `${name}\0HY\0${dk}`;
         towerColumnLabel = p.dongKey != null ? `동${p.dongKey}` : "동-번호";
@@ -4422,6 +4477,7 @@ function computeBuildingSeqSummary() {
           pileCount: 0,
           invalidFormatCount: 0,
           mismatchCount: 0,
+          hyphenTokenMode: rowKey.includes("\0HY\0"),
         });
       }
       const bucket = byKey.get(rowKey);
@@ -4431,11 +4487,17 @@ function computeBuildingSeqSummary() {
         bucket.pileCount += 1;
         return;
       }
-      if (p.hasHyphen && Number.isInteger(p.seqNum) && p.seqNum >= 1) {
+      if (
+        p.hasHyphen
+        && p.seqToken != null
+        && p.seqToken !== ""
+        && Number.isInteger(p.seqNum)
+        && p.seqNum >= 1
+      ) {
         if (p.dongKey != null && !dongKeyMatchesBuildingName(p.dongKey, name)) {
           bucket.mismatchCount += 1;
         }
-        bucket.numSet.add(p.seqNum);
+        bucket.numSet.add(String(p.seqToken));
         bucket.pileCount += 1;
         return;
       }
@@ -4451,7 +4513,16 @@ function computeBuildingSeqSummary() {
     [...byKey.entries()]
       .sort(([ka], [kb]) => ka.localeCompare(kb))
       .forEach(([, bucket]) => {
-        const { buildingName, craneNum, towerColumnLabel, numSet, pileCount, invalidFormatCount, mismatchCount } = bucket;
+        const {
+          buildingName,
+          craneNum,
+          towerColumnLabel,
+          numSet,
+          pileCount,
+          invalidFormatCount,
+          mismatchCount,
+          hyphenTokenMode,
+        } = bucket;
         if (!numSet.size) {
           result.push({
             buildingName,
@@ -4459,6 +4530,22 @@ function computeBuildingSeqSummary() {
             towerColumnLabel,
             maxNum: 0,
             missing: [],
+            pileCount,
+            mismatchCount: mismatchCount || 0,
+            invalidFormatCount,
+            hyphenMode: false,
+            towerMode: true,
+          });
+          return;
+        }
+        if (hyphenTokenMode) {
+          const { maxNum, missing } = finalizeHyphenSummaryFromTokenSet(numSet);
+          result.push({
+            buildingName,
+            craneNum,
+            towerColumnLabel,
+            maxNum,
+            missing,
             pileCount,
             mismatchCount: mismatchCount || 0,
             invalidFormatCount,
@@ -9587,8 +9674,14 @@ function getCircleDisplayNumber(circle) {
   const tower = parseTowerCranePileText(raw);
   if (tower.isTower) return String(tower.seqNum);
   const hyphen = parseHyphenPileText(raw);
-  if (hyphen.hasHyphen && Number.isInteger(hyphen.seqNum) && hyphen.seqNum >= 1) {
-    return String(hyphen.seqNum);
+  if (
+    hyphen.hasHyphen
+    && hyphen.seqToken != null
+    && hyphen.seqToken !== ""
+    && Number.isInteger(hyphen.seqNum)
+    && hyphen.seqNum >= 1
+  ) {
+    return String(hyphen.seqToken);
   }
   const number = getMatchedTextNumber(raw);
   return Number.isInteger(number) && number >= 1 ? String(number) : raw;

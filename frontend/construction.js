@@ -1106,7 +1106,22 @@
     const text = String(value ?? "").trim();
     if (!text) return "-";
     if (!text.includes("-")) return text;
-    const parts = text.split("-").map((part) => part.trim()).filter(Boolean);
+    const norm = text
+      .replace(/\u2212|\u2013|\u2014/g, "-")
+      .replace(/\s+/g, "");
+    if (/^(?:T|TC)\d+-\d+$/i.test(norm)) {
+      const tp = norm.split("-").filter(Boolean);
+      return tp[tp.length - 1] || text;
+    }
+    const parts = norm.split("-").filter(Boolean);
+    if (parts.length >= 2 && parts.every((p) => /^\d+$/.test(p))) {
+      if (parts.length >= 3) return parts.slice(1).join("-");
+      const [a, b] = parts;
+      const na = parseInt(a, 10);
+      if ((a.length <= 2 || na <= 9) && b.length >= 2) return b;
+      if (b.length === 1 && a.length >= 2) return `${a}-${b}`;
+      return b;
+    }
     return parts[parts.length - 1] || text;
   }
 
@@ -3024,8 +3039,8 @@
       const buildingA = (a.building_name || "").trim() || "\uFFFF";
       const buildingB = (b.building_name || "").trim() || "\uFFFF";
       if (buildingA !== buildingB) return buildingA.localeCompare(buildingB);
-      const numA = getMatchedTextNumber(a.matched_text?.text);
-      const numB = getMatchedTextNumber(b.matched_text?.text);
+      const numA = getEffectivePileSequenceNumber(a.matched_text?.text);
+      const numB = getEffectivePileSequenceNumber(b.matched_text?.text);
       const sortA = Number.isInteger(numA) && numA >= 1 ? numA : Infinity;
       const sortB = Number.isInteger(numB) && numB >= 1 ? numB : Infinity;
       if (sortA !== sortB) return sortA - sortB;
@@ -5303,7 +5318,7 @@ function inferOpenRectangleVertices(vertices) {
     return out;
   }
 
-  /** dxf_parser._ascii_fold_pf_compact 와 동일 목적 — PHC/PART 잡음 판별용 */
+  /** dxf_parser._ascii_fold_pf_compact 와 동일 목적 — PHC/PART/PIT 잡음 판별용 */
   function asciiFoldForPfNoise(compact) {
     let out = "";
     const S = String(compact);
@@ -5333,13 +5348,16 @@ function inferOpenRectangleVertices(vertices) {
     const lead = mapped.toUpperCase();
     if (lead !== "P" && lead !== "F") return false;
     const nu = asciiFoldForPfNoise(compact);
-    if (nu === "PHC" || nu === "PART") return false;
+    if (nu === "PHC" || nu === "PART" || nu === "PIT") return false;
     return true;
   }
 
   function isPfLocationLabelText(text) {
     const s = String(text ?? "").trim();
     if (!s || s.length > 220) return false;
+    const compact = s.replace(/\s+/g, "");
+    const nu = asciiFoldForPfNoise(compact);
+    if (nu === "PHC" || nu === "PART" || nu === "PIT") return false;
     if (isPfLeadingPfLocationTextString(s)) return true;
     return /[PFpf]/.test(s);
   }
@@ -5347,8 +5365,12 @@ function inferOpenRectangleVertices(vertices) {
   /** 서버에서 foundation_pf_only 로 표시된 P/F 또는(구데이터) 문자열에 P/F 가 포함된 텍스트 */
   function isPfPositionLabelTextRecord(t) {
     if (!t || typeof t !== "object") return false;
+    const raw = String(t.text ?? "").trim();
+    const compact = raw.replace(/\s+/g, "");
+    const nu = asciiFoldForPfNoise(compact);
+    if (nu === "PHC" || nu === "PART" || nu === "PIT") return false;
     if (t.foundation_pf_only === true) return true;
-    return isPfLocationLabelText(String(t.text ?? ""));
+    return isPfLocationLabelText(raw);
   }
 
   /** P/F 라벨만 수집. `state.texts` 배열 참조가 바뀔 때만 다시 스캔(대용량 도면에서 전체 텍스트 반복 순회 방지). */

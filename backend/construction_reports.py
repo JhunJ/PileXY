@@ -552,7 +552,25 @@ def _normalize_location(value: Any) -> str:
 def _pile_sort_value(pile_number: str) -> Optional[int]:
     if not pile_number:
         return None
-    digits = re.sub(r"\D", "", pile_number)
+    text = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", str(pile_number))
+    text = re.sub(r"\s+", "", text)
+    parts = [p for p in text.split("-") if p]
+    if len(parts) >= 2 and all(p.isdigit() for p in parts):
+        if len(parts) >= 3:
+            tail = "-".join(parts[1:])
+        else:
+            a, b = parts[0], parts[1]
+            na, nb = int(a), int(b)
+            if (len(a) <= 2 or na <= 9) and len(b) >= 2:
+                tail = b
+            elif len(b) == 1 and len(a) >= 2:
+                tail = f"{a}-{b}"
+            else:
+                tail = b
+        m = re.match(r"^\d+", tail)
+        digits = m.group(0) if m else ""
+    else:
+        digits = re.sub(r"\D", "", pile_number)
     if not digits:
         return None
     try:
