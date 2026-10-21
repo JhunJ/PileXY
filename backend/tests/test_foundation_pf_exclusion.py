@@ -47,14 +47,23 @@ class FoundationPfExclusionTest(unittest.TestCase):
 
         self.assertEqual(_count_non_foundation_texts(texts), 2)
 
-    def test_build_match_errors_marks_ambiguous_numeric_hyphen(self) -> None:
-        circles = [{"id": "c1", "matched_text_id": "t_bad"}]
-        texts = [{"id": "t_bad", "text": "250-1", "height": 0.8}]
-        errors = build_match_errors(circles, texts, {"t_bad": ["c1"]})
+    def test_build_match_errors_accepts_building_number_hyphen(self) -> None:
+        for label in ("101-1", "250-1", "101–1", "101 - 1"):
+            with self.subTest(label=label):
+                circles = [{"id": "c1", "matched_text_id": "t1",
+                            "has_error": True, "error_codes": ["NUMERIC_HYPHEN_FORMAT_INVALID"]}]
+                texts = [{"id": "t1", "text": label, "height": 0.8, "has_error": True}]
+                errors = build_match_errors(circles, texts, {"t1": ["c1"]})
+                self.assertEqual(errors, [])
+                self.assertFalse(texts[0]["has_error"])
+                self.assertFalse(circles[0]["has_error"])
+                self.assertEqual(circles[0]["error_codes"], [])
 
-        self.assertTrue(any(e.error_type == "NUMERIC_HYPHEN_FORMAT_INVALID" for e in errors))
+    def test_build_match_errors_still_reports_unmatched_hyphen_number(self) -> None:
+        texts = [{"id": "t1", "text": "101-1", "height": 0.8}]
+        errors = build_match_errors([], texts, {})
+        self.assertEqual([e.error_type for e in errors], ["TEXT_NO_MATCH"])
         self.assertTrue(texts[0]["has_error"])
-        self.assertIn("NUMERIC_HYPHEN_FORMAT_INVALID", circles[0]["error_codes"])
 
     def test_build_match_errors_keeps_tc_tower_format_valid(self) -> None:
         circles = [{"id": "c1", "matched_text_id": "t_tc"}]

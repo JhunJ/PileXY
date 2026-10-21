@@ -297,7 +297,8 @@ def test_compare_excel_workbook_matches_only_same_coordinate_number() -> None:
 
     assert result["summary"]["totalRows"] == 1
     assert result["summary"]["coordMismatch"] == 1
-    assert len(result["issues"]) == 1
+    assert len(result["issues"]) == 2
+    assert result["summary"]["missingExcel"] == 1
     issue = result["issues"][0]
     assert issue["status"] == "coord-mismatch"
     assert issue["number"] == "1"
@@ -518,6 +519,68 @@ def test_compare_excel_tower_number_column_t4_dash_n_matches_even_if_sheet_name_
     assert result["summary"]["matchBoth"] == 2
 
 
+def test_inspect_excel_workbook_suggests_no_header_for_headerless_coordinates() -> None:
+    rows = [[1, 445250.779, 243265.534, 0], [2, 445251.818, 243266.406, 0]]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="101동", header=False, index=False)
+    result = inspect_excel_workbook(buffer.getvalue())
+    assert result["sheets"][0]["suggestedHeaderRow"] == 0
+
+
+def test_compare_excel_headerless_sheet_reads_first_data_row() -> None:
+    rows = [[1, 10.0, 20.0, 0], [2, 11.0, 21.0, 0]]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="101동", header=False, index=False)
+    workbook = buffer.getvalue()
+    circles = [
+        {"building_name": "101동", "matched_text": {"text": "1-1"}, "center_x": 20.0, "center_y": 10.0},
+        {"building_name": "101동", "matched_text": {"text": "1-2"}, "center_x": 21.0, "center_y": 11.0},
+    ]
+    result = compare_excel_workbook(
+        workbook,
+        sheet_names=["101동"],
+        header_row=0,
+        building_column=None,
+        number_column="A",
+        x_column="B",
+        y_column="C",
+        building_source_mode="sheet",
+        circles_a=circles,
+        circles_b=[{**c} for c in circles],
+        coord_tolerance=0.2,
+    )
+    assert result["summary"]["totalRows"] == 2
+    assert result["summary"]["matchBoth"] == 2
+
+
+def test_compare_excel_header_row_one_skips_first_row_on_headerless_file() -> None:
+    rows = [[1, 10.0, 20.0, 0], [2, 11.0, 21.0, 0]]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="101동", header=False, index=False)
+    workbook = buffer.getvalue()
+    circles = [
+        {"building_name": "101동", "matched_text": {"text": "1-1"}, "center_x": 20.0, "center_y": 10.0},
+        {"building_name": "101동", "matched_text": {"text": "1-2"}, "center_x": 21.0, "center_y": 11.0},
+    ]
+    result = compare_excel_workbook(
+        workbook,
+        sheet_names=["101동"],
+        header_row=1,
+        building_column=None,
+        number_column="A",
+        x_column="B",
+        y_column="C",
+        building_source_mode="sheet",
+        circles_a=circles,
+        circles_b=[{**c} for c in circles],
+        coord_tolerance=0.2,
+    )
+    assert result["summary"]["totalRows"] == 1
+
+
 def test_normalize_excel_building_key_tower_variants() -> None:
     from backend.excel_compare import _normalize_excel_building_key
 
@@ -526,6 +589,124 @@ def test_normalize_excel_building_key_tower_variants() -> None:
     assert _normalize_excel_building_key("t 4 동") == "T4"
     assert _normalize_excel_building_key("TC4") == "T4"
     assert _normalize_excel_building_key("TC4동") == "T4"
+    assert _normalize_excel_building_key("101") == "101동"
+    assert _normalize_excel_building_key("101동") == "101동"
+
+
+def test_compare_excel_sheet_101_vs_circle_101dong() -> None:
+    """시트명 101 / 윤곽 101동 표기 차이 — 행 전체가 아니라 동키만 맞춰도 매칭."""
+    rows = [["num", "X", "Y"], ["1", 100.0, 200.0]]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="101", header=False, index=False)
+    workbook = buffer.getvalue()
+    circle = {
+        "id": "c101",
+        "building_name": "101동",
+        "matched_text": {"text": "1-1"},
+        "center_x": 200.0,
+        "center_y": 100.0,
+    }
+    result = compare_excel_workbook(
+        workbook,
+        sheet_names=["101"],
+        header_row=1,
+        building_column=None,
+        number_column="A",
+        x_column="B",
+        y_column="C",
+        building_source_mode="sheet",
+        circles_a=[circle],
+        circles_b=[{**circle}],
+        coord_tolerance=0.2,
+    )
+    assert result["summary"]["totalRows"] == 1
+    assert result["summary"]["matchBoth"] == 1
+
+
+def test_compare_excel_excel_101_dash_1_matches_cad_1_1() -> None:
+    """업체 엑셀 101-1 ↔ 도면 1-1 (101동) — 시트당 1건 누락 방지."""
+    rows = [
+        ["num", "X", "Y"],
+        ["101-1", 100.0, 200.0],
+        ["2", 101.0, 201.0],
+    ]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="101동", header=False, index=False)
+    workbook = buffer.getvalue()
+    circles = [
+        {
+            "id": "a1",
+            "building_name": "101동",
+            "matched_text": {"text": "1-1"},
+            "center_x": 200.0,
+            "center_y": 100.0,
+        },
+        {
+            "id": "a2",
+            "building_name": "101동",
+            "matched_text": {"text": "1-2"},
+            "center_x": 201.0,
+            "center_y": 101.0,
+        },
+    ]
+    result = compare_excel_workbook(
+        workbook,
+        sheet_names=["101동"],
+        header_row=1,
+        building_column=None,
+        number_column="A",
+        x_column="B",
+        y_column="C",
+        building_source_mode="sheet",
+        circles_a=circles,
+        circles_b=[{**c} for c in circles],
+        coord_tolerance=0.2,
+    )
+    assert result["summary"]["totalRows"] == 2
+    assert result["summary"]["matchBoth"] == 2
+    assert result["summary"]["missingBoth"] == 0
+
+
+def test_compare_excel_excel_dong_hyphen_matches_cad_same_on_110dong() -> None:
+    """엑셀 110-1 ↔ 도면 10-1 (110동) — 엑셀 행에서도 축약 별칭."""
+    rows = [["num", "X", "Y"], ["110-1", 100.0, 200.0], ["2", 101.0, 201.0]]
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="110동", header=False, index=False)
+    workbook = buffer.getvalue()
+    circles = [
+        {
+            "id": "h1",
+            "building_name": "110동",
+            "matched_text": {"text": "10-1"},
+            "center_x": 200.0,
+            "center_y": 100.0,
+        },
+        {
+            "id": "h2",
+            "building_name": "110동",
+            "matched_text": {"text": "2"},
+            "center_x": 201.0,
+            "center_y": 101.0,
+        },
+    ]
+    result = compare_excel_workbook(
+        workbook,
+        sheet_names=["110동"],
+        header_row=1,
+        building_column=None,
+        number_column="A",
+        x_column="B",
+        y_column="C",
+        building_source_mode="sheet",
+        circles_a=circles,
+        circles_b=[{**c} for c in circles],
+        coord_tolerance=0.2,
+    )
+    assert result["summary"]["totalRows"] == 2
+    assert result["summary"]["matchBoth"] == 2
 
 
 def test_compare_excel_matches_cad_digit_hyphen_display_to_plain_pile_numbers() -> None:

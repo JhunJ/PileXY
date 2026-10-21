@@ -132,6 +132,7 @@ from .pile_clustering import (
 )
 from .parcel_review_api import router as parcel_review_router
 from .pile_dataset_api import router as pile_dataset_router
+from .manual_pile_outline import router as manual_pile_outline_router
 from .work_context import (
     DEFAULT_PROJECT_NAME,
     DEFAULT_SOURCE_TYPE,
@@ -218,7 +219,6 @@ LABEL_DIRECTION_MANUAL_VOTE_EQUIV = 3.0
 MANUAL_PRUNE_MAX_CENTER_FACTOR = 1.25
 MANUAL_PRUNE_MIN_DISTANCE_IMPROVEMENT = 0.04
 NUMERIC_LABEL_PATTERN = re.compile(r"^\d+$")
-NUMERIC_HYPHEN_AMBIGUOUS_PATTERN = re.compile(r"^\d{3,}-\d+$")
 TOWER_CRANE_PILE_PATTERN = re.compile(r"^(?:T|TC)\d+-\d+$", flags=re.IGNORECASE)
 DEFAULT_CLUSTER_CONFIG = ClusterConfig()
 PILE_NO_HEADER = "말뚝 NO."
@@ -394,6 +394,32 @@ def _write_saved_settings_index(items: List[Dict[str, Any]]) -> None:
     path = os.path.join(SAVED_SETTINGS_DIR, SAVED_SETTINGS_INDEX)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
+
+
+def _find_saved_setting_by_name_version(project_name: str, version_id: str) -> Optional[Dict[str, Any]]:
+    """컨텍스트가 달라도 설정명·버전으로 저장본을 찾는다.
+
+    다른 PC에서 동 설정을 저장하면 contextProject가 현재 화면 프로젝트명과 달라
+    정확 키 조회가 실패하고, 필터만 있는 로컬 캐시만 적용되는 경우가 있다.
+    """
+    name = normalize_project_name(project_name)
+    version = str(version_id or "").strip()
+    if not name or not version:
+        return None
+    for entry in _read_saved_settings_index():
+        entry_name = normalize_project_name(entry.get("name") or entry.get("projectName"))
+        entry_version = str(entry.get("versionId") or "").strip()
+        if entry_name != name or entry_version != version:
+            continue
+        data = _get_saved_setting(
+            entry_name,
+            entry_version,
+            entry.get("contextProject") or None,
+            entry.get("contextProjectId") or None,
+        )
+        if data is not None:
+            return data
+    return None
 
 
 def _get_saved_setting(
@@ -673,6 +699,7 @@ app.mount(
 )
 
 app.include_router(pile_dataset_router)
+app.include_router(manual_pile_outline_router)
 app.include_router(parcel_review_router)
 
 FRONTEND_INDEX_PATH = os.path.join(_PROJECT_ROOT, "frontend", "index.html")
@@ -927,19 +954,6 @@ def _normalize_pile_text_hyphens(value: Any) -> str:
     )
 
 
-def _is_numeric_hyphen_ambiguous_text(value: Any) -> bool:
-    """
-    250-1, 250-2 같은 OCR 혼동 패턴(긴 숫자-숫자)을 숫자 포맷 에러로 분류한다.
-    T/TC 형식은 타워크레인 번호로 간주해 제외.
-    """
-    compact = re.sub(r"\s+", "", _normalize_pile_text_hyphens(value))
-    if not compact:
-        return False
-    if TOWER_CRANE_PILE_PATTERN.fullmatch(compact):
-        return False
-    return bool(NUMERIC_HYPHEN_AMBIGUOUS_PATTERN.fullmatch(compact))
-
-
 def _count_non_foundation_texts(texts: List[Any]) -> int:
     return sum(1 for text in texts or [] if not _is_foundation_pf_text_item(text))
 
@@ -994,6 +1008,8 @@ def gather_text_candidates(
     max_distance: Optional[float],
     text_reference_point: str = "center",
     grid_radius: int = MAX_SEARCH_RADIUS,
+    nearby_index=None,
+    text_order=None,
 ) -> tuple[List[Tuple[Dict, float]], bool]:
     cx = circle["center_x"]
     cy = circle["center_y"]
@@ -1004,6 +1020,27 @@ def gather_text_candidates(
     
     # 텍스트 기준점에 따라 사용할 좌표 결정
     use_insert = text_reference_point == "insert"
+
+    if nearby_index is not None and 0 < max_distance <= GRID_CELL_SIZE and grid_radius >= 1:
+        # A radius-sized grid avoids scanning every label in a 400 m cell.
+        # Every point within this distance is also inside the legacy window.
+        near_x = math.floor(cx / max_distance)
+        near_y = math.floor(cy / max_distance)
+        for cell in iter_neighbor_cells(near_x, near_y, 1):
+            for text in nearby_index.get(cell, []):
+                tx = text["insert_x"] if use_insert else text["text_center_x"]
+                ty = text["insert_y"] if use_insert else text["text_center_y"]
+                distance = math.hypot(cx - tx, cy - ty)
+                if distance <= max_distance:
+                    candidates.append((text, distance))
+        # Preserve the old stable ordering for equal-distance candidates.
+        candidates.sort(key=lambda item: (
+            item[1],
+            math.floor(item[0]["insert_x" if use_insert else "text_center_x"] / GRID_CELL_SIZE),
+            math.floor(item[0]["insert_y" if use_insert else "text_center_y"] / GRID_CELL_SIZE),
+            (text_order or {}).get(item[0]["id"], 0),
+        ))
+        return candidates, bool(texts)
 
     # 이전: 반지름을 키우다가 후보가 생기면 즉시 중단 → 인접 격자의 올바른 텍스트가
     # 후보에서 빠져 그리디/최소비용 유량이 국소 최적에 갇히는 문제(영통 5동 등).
@@ -1440,10 +1477,12 @@ def classify_entities(
 ) -> None:
     """
     Assign circles/texts to building polygons. Prefer user-defined buildings and
-    fall back to clustering polygons when necessary.
+    fall back to clustering polygons when necessary. A circle's explicit assignment
+    takes precedence only while the named building remains configured.
     """
     polygons: List[Tuple[int, int, str, List[Tuple[float, float]]]] = []
     circles_bbox_area = _circles_bbox_area(circles)
+    configured_names = {building.name for building in buildings if building.name.strip()}
 
     # Use building definitions first
     for index, building in enumerate(buildings):
@@ -1504,25 +1543,27 @@ def classify_entities(
                     len(vertices),
                 )
 
-    # No polygons -> nothing to assign
-    if not polygons:
-        for circle in circles:
-            circle["building_name"] = None
-            circle["building_seq"] = None
-        for text in texts:
-            text["building_name"] = None
-        return
-
     assigned_circles: Dict[str, List[Dict]] = defaultdict(list)
+    matched_circle_owners: Dict[str, List[Dict]] = defaultdict(list)
 
     for circle in circles:
         circle["building_name"] = None
         circle["building_seq"] = None
-        for _, _, name, polygon in polygons:
-            if point_in_polygon(circle["center_x"], circle["center_y"], polygon):
-                circle["building_name"] = name
-                assigned_circles[name].append(circle)
-                break
+        override = circle.get("building_name_override")
+        if isinstance(override, str) and override in configured_names:
+            circle["building_name"] = override
+        else:
+            for _, _, name, polygon in polygons:
+                if point_in_polygon(circle["center_x"], circle["center_y"], polygon):
+                    circle["building_name"] = name
+                    break
+        if circle["building_name"] is not None:
+            assigned_circles[circle["building_name"]].append(circle)
+        matched_id = circle.get("matched_text_id")
+        if matched_id is None and isinstance(circle.get("matched_text"), dict):
+            matched_id = circle["matched_text"].get("id")
+        if matched_id is not None:
+            matched_circle_owners[str(matched_id)].append(circle)
 
     for name, members in assigned_circles.items():
         members.sort(key=lambda item: (-item["center_y"], item["center_x"]))
@@ -1531,6 +1572,18 @@ def classify_entities(
 
     for text in texts:
         text["building_name"] = None
+        owners = matched_circle_owners.get(str(text.get("id")), [])
+        if len(owners) == 1:
+            owner = owners[0]
+            linked_ids = {str(cid) for cid in (text.get("matched_circle_ids") or [])}
+            override = owner.get("building_name_override")
+            if (
+                isinstance(override, str)
+                and override in configured_names
+                and not linked_ids.difference({str(owner.get("id"))})
+            ):
+                text["building_name"] = override
+                continue
         for _, _, name, polygon in polygons:
             if point_in_polygon(text["text_center_x"], text["text_center_y"], polygon):
                 text["building_name"] = name
@@ -1883,6 +1936,9 @@ def match_texts_to_circles(
         return matched_count, dict(final_links)
 
     spatial_index = build_text_spatial_index(available_texts, GRID_CELL_SIZE, text_reference_point)
+    nearby_index = (build_text_spatial_index(available_texts, max_match_distance, text_reference_point)
+                    if 0 < max_match_distance <= GRID_CELL_SIZE else None)
+    text_order = {text["id"]: i for i, text in enumerate(available_texts)}
     circle_states: Dict[str, Dict[str, Optional[object]]] = {}
 
     for circle in circles:
@@ -1895,6 +1951,8 @@ def match_texts_to_circles(
             max_match_distance,
             text_reference_point,
             grid_radius=MAX_SEARCH_RADIUS,
+            nearby_index=nearby_index,
+            text_order=text_order,
         )
         circle_states[circle["id"]] = {
             "candidates": candidates,
@@ -1931,6 +1989,8 @@ def match_texts_to_circles(
                 max_match_distance,
                 text_reference_point,
                 grid_radius=EXPANDED_MATCH_GRID_RADIUS,
+                nearby_index=nearby_index,
+                text_order=text_order,
             )
             circle_states[cid] = {"candidates": cands, "had_any": had_any}
 
@@ -1972,19 +2032,6 @@ def build_match_errors(
         circle_ids = text_links.get(text["id"], [])
         text["matched_circle_ids"] = circle_ids
         has_error = False
-        if _is_numeric_hyphen_ambiguous_text(text.get("text")):
-            has_error = True
-            errors.append(
-                MatchError(
-                    error_type="NUMERIC_HYPHEN_FORMAT_INVALID",
-                    text_id=text["id"],
-                    text_value=text["text"],
-                    circle_ids=circle_ids,
-                    message=f"TEXT {text['text']} has ambiguous numeric hyphen format (expected pure number).",
-                )
-            )
-            for cid in circle_ids:
-                circle_errors[cid].append("NUMERIC_HYPHEN_FORMAT_INVALID")
         if len(circle_ids) > 1:
             has_error = True
             errors.append(
@@ -2066,8 +2113,22 @@ def build_duplicate_groups(circles: List[Dict]) -> List[DuplicateGroup]:
         if pi != pj:
             parent[pi] = pj
 
-    for i in range(n):
-        for j in range(i + 1, n):
+    # Sweep bounding intervals; only nearby pairs can overlap. Keep the exact
+    # circle predicate and original pair order for deterministic groups.
+    radii = [max(0.0, float(c.get("radius") or (c.get("diameter") or 0) / 2)) for c in circles]
+    centers = [(float(c.get("center_x", 0)), float(c.get("center_y", 0))) for c in circles]
+    active = []
+    pairs = defaultdict(list)
+    for i in sorted(range(n), key=lambda k: centers[k][0] - radii[k]):
+        left = centers[i][0] - radii[i]
+        active = [j for j in active if centers[j][0] + radii[j] >= left]
+        for j in active:
+            if abs(centers[i][1] - centers[j][1]) <= radii[i] + radii[j]:
+                a, b = sorted((i, j))
+                pairs[a].append(b)
+        active.append(i)
+    for i in sorted(pairs):
+        for j in sorted(pairs[i]):
             if _circles_overlap(circles[i], circles[j]):
                 union(i, j)
 
@@ -2228,6 +2289,7 @@ def to_circle_model(circle: Dict) -> CircleRecord:
         has_error=circle.get("has_error", False),
         error_codes=circle.get("error_codes", []),
         building_name=circle.get("building_name"),
+        building_name_override=circle.get("building_name_override"),
         building_seq=circle.get("building_seq"),
         manual_match=circle.get("manual_match"),
     )
@@ -3093,6 +3155,13 @@ async def root():
     return {"message": "DXF Circle/Text API is running. Serve frontend/index.html or use the configured UI." + hint}
 
 
+def _upload_source_metadata(path: str, filename: str) -> Dict[str, Any]:
+    with open(path, "rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    return {"filename": filename, "sha256": digest, "size": os.path.getsize(path),
+            "uploadedAt": datetime.now(timezone.utc).isoformat()}
+
+
 @app.post("/api/upload-dxf", response_model=CircleResponse)
 async def upload_dxf(
     request: Request,
@@ -3244,7 +3313,9 @@ async def upload_dxf(
         # 업로드 직후이므로 전역 변수가 설정되었는지 확인
         if ws.last_raw_circles is None or ws.last_raw_texts is None:
             raise HTTPException(status_code=500, detail="Failed to parse DXF file data.")
-        return update_cached_result(filters)
+        result = update_cached_result(filters)
+        result.source_metadata = _upload_source_metadata(temp_path, filename)
+        return result
     except HTTPException:
         raise
     except (ezdxf.DXFStructureError, ezdxf.DXFError) as exc:
@@ -3379,7 +3450,9 @@ async def upload_dxf_chunk(
             text_height_max=text_height_max,
             max_match_distance=max_match_distance,
         )
-        return update_cached_result(filters)
+        result = update_cached_result(filters)
+        result.source_metadata = _upload_source_metadata(merge_path, filename)
+        return result
     except HTTPException:
         raise
     except (ezdxf.DXFStructureError, ezdxf.DXFError) as e:
@@ -3682,6 +3755,18 @@ def _build_filtered_circle_response(
     )
     filtered_texts = filter_texts(texts, filters.text_height_min, filters.text_height_max)
     overrides = dict(manual_overrides_map) if manual_overrides_map else {}
+    # Keep explicit labels for circles that passed the geometry filter. A synthetic
+    # label must remain editable after the text-height filter changes.
+    filtered_circle_ids = {str(c["id"]) for c in filtered_circles}
+    filtered_text_ids = {str(t["id"]) for t in filtered_texts}
+    overridden_text_ids = {
+        str(tid) for cid, tid in overrides.items() if str(cid) in filtered_circle_ids
+    }
+    for text in texts:
+        tid = str(text["id"])
+        if tid in overridden_text_ids and tid not in filtered_text_ids:
+            filtered_texts.append(copy.deepcopy(text))
+            filtered_text_ids.add(tid)
     text_lookup_fb = {str(t["id"]): t for t in filtered_texts}
     overrides = _prune_pairwise_swap_manual_overrides(
         filtered_circles,
@@ -4077,7 +4162,7 @@ async def assign_buildings(payload: BuildingApplyRequest) -> CircleResponse:
                         continue
                     ws.manual_overrides[str(cid)] = str(c["matched_text_id"])
                 ws.history_manual_overrides = {}
-            filters = ws.current_filters or FilterSettings(
+            filters = payload.filter or ws.current_filters or FilterSettings(
                 min_diameter=DEFAULT_MIN_DIAMETER,
                 max_diameter=DEFAULT_MAX_DIAMETER,
                 text_height_min=DEFAULT_TEXT_HEIGHT_MIN,
@@ -4234,11 +4319,20 @@ async def get_saved_work(work_id: str) -> Dict[str, Any]:
         return data
 
 
+def _check_saved_work_source(existing: Dict[str, Any], payload: Dict[str, Any], *, patch: bool = False) -> None:
+    known = (existing.get("sourceMetadata") or {}).get("sha256")
+    incoming = (payload.get("sourceMetadata") or {}).get("sha256")
+    if known and (not incoming or (patch and incoming != known)):
+        raise HTTPException(status_code=409, detail="저장된 도면의 원본이 갱신되었습니다. 페이지를 새로고침하고 작업을 다시 불러온 뒤 저장하세요.")
+
+
 @app.put("/api/saved-works/{work_id}")
 async def replace_saved_work(work_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """저장된 작업 전체 덮어쓰기 (현재 화면 상태로 기존 작업 교체)."""
-    if _get_saved_work(work_id) is None:
+    existing = _get_saved_work(work_id)
+    if existing is None:
         raise HTTPException(status_code=404, detail="Saved work not found.")
+    _check_saved_work_source(existing, payload)
     from datetime import datetime, timezone
     payload["id"] = work_id
     payload["timestamp"] = datetime.now(timezone.utc).isoformat()
@@ -4302,6 +4396,8 @@ async def update_saved_work(work_id: str, payload: Dict[str, Any]) -> Dict[str, 
     data = _get_saved_work(work_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Saved work not found.")
+    if any(key in payload for key in ("circlePatches", "textPatches", "manualOverrides")):
+        _check_saved_work_source(data, payload, patch=True)
     touched = False
     if "title" in payload and payload["title"] is not None:
         title = (str(payload["title"]) or "").strip() or "이름 없음"
@@ -4475,6 +4571,9 @@ async def get_saved_setting(
     if data is None and (context or context_id):
         # 레거시 저장본(컨텍스트 없는 키) 호환
         data = _get_saved_setting(name, version, None, None)
+    if data is None:
+        # 다른 프로젝트 컨텍스트로 저장된 동 설정 (예: 설정명 청주씨엘리체2, 컨텍스트 청주씨엘리체)
+        data = _find_saved_setting_by_name_version(name, version)
     if data is None:
         raise HTTPException(status_code=404, detail="Saved setting not found.")
     return data
@@ -4670,7 +4769,7 @@ def _parse_excel_header_rows_map(
             continue
         try:
             n = int(val)
-            out[name] = n if n >= 1 else fb
+            out[name] = n if n >= 0 else fb
         except (TypeError, ValueError):
             out[name] = fb
     return out

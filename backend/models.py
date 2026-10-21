@@ -50,6 +50,9 @@ class CircleRecord(BaseModel):
     has_error: bool = Field(False)
     error_codes: List[str] = Field(default_factory=list)
     building_name: Optional[str] = None
+    building_name_override: Optional[str] = Field(
+        None, description="Explicit building assignment; empty restores automatic geometry assignment"
+    )
     building_seq: Optional[int] = None
     manual_match: Optional[bool] = Field(None, description="?섎룞 留ㅼ묶 ?щ? (???遺덈윭?ㅺ린 ??蹂듭썝??")
 
@@ -246,12 +249,14 @@ class CircleResponse(BaseModel):
     filter: FilterSettings
     building_summary: List[BuildingSummary] = Field(default_factory=list)
     match_corrections: List[MatchCorrection] = Field(default_factory=list)
+    source_metadata: Optional[Dict[str, Any]] = None
 
 
 class BuildingApplyRequest(BaseModel):
     """???뺣낫 ?곸슜. buildings ?꾩닔. circles/texts/polylines ?덉쑝硫??대떦 ?곗씠??湲곗??쇰줈 ?곸슜(?ㅼ쨷 ?ъ슜?????꾩뿭 ?곹깭 ?ㅼ뿼 諛⑹?)."""
 
     buildings: List[BuildingDefinition]
+    filter: Optional[FilterSettings] = None
     circles: Optional[List[Dict[str, Any]]] = None
     texts: Optional[List[Dict[str, Any]]] = None
     polylines: Optional[List[Dict[str, Any]]] = None

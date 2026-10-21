@@ -24,5 +24,18 @@ Thumbs.db
 # 로컬 테스트 자격 증명 샘플
 tools/meissa-login-test.json
 
-# 중앙 저장 데이터 (선택적: 저장소에 포함하려면 이 줄 제거)
+# 운영 데이터와 현장 원본은 비공개 이전 백업으로 보관합니다 (MIGRATION.md).
 /data/
+/logs/
+backend/server-*.log
+/검암푸르지오프라베뉴/
+/*_파일마스터*/
+
+# 이전용 비밀 설정 및 복원 키는 공개 Git 저장소에 포함하지 않습니다.
+private-config/
+private-plaintext/
+*.sealed
+restore-key*.txt
+migration.zip*
+migration-manifest.json
+/migration-restore-report.json

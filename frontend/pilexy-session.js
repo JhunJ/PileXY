@@ -4,25 +4,19 @@
  */
 (function () {
   if (typeof window === "undefined") return;
-  var STORAGE_KEY = "pilexy_session_id";
-
   function getOrCreateSessionId() {
-    try {
-      var id = window.localStorage && window.localStorage.getItem(STORAGE_KEY);
-      if (!id || String(id).trim().length < 8) {
-        id =
-          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
-          "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 14);
-        if (window.localStorage) window.localStorage.setItem(STORAGE_KEY, id);
-      }
-      return String(id).trim();
-    } catch (e) {
-      return "default";
-    }
+    // localStorage is shared across tabs; sharing it mixed their server-side CAD data.
+    return (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
+      "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 14);
   }
 
   var SESSION_ID = getOrCreateSessionId();
   window.__PILEXY_SESSION_ID__ = SESSION_ID;
+  window.pilexyBeginDrawingSession = function () {
+    SESSION_ID = getOrCreateSessionId();
+    window.__PILEXY_SESSION_ID__ = SESSION_ID;
+    return SESSION_ID;
+  };
 
   function isPilexyApiUrl(urlStr) {
     return String(urlStr || "").indexOf("/api/") >= 0;
@@ -35,9 +29,22 @@
       if (isPilexyApiUrl(u)) {
         init = init ? Object.assign({}, init) : {};
         var headers = new Headers(init.headers || undefined);
-        if (!headers.has("X-PileXY-Session")) headers.set("X-PileXY-Session", SESSION_ID);
+        var requestSession = SESSION_ID;
+        if (!headers.has("X-PileXY-Session")) headers.set("X-PileXY-Session", requestSession);
         init.headers = headers;
-        return _fetch(input, init);
+        return _fetch(input, init).then(function (response) {
+          if (/\/api\/(?:circles|assign-buildings|buildings\/apply|manual-match|upload-dxf)/.test(u)) {
+            var checkSession = function () {
+              if (requestSession !== SESSION_ID) throw new Error("도면이 변경되어 이전 요청 결과를 적용하지 않았습니다.");
+            };
+            checkSession();
+            var readJson = response.json.bind(response);
+            response.json = function () {
+              return readJson().then(function (data) { checkSession(); return data; });
+            };
+          }
+          return response;
+        });
       }
     } catch (e) {
       /* fall through */

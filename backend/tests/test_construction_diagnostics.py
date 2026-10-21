@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend import construction_reports
 
 
@@ -233,8 +235,9 @@ def test_pdam_duplicates_merge_unicode_dash_pile_numbers(monkeypatch):
     assert dashboard["diagnostics"]["pdamDuplicates"][0]["count"] == 2
 
 
-def test_parking_location_flags_dong_hyphen_pile_as_numeric_format_issue(monkeypatch):
-    """시공위치가 주차장으로 정규화되는데 파일번호만 동-번호 형식(예: 8-12)이면 숫자 오류 진단에 포함."""
+@pytest.mark.parametrize("pile_number", ["101-1", "8-12", "101–1", "101 - 1"])
+def test_parking_location_accepts_dong_hyphen_pile_format(monkeypatch, pile_number):
+    """지원하는 동-번호 형식은 주차장에서도 숫자 오류로 분류하지 않는다."""
     records = [
         {
             "sheet_name": "record",
@@ -246,7 +249,7 @@ def test_parking_location_flags_dong_hyphen_pile_as_numeric_format_issue(monkeyp
             "pile_type": "PHC",
             "construction_method": "T4",
             "location": "주차장",
-            "pile_number": "8-12",
+            "pile_number": pile_number,
             "pile_number_sort": 12,
             "pile_remaining": 0.2,
             "penetration_depth": 6.0,
@@ -265,12 +268,10 @@ def test_parking_location_flags_dong_hyphen_pile_as_numeric_format_issue(monkeyp
 
     dashboard = construction_reports.build_dashboard("sample-dataset", circles=[])
 
-    assert dashboard["diagnostics"]["summary"]["parkingPileFormatIssueCount"] == 1
-    issue = dashboard["diagnostics"]["parkingPileFormatIssues"][0]
-    assert issue["pileNumber"] == "8-12"
-    assert issue["rawPileNumber"] == "8-12"
-    assert issue["issueType"] == "숫자 오류"
-    assert issue["rawLocation"] == "주차장"
+    assert dashboard["diagnostics"]["summary"]["parkingPileFormatIssueCount"] == 0
+    assert dashboard["diagnostics"]["parkingPileFormatIssues"] == []
+    # 미매칭 진단은 형식 허용 여부와 별개로 계속 제공한다.
+    assert dashboard["diagnostics"]["summary"]["pdamOnlyCount"] == 1
 
 
 def test_mapping_diagnostics_do_not_report_same_display_number_as_pdam_only_when_already_matched(monkeypatch):

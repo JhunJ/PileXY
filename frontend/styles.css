@@ -2675,16 +2675,37 @@ body {
 }
 
 /* 동별 계획 매트릭스: 행이 많을 때 세로로 더 쓰고 셀은 촘촘히 */
+.materials-plan-row-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.materials-plan-row-toolbar input { flex: 1; min-width: 200px; }
+.materials-plan-row-toolbar select { width: auto; min-width: 150px; }
+.materials-plan-inline-row { display: flex; align-items: center; gap: 3px; }
+.materials-plan-inline-row input[data-plan-row-name] {
+  flex: 1; min-width: 0; width: 100%; padding: 7px 3px;
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+  font: inherit; font-weight: 500; color: inherit;
+}
+.materials-plan-inline-row input[data-plan-row-name]:hover { border-color: #cbd5e1; }
+.materials-plan-inline-row input[data-plan-row-name]:focus { background: #fff; border-color: #2563eb; outline: none; }
+.materials-plan-inline-row select[data-plan-row-action] { width: 32px; min-width: 32px; padding: 4px 0; border: 0; background: transparent; cursor: pointer; }
+.materials-plan-row-handle { min-width: 26px; padding: 5px 2px; border: 0; border-radius: 3px; background: #e2e8f0; color: #475569; cursor: grab; }
+.materials-plan-row-handle[aria-pressed="true"] { background: #2563eb; color: white; }
+.materials-add-plan-row { display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid #cbd5e1; background: #f8fafc; }
+.materials-add-plan-row input { width: min(280px, 70%); padding: 8px; border: 1px dashed #94a3b8; background: transparent; border-radius: 4px; }
+.materials-add-plan-row button { margin-left: 8px; padding: 7px 12px; cursor: pointer; }
 .materials-table-shell--wide.materials-table-shell--matrix {
   max-height: min(82vh, 960px);
-  overflow-x: hidden;
+  overflow-x: auto;
   max-width: 100%;
 }
 
 .materials-panel .materials-table-shell--matrix .materials-matrix {
   width: 100%;
-  min-width: 0 !important;
-  max-width: 100%;
+  max-width: none;
   table-layout: fixed;
 }
 
@@ -2732,8 +2753,7 @@ body {
 
 .materials-panel .materials-table-shell--matrix .construction-records-table.materials-matrix {
   width: 100%;
-  min-width: 0;
-  max-width: 100%;
+  max-width: none;
 }
 
 /* 우측 요약·파손·시멘트: 카드 폭에 맞춤(가로 드래그 최소화) */
@@ -5020,6 +5040,22 @@ body {
   gap: 0.35rem;
 }
 
+.construction-foundation-subgroup-row--pf {
+  flex-wrap: wrap;
+  margin-top: 0.28rem;
+}
+
+.foundation-scope-btn--size {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.foundation-scope-btn.is-active.foundation-scope-btn--size {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
 .foundation-scope-btn {
   min-width: 52px;
   text-align: center;
@@ -5905,6 +5941,17 @@ body {
   border: 1px solid transparent;
 }
 
+.version-compare-list-tag {
+  display: inline-block;
+  min-width: 2.6em;
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+
+.version-compare-list-section[data-status="only-old"] .version-compare-list-tag { color: #16a34a; }
+.version-compare-list-section[data-status="only-new"] .version-compare-list-tag { color: #dc2626; }
+.version-compare-list-section[data-status="coord-changed"] .version-compare-list-tag { color: #ea580c; }
+
 .version-compare-list li:hover {
   background: #f3f4f6;
 }
@@ -6040,6 +6087,51 @@ body {
 
 .version-compare-summary-section .version-compare-summary-hint {
   font-size: 0.8rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.version-compare-list li.is-selected,
+.version-compare-building-detail-list li.is-selected {
+  background: #dbeafe;
+  border-color: #2563eb;
+}
+
+.version-compare-row-selected td {
+  background: #eff6ff;
+}
+
+.version-compare-building-detail {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.version-compare-building-detail h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+}
+
+.version-compare-building-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.version-compare-building-detail-list li {
+  padding: 0.35rem 0.15rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.version-compare-building-detail-list li:hover {
+  background: #eef2ff;
+}
   font-weight: normal;
   color: #6b7280;
 }
@@ -6614,6 +6706,7 @@ button:active {
 .canvas-tooltip {
   position: fixed;
   pointer-events: none;
+  z-index: 1200;
   background: rgba(2, 6, 23, 0.94);
   color: #fff;
   padding: 0.58rem 0.84rem;
@@ -10459,3 +10552,73 @@ tr.meissa-result-data-row {
   color: #2563eb;
   font-size: 0.85rem;
 }
+.manual-pile-panel {
+  margin: 18px 0;
+  padding: 1rem 1.2rem;
+  border-left: 3px solid var(--semantic-caution-border);
+  border-radius: 16px;
+  background: var(--semantic-caution-bg);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+.manual-pile-panel h3 {
+  margin: 0 0 8px;
+  color: var(--semantic-caution-title);
+  font-weight: 600;
+}
+.manual-pile-panel p { font-size: 12px; line-height: 1.6; }
+.manual-pile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.manual-pile-grid[hidden], #manual-pile-new[hidden] { display: none; }
+.manual-pile-selection-tools { margin-top: 12px; }
+.manual-pile-selection-tools button { margin-right: 6px; }
+.manual-pile-grid label { display: grid; gap: 5px; font-size: 12px; min-width: 0; }
+.manual-pile-number-label { grid-column: 1 / -1; }
+.manual-pile-delete-tools { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--semantic-caution-border); }
+#manual-pile-selected { overflow-wrap: anywhere; }
+#manual-pile-delete:not(:disabled) { color: #b91c1c; border-color: #fca5a5; }
+.manual-pile-grid input, .manual-pile-grid select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.manual-pile-grid input:focus, .manual-pile-grid select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#manual-pile-status { margin-bottom: 0; color: #166534; }
+#manual-pile-status.is-error { color: #b91c1c; }
+@media (max-width: 420px) { .manual-pile-grid { grid-template-columns: 1fr; } }
+
+.materials-plan-sort-name { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; padding: 4px 0; cursor: pointer; width: 100%; text-align: left; }
+.materials-plan-sort-name:hover { color: #2563eb; }
+
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:first-child,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody th:first-child {
+  position: sticky; left: 0; z-index: 2; background: #f1f5f9;
+  box-shadow: 1px 0 0 #cbd5e1;
+}
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:first-child { z-index: 4; }
+.materials-join-panel-add label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.materials-join-error { color: #b91c1c; font-size: 12px; }
+
+.materials-join-panel-table-shell { overflow-x: auto; }
+.materials-join-panel-table { min-width: 560px; }
+.materials-join-panel-table thead th:nth-child(n),
+.materials-join-panel-table tbody th,
+.materials-join-panel-table tbody td:nth-child(n) { width: auto; }
+.materials-join-panel-add { align-items: end; }
+
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:last-child,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody td.materials-matrix-row-sum,
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody tr.materials-total-row td.materials-matrix-grand-total {
+  position: sticky; right: 0; left: auto; z-index: 2;
+  background: #f1f5f9; box-shadow: -1px 0 0 #cbd5e1;
+}
+.materials-panel .materials-table-shell--matrix .materials-matrix thead th:last-child { z-index: 4; }
+.materials-panel .materials-table-shell--matrix .materials-matrix tbody tr.materials-total-row td.materials-matrix-grand-total { background: #ffedd5; }
+
+.materials-matrix-qty-inp::-webkit-inner-spin-button,
+.materials-matrix-qty-inp::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.materials-matrix-qty-inp { appearance: textfield; }

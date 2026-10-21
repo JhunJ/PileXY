@@ -295,7 +295,23 @@ function toggleFavoriteWorkId(id) {
 }
 
 function loadWorkSearchNorm(s) {
-  return (s || "").trim().toLowerCase();
+  return (s || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+/** 저장 프로젝트명과 현장에서 부르는 이름이 다를 때 검색이 맞도록 한다. */
+const LOAD_WORK_PROJECT_SEARCH_ALIASES = {
+  청주씨엘리체: ["청주푸르지오씨엘리체", "청주푸르지오", "푸르지오씨엘리체", "씨엘리체"],
+};
+
+function loadWorkProjectMatchesQuery(projectName, queryNorm) {
+  if (!queryNorm) return true;
+  const name = loadWorkSearchNorm(projectName);
+  if (name.includes(queryNorm) || queryNorm.includes(name)) return true;
+  const aliases = LOAD_WORK_PROJECT_SEARCH_ALIASES[projectName] || [];
+  return aliases.some((alias) => {
+    const norm = loadWorkSearchNorm(alias);
+    return norm.includes(queryNorm) || queryNorm.includes(norm);
+  });
 }
 
 function closeLoadWorkListPanel() {
@@ -487,6 +503,7 @@ const state = {
   showParkingHatch: false,
   showTowerCraneHatch: false,
   manualSelection: { circleId: "", textId: "" },
+  manualPileEditCircleId: "",
   manualPickMode: null,
   buildingEditMode: false,
   enableAreaListHitFocus: false,
@@ -540,6 +557,10 @@ const state = {
   highlightedBuildingNameIndex: -1,
   /** 불러온 작업 ID (수동 매칭 적용 시 해당 저장 항목 자동 갱신용) */
   loadedWorkId: null,
+  drawingUploadStatus: "ready",
+  drawingUploadFilename: "",
+  drawingRevision: 0,
+  sourceMetadata: null,
   /** 불러온 작업의 수동 매칭 맵 (circle_id -> text_id). 불러오기 후 필터 적용 시 서버로 전달해 복원 */
   manualOverrides: {},
   matchCorrections: [],
@@ -1114,7 +1135,8 @@ function normalizeAreaDefinitions(buildings = []) {
     const kind = resolveBuildingOutlineKind(building);
     const order = counters[kind];
     counters[kind] += 1;
-    const slot = Number.isFinite(Number(building?.slot)) ? Math.round(Number(building.slot)) : undefined;
+    const slot = building?.slot != null && building.slot !== "" && Number.isFinite(Number(building.slot))
+      ? Math.round(Number(building.slot)) : undefined;
     const fallbackIndex = isSlotAreaKind(kind) && Number.isFinite(slot) ? slot : order;
     const {
       drilling_start_elevation: _ignoredDrill,
@@ -1152,7 +1174,9 @@ function serializeBuildingDefinitions(buildings = state.buildings) {
     [AREA_KIND_TOWER_CRANE]: 0,
   };
   return (Array.isArray(buildings) ? buildings : [])
-    .filter((building) => Array.isArray(building?.vertices) && building.vertices.length >= 3)
+    // 동 목록은 위치로 참조하므로 미생성 행도 저장·재계산에서 유지한다.
+    .filter((building) => Array.isArray(building?.vertices)
+      && (building.vertices.length >= 3 || resolveBuildingOutlineKind(building) === AREA_KIND_BUILDING))
     .map((building) => {
       const kind = resolveBuildingOutlineKind(building);
       const order = counters[kind];
@@ -1191,8 +1215,9 @@ function getAreasByKind(kind, buildings = state.buildings) {
 }
 
 function getAreaSlot(entry, fallbackOrder = 0) {
-  const raw = Number(entry?.building?.slot);
-  return Number.isFinite(raw) ? raw : fallbackOrder;
+  const value = entry?.building?.slot;
+  const raw = value == null || value === "" ? NaN : Number(value);
+  return Number.isInteger(raw) && raw >= 0 ? raw : fallbackOrder;
 }
 
 /** 슬롯 기반 구역(지하주차장·타워크레인): 폴리곤 개수와 slot 범위 중 큰 값 */
@@ -1590,6 +1615,7 @@ function buildManualHistoryRefreshRequestBody() {
 }
 
 async function applyManualHistoryMatchSettings() {
+  const drawingRevision = state.drawingRevision;
   readManualHistoryReuseControlsToState();
   if (!state.hasDataset) {
     setUploadStatus("먼저 DXF를 업로드하거나 작업을 불러오세요.", true);
@@ -1614,6 +1640,7 @@ async function applyManualHistoryMatchSettings() {
       body: JSON.stringify(body),
     });
     const payload = await response.json().catch(() => ({}));
+    if (drawingRevision !== state.drawingRevision) return;
     if (!response.ok) {
       const detail = payload?.detail || payload?.message || response.statusText;
       const msg = typeof detail === "string" ? detail : "요청 실패";
@@ -1661,7 +1688,7 @@ function renderMatchCorrectionsPanel() {
             <span>${escapeHtml(circleId)}</span>
           </div>
           <div class="match-correction-item-meta">
-            <span>좌표 (${formatNumber(item.circle_center_x)}, ${formatNumber(item.circle_center_y)})</span>
+            <span>좌표 (${formatCoordNumber(item.circle_center_x)}, ${formatCoordNumber(item.circle_center_y)})</span>
             <span>${escapeHtml(sourceLabel)} · ${escapeHtml(origin)}</span>
           </div>
         </button>
@@ -1841,6 +1868,10 @@ function init() {
   reconcileProjectList();
   renderProjectList();
   updateProjectButtonState();
+  void syncSavedSettingsFromServer().then(() => {
+    renderProjectList();
+    updateProjectButtonState();
+  });
   renderLoadWorkList();
   setPhase("idle");
   setCanvasSearchMode("circle-id");
@@ -1875,8 +1906,6 @@ function bindEvents() {
   fileInput.addEventListener("change", () => {
     updateUploadButtonState();
     if (!fileInput.files?.[0] || uploadButton.disabled) return;
-    const filterValues = getFilterValuesFromInputs();
-    if (!filterValues) return;
     handleUpload({ preventDefault() {} });
   });
   applyFilterBtn.addEventListener("click", applyFilterFromPanel);
@@ -2214,9 +2243,12 @@ function bindEvents() {
   }
   if (refreshProjectListBtn) {
     refreshProjectListBtn.addEventListener("click", () => {
-      reconcileProjectList();
-      renderProjectList();
-      updateProjectButtonState();
+      void (async () => {
+        reconcileProjectList();
+        await syncSavedSettingsFromServer();
+        renderProjectList();
+        updateProjectButtonState();
+      })();
     });
   }
 
@@ -2972,7 +3004,7 @@ function requestRedraw() {
   });
 }
 function updateUploadButtonState() {
-  uploadButton.disabled = !fileInput.files || fileInput.files.length === 0;
+  uploadButton.disabled = state.drawingUploadStatus === "pending" || !fileInput.files || fileInput.files.length === 0;
   if (selectedFileName) {
     const file = fileInput.files && fileInput.files[0];
     selectedFileName.textContent = file ? file.name : "선택된 DXF/DWG 파일 없음";
@@ -3315,12 +3347,46 @@ function sendVersionCompareExcelRequest(formData, callbacks = {}) {
   });
 }
 
+function drawingSaveBlockReason() {
+  if (state.drawingUploadStatus === "pending") return "새 CAD 업로드가 진행 중입니다. 완료 후 저장하세요.";
+  if (state.drawingUploadStatus === "failed") return `새 CAD ${state.drawingUploadFilename || ""} 업로드가 완료되지 않았습니다. 이전 도면의 저장·내보내기를 막았습니다. 다시 업로드하거나 저장된 작업을 다시 불러오세요.`;
+  return "";
+}
+
+function ensureDrawingReadyForSave() {
+  const reason = drawingSaveBlockReason();
+  if (reason) setUploadStatus(reason, true);
+  return !reason;
+}
+
+function updateDrawingUploadState(status, filename = state.drawingUploadFilename) {
+  state.drawingUploadStatus = status;
+  state.drawingUploadFilename = filename;
+  const blocked = !!drawingSaveBlockReason();
+  [saveWorkBtn, saveWorkUpdateBtn, saveWorkModalSubmit].forEach((button) => {
+    if (button) button.disabled = blocked;
+  });
+  let notice = document.getElementById("drawing-upload-notice");
+  if (!notice && uploadForm) {
+    notice = document.createElement("p");
+    notice.id = "drawing-upload-notice";
+    notice.setAttribute("role", "status");
+    uploadForm.appendChild(notice);
+  }
+  if (notice) {
+    notice.hidden = !blocked;
+    notice.textContent = drawingSaveBlockReason();
+  }
+}
+
 async function handleUpload(event) {
   event.preventDefault();
+  if (state.drawingUploadStatus === "pending") return;
   if (!fileInput.files || !fileInput.files[0]) {
     setUploadStatus("DXF/DWG 파일을 선택하세요.", true);
     return;
   }
+  updateDrawingUploadState("failed", fileInput.files[0].name);
   readManualHistoryReuseControlsToState();
   if (state.reuseManualHistory && !state.manualHistoryReferenceWorkId) {
     setUploadStatus("수동 매칭 재사용을 켠 상태에서는 참고할 저장 작업 버전을 하나 선택하세요.", true);
@@ -3330,14 +3396,36 @@ async function handleUpload(event) {
   if (!filterValues) return;
   const file = fileInput.files[0];
   const useChunked = file.size > CHUNKED_UPLOAD_THRESHOLD;
+  updateDrawingUploadState("pending", file.name);
+  closeSaveWorkModal();
+  state.drawingRevision = (state.drawingRevision || 0) + 1;
+  window.pilexyBeginDrawingSession?.();
   try {
     uploadButton.disabled = true;
+    fileInput.disabled = true;
     setPhase("uploading", 0);
     setUploadStatus(useChunked ? "Uploading CAD file (chunked)..." : "Uploading CAD file...");
     
     const payload = useChunked
       ? await sendChunkedUploadRequest(file, filterValues, getDesiredBuildingCount())
       : await sendUploadRequest(file, filterValues, getDesiredBuildingCount());
+    if (!Array.isArray(payload?.circles) || !Array.isArray(payload?.texts)) {
+      throw new Error("새 CAD 처리 결과가 올바르지 않습니다.");
+    }
+    if (payload.source_metadata?.filename && payload.source_metadata.filename !== file.name) {
+      throw new Error("업로드 파일과 처리 결과의 원본 파일명이 다릅니다.");
+    }
+    // Drop every reference to the previous work before applying the new drawing.
+    state.sourceCircles = null;
+    state.sourceTexts = null;
+    state.loadedWorkId = null;
+    state.loadedWorkMeta = null;
+    state.manualOverrides = {};
+    state.foundationThicknessByPileId = {};
+    state.foundationPitOffsetByPileId = {};
+    state.drillingStartByPileId = {};
+    state.foundationTopByPileId = {};
+    state.sourceMetadata = payload.source_metadata || { filename: file.name, size: file.size };
     setPhase("matching", 95);
     setUploadStatus("Processing CAD file...");
     handlePayload(payload);
@@ -3363,6 +3451,7 @@ async function handleUpload(event) {
     setPhase("ready", 100);
     setTimeout(() => setPhase("idle"), 600);
     state.lastUploadedFileName = file ? file.name : "";
+    updateDrawingUploadState("ready", file.name);
     if (state.circles?.length > 0) {
       setUploadStatus("처리 완료. XLSX 다운로드 버튼을 눌러 저장할 수 있습니다.");
     } else {
@@ -3371,9 +3460,10 @@ async function handleUpload(event) {
     fileInput.value = "";
     updateUploadButtonState();
   } catch (error) {
+    updateDrawingUploadState("failed", file.name);
     setPhase("error");
     const errorMsg = parseErrorMessage(error);
-    setUploadStatus(errorMsg, true);
+    setUploadStatus(`${errorMsg} ${drawingSaveBlockReason()}`, true);
     // 에러 메시지에 서버 상태 안내 추가
     if (errorMsg.includes("Network") || errorMsg.includes("timeout") || errorMsg.includes("fetch")) {
       setTimeout(() => {
@@ -3381,6 +3471,7 @@ async function handleUpload(event) {
       }, 100);
     }
   } finally {
+    fileInput.disabled = false;
     uploadButton.disabled = false;
   }
 }
@@ -3399,6 +3490,7 @@ function getDesiredBuildingCount() {
 }
 
 async function refreshClustersForCount(expectedCount, showStatus = true, finalizePhase = true) {
+  if (!ensureDrawingReadyForSave()) return null;
   if (!state.hasDataset) return null;
   const desired = Math.max(1, Math.round(expectedCount || getDesiredBuildingCount()));
   const params = new URLSearchParams({
@@ -3540,7 +3632,9 @@ function buildManualOverridesForApplyFilter(circles) {
  * - 없고 loadedWorkId만 있으면 서버에서 작업 JSON을 한 번 더 받아 복구(스냅샷도 메모리에 저장)
  */
 async function resolveCirclesTextsForFilterApply() {
-  if (Array.isArray(state.sourceCircles) && state.sourceCircles.length > 0) {
+  const drawingRevision = state.drawingRevision;
+  const loadedWorkId = state.loadedWorkId;
+  if (Array.isArray(state.sourceCircles)) {
     return {
       circles: state.sourceCircles,
       texts: state.sourceTexts || [],
@@ -3552,6 +3646,9 @@ async function resolveCirclesTextsForFilterApply() {
       throw new Error((await r.text()) || "저장 작업을 불러오지 못했습니다.");
     }
     const data = await r.json();
+    if (drawingRevision !== state.drawingRevision || loadedWorkId !== state.loadedWorkId) {
+      throw new Error("도면이 변경되어 이전 작업의 필터 데이터를 적용하지 않았습니다.");
+    }
     const c = Array.isArray(data.circles) ? data.circles : [];
     const t = Array.isArray(data.texts) ? data.texts : [];
     if (!c.length) {
@@ -3565,6 +3662,8 @@ async function resolveCirclesTextsForFilterApply() {
 }
 
 async function applyFilterFromPanel() {
+  if (!ensureDrawingReadyForSave()) return;
+  const drawingRevision = state.drawingRevision;
   if (!state.hasDataset) {
     setUploadStatus("Upload a DXF first.", true);
     return;
@@ -3595,6 +3694,7 @@ async function applyFilterFromPanel() {
 
     setPhase("matching", 45);
     const clientSnapshot = await resolveCirclesTextsForFilterApply();
+    if (drawingRevision !== state.drawingRevision) return;
     const useClientApplyFilter = clientSnapshot !== null;
     const baseCirclesForFilter = useClientApplyFilter
       ? clientSnapshot.circles
@@ -3668,6 +3768,7 @@ async function applyFilterFromPanel() {
       }
     }
 
+    if (drawingRevision !== state.drawingRevision) return;
     // 결과 처리
     setPhase("matching", 80);
     setUploadStatus("결과 데이터 처리 중...");
@@ -3702,8 +3803,8 @@ async function applyFilterFromPanel() {
   }
 }
 function handlePayload(payload) {
-  if (saveWorkBtn) saveWorkBtn.disabled = false;
-  if (saveWorkUpdateBtn) saveWorkUpdateBtn.disabled = false;
+  if (saveWorkBtn) saveWorkBtn.disabled = !!drawingSaveBlockReason();
+  if (saveWorkUpdateBtn) saveWorkUpdateBtn.disabled = !!drawingSaveBlockReason();
   state.summary = payload.summary || null;
   state.buildingSummary = Array.isArray(payload.building_summary) ? payload.building_summary : [];
   state.circles = Array.isArray(payload.circles) ? payload.circles : [];
@@ -3724,7 +3825,13 @@ function handlePayload(payload) {
   state.rawPolylines = payloadRaw.length > 0 ? payloadRaw : (state.rawPolylines || []);
   state.polylines = clusterPolylines.length ? clusterPolylines : state.rawPolylines;
   state.pileClusters = Array.isArray(payload.pile_clusters) ? payload.pile_clusters : [];
-  state.buildings = normalizeAreaDefinitions(Array.isArray(payload.buildings) ? payload.buildings : []);
+  const incomingBuildings = Array.isArray(payload.buildings) ? payload.buildings : [];
+  const incomingOutlineVertices = countSettingOutlineVertices({ buildings: incomingBuildings });
+  const existingOutlineVertices = countSettingOutlineVertices({ buildings: state.buildings });
+  // 필터 응답이 윤곽 좌표를 비우면, 방금 불러온 동 윤곽을 유지한다.
+  if (incomingOutlineVertices > 0 || existingOutlineVertices === 0) {
+    state.buildings = normalizeAreaDefinitions(incomingBuildings);
+  }
   state.circleMap = new Map(state.circles.map((circle) => [circle.id, circle]));
   state.textMap = new Map(state.texts.map((text) => [text.id, text]));
   state.foundationThicknessByPileId = Object.fromEntries(
@@ -3984,8 +4091,8 @@ function updateCircleTable() {
         <td>${circle.building_name || "-"}</td>
         <td class="matched-text-cell${matchedTextCellClass}">${circle.matched_text?.text ?? "—"}</td>
         <td>${circle.id}</td>
-        <td>${formatNumber(circle.center_y)}</td>
-        <td>${formatNumber(circle.center_x)}</td>
+        <td>${formatCoordNumber(circle.center_y)}</td>
+        <td>${formatCoordNumber(circle.center_x)}</td>
         <td>${formatNumber(circle.radius)}</td>
         <td>${formatNumber(circle.diameter)}</td>
         <td>${areaVal}</td>
@@ -4753,8 +4860,8 @@ function updateDuplicatesTable() {
       .filter(Boolean)
       .join(", ");
     row.innerHTML = `
-      <td>${formatNumber(group.coord_key.y)}</td>
-      <td>${formatNumber(group.coord_key.x)}</td>
+      <td>${formatCoordNumber(group.coord_key.y)}</td>
+      <td>${formatCoordNumber(group.coord_key.x)}</td>
       <td>${group.count}</td>
       <td>${group.circle_ids.join(", ")}</td>
       <td>${matchedTexts || "-"}</td>
@@ -4801,13 +4908,6 @@ function isFoundationPfOnlyTextRecord(text) {
   return foundationPfOnlyFromTextValue(text.text);
 }
 
-function isAmbiguousNumericHyphenText(value) {
-  const compact = normalizePileTextHyphens(String(value ?? "").trim()).replace(/\s+/g, "");
-  if (!compact) return false;
-  if (/^(?:T|TC)\d+-\d+$/i.test(compact)) return false;
-  return /^\d{3,}-\d+$/.test(compact);
-}
-
 function countMatchableTexts(texts) {
   return (texts || []).reduce((count, text) => (
     isFoundationPfOnlyTextRecord(text) ? count : count + 1
@@ -4839,16 +4939,6 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     const circleIds = textToCircleIds.get(String(text.id)) || [];
     text.matched_circle_ids = circleIds;
     let hasError = false;
-    if (isAmbiguousNumericHyphenText(text.text)) {
-      hasError = true;
-      errors.push({
-        error_type: "NUMERIC_HYPHEN_FORMAT_INVALID",
-        text_id: text.id,
-        text_value: text.text,
-        circle_ids: circleIds,
-        message: `TEXT ${text.text} has ambiguous numeric hyphen format (expected pure number).`,
-      });
-    }
     if (circleIds.length > 1) {
       hasError = true;
       errors.push({
@@ -4880,9 +4970,6 @@ function buildErrorsFromCirclesAndTexts(circles, texts) {
     const tidKey = ctid != null && ctid !== "" ? String(ctid) : "";
     const linkedCircleIds = tidKey ? textToCircleIds.get(tidKey) || [] : [];
     if (linkedCircleIds.length > 1) codes.push("TEXT_MULTI_MATCH");
-    if (isAmbiguousNumericHyphenText(circle.matched_text?.text)) {
-      codes.push("NUMERIC_HYPHEN_FORMAT_INVALID");
-    }
     if (circle.match_distance_exceeded && circle.manual_match !== true) {
       codes.push("MATCH_DISTANCE_EXCEEDED");
       errors.push({
@@ -5085,6 +5172,32 @@ function geometryMatchesCoLocatedDupPolicy(a, b) {
   return sameFileCircleGeometry(a, b);
 }
 
+/** Spatial broad phase only; callers keep their exact duplicate predicate. */
+function forEachNearbyGeometryPair(circles, visit) {
+  let cellSize = Math.max(0.01, SAME_FILE_CIRCLE_GEOMETRY_EPS * 16);
+  if (state.filter?.excludeIdenticalGeometryDuplicates) {
+    for (const circle of circles) {
+      const radius = Number(circle.radius ?? (circle.diameter != null ? circle.diameter / 2 : 0));
+      if (Number.isFinite(radius)) cellSize = Math.max(cellSize, radius * 0.25);
+    }
+  }
+  const cells = new Map();
+  circles.forEach((circle, i) => {
+    const x = Number(circle.center_x ?? circle.centerX ?? 0);
+    const y = Number(circle.center_y ?? circle.centerY ?? 0);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const gx = Math.floor(x / cellSize), gy = Math.floor(y / cellSize);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const j of cells.get(`${gx + dx}:${gy + dy}`) || []) visit(j, i);
+      }
+    }
+    const key = `${gx}:${gy}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(i);
+  });
+}
+
 /**
  * 동일 말뚝 심볼(geometryMatchesCoLocatedDupPolicy)끼리 union-find로 묶은 클러스터.
  * 「동일 좌표·크기 원 중복 제외」 시 동·번호 중복이 겹침 엔티티만으로 불어나지 않게 할 때 사용.
@@ -5103,11 +5216,9 @@ function clusterCirclesByCoLocatedGeometryPolicy(circles) {
     const pj = find(j);
     if (pi !== pj) parent[pi] = pj;
   };
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (geometryMatchesCoLocatedDupPolicy(circles[i], circles[j])) union(i, j);
-    }
-  }
+  forEachNearbyGeometryPair(circles, (i, j) => {
+    if (geometryMatchesCoLocatedDupPolicy(circles[i], circles[j])) union(i, j);
+  });
   const comp = new Map();
   for (let i = 0; i < n; i++) {
     const r = find(i);
@@ -5399,20 +5510,26 @@ function beginTowerCraneRectangleCreation(order) {
 
 function upsertAreaPolygonByOrder(kind, order, vertices) {
   const normalizedKind = normalizeAreaKind(kind);
-  const currentAreas = getAreasByKind(normalizedKind).map((entry) => entry.building);
+  const currentAreas = getAreasByKind(normalizedKind).map((entry, index) => ({
+    ...entry.building,
+    slot: isSlotAreaKind(normalizedKind) ? getAreaSlot(entry, index) : index,
+  }));
   const nextAreas = [...currentAreas];
+  const existingIndex = isSlotAreaKind(normalizedKind)
+    ? nextAreas.findIndex((area) => area.slot === order)
+    : order < nextAreas.length ? order : -1;
   const areaName = getAreaNames(normalizedKind)[order] || getDefaultAreaName(normalizedKind, order);
   const nextArea = {
-    ...(nextAreas[order] || {}),
+    ...(nextAreas[existingIndex] || {}),
     kind: normalizedKind,
     slot: order,
     name: areaName,
     vertices,
   };
-  if (order < nextAreas.length) {
-    nextAreas[order] = nextArea;
+  if (existingIndex >= 0) {
+    nextAreas[existingIndex] = nextArea;
   } else {
-    while (nextAreas.length < order) {
+    while (!isSlotAreaKind(normalizedKind) && nextAreas.length < order) {
       nextAreas.push({
         kind: normalizedKind,
         name: getAreaNames(normalizedKind)[nextAreas.length] || getDefaultAreaName(normalizedKind, nextAreas.length),
@@ -5421,7 +5538,10 @@ function upsertAreaPolygonByOrder(kind, order, vertices) {
     }
     nextAreas.push(nextArea);
   }
-  setAreasByKind(normalizedKind, nextAreas.filter((area) => Array.isArray(area.vertices) && area.vertices.length >= 3));
+  // 동은 목록 위치로 참조하므로 아직 만들지 않은 행도 유지한다.
+  setAreasByKind(normalizedKind, isSlotAreaKind(normalizedKind)
+    ? nextAreas.filter((area) => Array.isArray(area.vertices) && area.vertices.length >= 3)
+    : nextAreas);
   syncPendingNamesWithBuildings();
   const areaEntries = getAreasByKind(normalizedKind);
   const highlightedEntry = areaEntries.find((entry, entryOrder) => getAreaSlot(entry, entryOrder) === order);
@@ -5764,7 +5884,519 @@ function createBuildingFilterButton(value, label, count = null) {
   return button;
 }
 
+function resolveManualPilePlacement(input, circles, buildings) {
+  for (const key of ["x", "y"]) {
+    if (String(input[key] ?? "").trim() === "" || !Number.isFinite(Number(input[key]))) {
+      throw new Error("X와 Y에 유효한 숫자를 입력하세요.");
+    }
+  }
+  const references = circles.filter((circle) =>
+    Number.isFinite(circle.center_x) && Number.isFinite(circle.center_y)
+    && Number.isFinite(circle.diameter) && circle.diameter > 0);
+  if (!references.length) throw new Error("직경과 좌표를 참고할 기존 파일 도면을 먼저 불러오세요.");
+  const normal = { x: Number(input.y), y: Number(input.x) };
+  const reversed = { x: Number(input.x), y: Number(input.y) };
+  const nearest = (point) => {
+    let result = null;
+    for (const circle of references) {
+      const distance = Math.hypot(point.x - circle.center_x, point.y - circle.center_y);
+      if (!result || distance < result.distance) result = { circle, distance };
+    }
+    return result;
+  };
+  const directMatch = nearest(normal);
+  const reverseMatch = nearest(reversed);
+  const xs = references.map((circle) => circle.center_x).sort((a, b) => a - b);
+  const ys = references.map((circle) => circle.center_y).sort((a, b) => a - b);
+  // 극단적인 외곽 객체가 판단 범위를 지나치게 넓히지 않도록 중앙 80% 범위 사용.
+  const low = Math.floor((references.length - 1) * 0.1);
+  const high = Math.ceil((references.length - 1) * 0.9);
+  const span = Math.hypot(xs[high] - xs[low], ys[high] - ys[low]);
+  const nearbyRange = Math.max(span * 0.25, reverseMatch.circle.diameter * 100);
+  // 단순히 조금 가까운 정도로는 교정하지 않는다. 반대 방향이 현장 근처이고
+  // 원래 방향이 현장 규모보다 크게 벗어났을 때만 자동으로 바꾼다.
+  const swapped = reverseMatch.distance <= nearbyRange
+    && directMatch.distance > Math.max(span * 2, nearbyRange * 2, reverseMatch.distance * 10);
+  const point = swapped ? reversed : normal;
+  const reference = swapped ? reverseMatch.circle : directMatch.circle;
+  const priority = { tower_crane: 0, building: 1, parking: 2 };
+  const area = buildings
+    .filter((building) => Array.isArray(building.vertices) && building.vertices.length >= 3)
+    .slice()
+    .sort((a, b) => (priority[resolveBuildingOutlineKind(a)] ?? 1) - (priority[resolveBuildingOutlineKind(b)] ?? 1))
+    .find((building) => pointInPolygon(point, building.vertices));
+  return {
+    ...input, x: point.y, y: point.x, z: 0,
+    diameter: reference.diameter, buildingName: area?.name || null, swapped,
+  };
+}
+
+function buildManualPileRecords(input, circles, texts, uid) {
+  const number = String(input.number || "").trim();
+  if (!/^[A-Za-z]*\d+(?:-\d+)*$/.test(number) || number.length > 40 || !/[1-9]/.test(number)) {
+    throw new Error("파일 번호는 양의 정수 또는 101-12, T4-1 같은 번호로 입력하세요.");
+  }
+  for (const key of ["x", "y", "z", "diameter"]) {
+    if (String(input[key] ?? "").trim() === "" || !Number.isFinite(Number(input[key]))) {
+      throw new Error("X, Y, Z와 직경에 유효한 숫자를 입력하세요.");
+    }
+  }
+  const diameter = Number(input.diameter);
+  const radius = diameter / 2;
+  const area = Math.PI * radius * radius;
+  if (diameter <= 0 || !Number.isFinite(area) || area <= 0) throw new Error("직경은 0보다 큰 유효한 값이어야 합니다.");
+  // 화면의 토목 X/Y는 CAD의 Y/X와 반대이다.
+  const x = Number(input.y);
+  const y = Number(input.x);
+  const z = Number(input.z);
+  if (circles.some((circle) => Math.hypot(Number(circle.center_x) - x, Number(circle.center_y) - y) < 1e-6)) {
+    throw new Error("같은 좌표에 이미 파일이 있습니다. 기존 파일을 확인하세요.");
+  }
+  const circleId = `manual-circle-${uid}`;
+  const textId = `manual-text-${uid}`;
+  if (circles.some((circle) => circle.id === circleId) || texts.some((text) => text.id === textId)) {
+    throw new Error("추가 ID가 중복되었습니다. 다시 시도하세요.");
+  }
+  const buildingName = input.buildingName || null;
+  const height = Number(input.textHeight) > 0 && Number.isFinite(Number(input.textHeight))
+    ? Number(input.textHeight) : diameter;
+  const text = {
+    id: textId, type: "TEXT", text: number,
+    insert_x: x, insert_y: y, insert_z: z,
+    center_x: x, center_y: y, text_center_x: x, text_center_y: y,
+    height, rotation_deg: 0, layer: "MANUAL_PILE", block_name: null,
+    matched_circle_ids: [circleId], has_error: false, building_name: buildingName,
+  };
+  const circle = {
+    id: circleId, type: "CIRCLE", center_x: x, center_y: y, center_z: z,
+    radius, diameter, area, layer: "MANUAL_PILE", block_name: null, transformed: true,
+    matched_text: { ...text, distance: 0 }, matched_text_id: textId,
+    matched_text_distance: 0, manual_match: true, has_error: false, error_codes: [],
+    building_name: buildingName, building_seq: null,
+  };
+  return { circle, text };
+}
+
+function populateManualPileBuildingSelect() {
+  const select = document.getElementById("manual-pile-building");
+  if (!select) return;
+  const selected = select.value;
+  const editing = !!state.circleMap.get(state.manualSelection.circleId);
+  select.replaceChildren(new Option("자동 판정", ""));
+  (state.buildings || []).forEach((building, index) => {
+    if (!editing && resolveBuildingOutlineKind(building) !== AREA_KIND_BUILDING) return;
+    const option = new Option(building.name || `동 ${index + 1}`, String(index));
+    option.disabled = !editing && (!Array.isArray(building.vertices) || building.vertices.length < 3);
+    if (option.disabled) option.textContent += " (윤곽 필요)";
+    select.add(option);
+  });
+  if (editing) {
+    const definedCount = state.buildings.filter((area) => resolveBuildingOutlineKind(area) === AREA_KIND_BUILDING).length;
+    (state.pendingNames || []).forEach((name, order) => {
+      if (order < definedCount) return;
+      const label = String(name || "").trim() || getDefaultAreaName(AREA_KIND_BUILDING, order);
+      select.add(new Option(label, `pending-building:${order}`));
+    });
+  }
+  if ([...select.options].some((option) => option.value === selected && !option.disabled)) select.value = selected;
+}
+
+async function handleAddManualPile(event) {
+  event.preventDefault();
+  const status = document.getElementById("manual-pile-status");
+  const submit = document.querySelector('#manual-pile-form button[type="submit"]');
+  if (submit.disabled) return;
+  submit.disabled = true;
+  try {
+    const read = (name) => document.getElementById(`manual-pile-${name}`).value;
+    const sourceCircles = Array.isArray(state.sourceCircles) ? state.sourceCircles : state.circles;
+    const sourceTexts = Array.isArray(state.sourceTexts) ? state.sourceTexts : state.texts;
+    const references = [...new Map([...sourceCircles, ...state.circles].map((circle) => [circle.id, circle])).values()];
+    const placement = resolveManualPilePlacement({
+      number: read("number"), x: read("x"), y: read("y"),
+      textHeight: state.filter?.textHeightMin,
+    }, references, state.buildings || []);
+    const selected = read("building");
+    const targetIndex = selected === "" ? null : Number(selected);
+    const target = targetIndex === null ? null : state.buildings[targetIndex];
+    if (targetIndex !== null) {
+      if (!target || resolveBuildingOutlineKind(target) !== AREA_KIND_BUILDING || target.vertices?.length < 3) {
+        throw new Error("선택한 동의 윤곽선을 먼저 만들어 주세요.");
+      }
+      placement.buildingName = target.name;
+    }
+    const { circle, text } = buildManualPileRecords(placement,
+      references, [...sourceTexts, ...state.texts], crypto.randomUUID());
+    const key = getSameBuildingNumberGroupKey(circle);
+    if (key && [...sourceCircles, ...state.circles].some((item) => getSameBuildingNumberGroupKey(item) === key)) {
+      throw new Error("같은 구역에 이미 이 파일 번호가 있습니다. 번호 또는 구역을 확인하세요.");
+    }
+    let outline = null;
+    if (target) {
+      status.classList.remove("is-error");
+      status.textContent = "기존 파일에 영향이 없는지 윤곽 확장을 검토하고 있습니다…";
+      const snapshot = JSON.stringify({ work: state.loadedWorkId, buildings: state.buildings,
+        circles: state.circles, texts: state.texts, sourceCircles: state.sourceCircles, sourceTexts: state.sourceTexts });
+      const existingPoints = references.map((item) => ({ id: item.id, x: item.center_x, y: item.center_y }));
+      const existingTexts = [...new Map([...sourceTexts, ...state.texts].map((item) => [item.id, item])).values()];
+      for (const item of existingTexts) {
+        const x = Number(item.text_center_x ?? item.center_x ?? item.insert_x);
+        const y = Number(item.text_center_y ?? item.center_y ?? item.insert_y);
+        if (Number.isFinite(x) && Number.isFinite(y)) existingPoints.push({ id: item.id, x, y });
+      }
+      const response = await fetch(`${API_BASE_URL}/api/manual-pile/outline`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buildings: state.buildings, target_index: targetIndex,
+          point: { x: circle.center_x, y: circle.center_y }, radius: circle.radius, existing_points: existingPoints }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(typeof error?.detail === "string" ? error.detail : "윤곽 검토에 실패했습니다. 다시 시도하세요.");
+      }
+      outline = await response.json();
+      if (snapshot !== JSON.stringify({ work: state.loadedWorkId, buildings: state.buildings,
+        circles: state.circles, texts: state.texts, sourceCircles: state.sourceCircles, sourceTexts: state.sourceTexts })) {
+        throw new Error("검토 중 도면이 변경되었습니다. 다시 추가하세요.");
+      }
+      if (!Array.isArray(outline.vertices) || outline.vertices.length < 3) throw new Error("검토된 윤곽이 올바르지 않습니다.");
+    }
+    circle.building_seq = getEffectivePileSequenceNumber(text.text);
+    if (!Number.isFinite(circle.building_seq)) circle.building_seq = null;
+    // 모든 검토가 끝난 뒤 새 좌표와 윤곽을 함께 반영한다.
+    if (outline?.expanded || outline?.repaired) {
+      state.buildings[targetIndex] = { ...target, vertices: outline.vertices };
+      state.showBuildingHatch = true;
+      const hatch = document.getElementById("toggle-building-hatch");
+      if (hatch) hatch.checked = true;
+    }
+    // 필터 재적용의 원본에도 넣어 화면에서 추가한 파일이 사라지지 않게 한다.
+    state.sourceCircles = [...sourceCircles, structuredClone(circle)];
+    state.sourceTexts = [...sourceTexts, structuredClone(text)];
+    state.circles.push(circle);
+    state.texts.push(text);
+    state.circleMap.set(circle.id, circle);
+    state.textMap.set(text.id, text);
+    state.manualOverrides[circle.id] = text.id;
+    state.hasDataset = true;
+    state.summary = { ...(state.summary || {}), total_circles: state.circles.length };
+    state.activeBuildingFilter = "ALL";
+    refreshMatchDerivedUIState();
+    updateSummaryCards();
+    updateCircleTable();
+    updateDuplicatesTable();
+    updateErrorsTable();
+    renderBuildingTabs();
+    updateCanvasSearchAvailability();
+    syncMeissaCompareBtnEnabled();
+    notifyWorkContextChanged();
+    setManualCircleSelection(circle.id, true);
+    if (saveWorkBtn) saveWorkBtn.disabled = false;
+    if (saveWorkUpdateBtn) saveWorkUpdateBtn.disabled = false;
+    const correction = placement.swapped
+      ? `X·Y가 뒤바뀐 것으로 판단되어 서로 바꿔 적용했습니다 (X ${placement.x}, Y ${placement.y}). ` : "";
+    status.textContent = `${correction}${text.text} 파일 추가 · 구역 ${circle.building_name || "미할당(구역 밖)"} · 직경 ${circle.diameter}.${outline?.expanded ? " 동 윤곽을 확장했습니다. 기존 좌표·번호의 포함 여부는 유지됩니다." : ""} 상단에서 저장하세요.`;
+    document.getElementById("manual-pile-x").value = String(placement.x);
+    document.getElementById("manual-pile-y").value = String(placement.y);
+    status.classList.remove("is-error");
+    updateManualPileEditorSelection(true);
+    document.getElementById("manual-pile-number").focus();
+  } catch (error) {
+    status.textContent = error.message || "파일을 추가하지 못했습니다.";
+    status.classList.add("is-error");
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+document.getElementById("manual-pile-form")?.addEventListener("submit", (event) => {
+  if (state.circleMap.has(state.manualSelection.circleId)) handleEditSelectedPile(event);
+  else handleAddManualPile(event);
+});
+
+function resolveManualPileBuildingName(circle, buildings) {
+  const priority = { tower_crane: 0, building: 1, parking: 2 };
+  return (buildings || []).filter((area) => area.vertices?.length >= 3).slice()
+    .sort((a, b) => (priority[resolveBuildingOutlineKind(a)] ?? 1) - (priority[resolveBuildingOutlineKind(b)] ?? 1))
+    .find((area) => pointInPolygon({ x: circle.center_x, y: circle.center_y }, area.vertices))?.name || null;
+}
+
+function buildManualPileEditRecords(circle, input, circles, texts, uid, manualOverrides = {}) {
+  if (!circle?.id) throw new Error("수정할 파일을 먼저 선택하세요.");
+  const number = String(input.number || "").trim();
+  if (!/^[A-Za-z]*\d+(?:-\d+)*$/.test(number) || number.length > 40 || !/[1-9]/.test(number)) {
+    throw new Error("파일 번호는 양의 정수 또는 101-12, T4-1 같은 번호로 입력하세요.");
+  }
+  const previousTextId = circle.matched_text_id || circle.matched_text?.id || "";
+  const previousText = texts.find((item) => item.id === previousTextId) || circle.matched_text;
+  const shared = previousTextId && (
+    circles.some((item) => item.id !== circle.id && (item.matched_text_id === previousTextId || item.matched_text?.id === previousTextId))
+    || Object.entries(manualOverrides).some(([id, tid]) => id !== circle.id && tid === previousTextId)
+    || (previousText?.matched_circle_ids || []).some((id) => id !== circle.id)
+  );
+  const reuseText = previousTextId && previousText && !shared;
+  const textId = reuseText ? previousTextId : `manual-text-edit-${uid}`;
+  if (!reuseText && texts.some((item) => item.id === textId)) throw new Error("수정 ID가 중복되었습니다. 다시 시도하세요.");
+  const x = circle.center_x;
+  const y = circle.center_y;
+  const z = circle.center_z ?? 0;
+  const text = {
+    id: textId, type: "TEXT", insert_x: x, insert_y: y, insert_z: z,
+    center_x: x, center_y: y, text_center_x: x, text_center_y: y,
+    height: Number(input.textHeight) > 0 ? Number(input.textHeight) : circle.diameter,
+    rotation_deg: 0, layer: "MANUAL_PILE", block_name: null,
+    ...(reuseText ? previousText : {}),
+    id: textId, text: number, matched_circle_ids: [circle.id], has_error: false,
+    building_name: input.buildingName || null,
+  };
+  const distance = Math.hypot(x - (text.text_center_x ?? text.center_x), y - (text.text_center_y ?? text.center_y));
+  const updated = {
+    ...circle, matched_text: { ...text, distance }, matched_text_id: textId,
+    matched_text_distance: distance, manual_match: true, has_error: false, error_codes: [],
+    building_name: input.buildingName || null,
+    building_name_override: input.buildingNameOverride || null,
+    building_seq: getEffectivePileSequenceNumber(number),
+  };
+  if (!Number.isFinite(updated.building_seq)) updated.building_seq = null;
+  const key = getSameBuildingNumberGroupKey(updated);
+  if (key && circles.some((item) => item.id !== circle.id && getSameBuildingNumberGroupKey(item) === key)) {
+    throw new Error("같은 구역에 이미 이 파일 번호가 있습니다. 번호 또는 구역을 확인하세요.");
+  }
+  return { circle: updated, text, previousTextId };
+}
+
+function applyManualPileEditToDataset(edit, circleId, circles, texts) {
+  const nextCircles = circles.map((item) => item.id === circleId ? structuredClone(edit.circle) : item);
+  if (!nextCircles.some((item) => item.id === circleId)) nextCircles.push(structuredClone(edit.circle));
+  const nextTexts = texts.map((item) => {
+    if (item.id === edit.text.id) return structuredClone(edit.text);
+    if (item.id === edit.previousTextId) return {
+      ...item, matched_circle_ids: (item.matched_circle_ids || []).filter((id) => id !== circleId),
+    };
+    return item;
+  });
+  if (!nextTexts.some((item) => item.id === edit.text.id)) nextTexts.push(structuredClone(edit.text));
+  return { circles: nextCircles, texts: nextTexts };
+}
+
+function refreshManualPileBuildingSummary() {
+  const rows = new Map();
+  const rowFor = (name) => {
+    const label = name || "미할당";
+    if (!rows.has(label)) rows.set(label, { name: label, circle_count: 0, text_count: 0, error_count: 0 });
+    return rows.get(label);
+  };
+  for (const circle of state.circles) {
+    const row = rowFor(circle.building_name);
+    row.circle_count += 1;
+    if (circle.has_error) row.error_count += 1;
+  }
+  for (const text of state.texts) {
+    if (!isFoundationPfOnlyTextRecord(text)) rowFor(text.building_name).text_count += 1;
+  }
+  for (const area of state.buildings) rowFor(area.name);
+  state.buildingSummary = [...rows.values()];
+}
+
+function updateManualPileEditorSelection(force = false) {
+  const circle = state.circleMap.get(state.manualSelection.circleId);
+  const id = circle?.id || "";
+  const changed = state.manualPileEditCircleId !== id;
+  state.manualPileEditCircleId = id;
+  const editing = !!circle;
+  const get = (name) => document.getElementById(`manual-pile-${name}`);
+  const title = get("title");
+  if (title) title.textContent = editing ? "파일 마스터 · 번호·동 수정" : "파일 마스터 · 직접 추가";
+  for (const name of ["coordinates", "add-help"]) { if (get(name)) get(name).hidden = editing; }
+  for (const name of ["edit-help", "new"]) { if (get(name)) get(name).hidden = !editing; }
+  for (const name of ["x", "y"]) {
+    if (get(name)) { get(name).disabled = editing; get(name).required = !editing; }
+  }
+  const submit = document.querySelector('#manual-pile-form button[type="submit"]');
+  if (submit) submit.textContent = editing ? "선택 파일 수정" : "파일 추가";
+  if (!changed && !force) return;
+  if (changed && get("status")) {
+    get("status").textContent = "";
+    get("status").classList.remove("is-error");
+  }
+  populateManualPileBuildingSelect();
+  if (get("number")) get("number").value = circle?.matched_text?.text || "";
+  if (get("x")) get("x").value = circle ? String(circle.center_y) : "";
+  if (get("y")) get("y").value = circle ? String(circle.center_x) : "";
+  if (get("building")) {
+    const index = circle ? state.buildings.findIndex((area) => area.name === circle.building_name) : -1;
+    const pendingIndex = circle ? (state.pendingNames || []).findIndex((name) => name === circle.building_name) : -1;
+    get("building").value = index >= 0 ? String(index) : pendingIndex >= 0 ? `pending-building:${pendingIndex}` : "";
+  }
+}
+
+function resolveManualPileEditBuilding(selected, buildings, pendingNames) {
+  if (selected === "") return { target: null, buildings };
+  const pending = /^pending-building:(\d+)$/.exec(selected);
+  if (!pending) {
+    const index = Number(selected);
+    const target = Number.isInteger(index) ? buildings[index] : null;
+    if (!target?.name?.trim()) throw new Error("수정할 동을 다시 선택하세요.");
+    return { target, buildings };
+  }
+  const order = Number(pending[1]);
+  const existingCount = buildings.filter((area) => resolveBuildingOutlineKind(area) === AREA_KIND_BUILDING).length;
+  if (order < existingCount || order >= pendingNames.length) throw new Error("수정할 동을 다시 선택하세요.");
+  const nextBuildings = [...buildings];
+  let target;
+  for (let index = existingCount; index <= order; index += 1) {
+    const area = { kind: AREA_KIND_BUILDING, slot: index, vertices: [],
+      name: String(pendingNames[index] || "").trim() || getDefaultAreaName(AREA_KIND_BUILDING, index) };
+    nextBuildings.push(area);
+    if (index === order) target = area;
+  }
+  return { target, buildings: nextBuildings };
+}
+
+function handleEditSelectedPile(event) {
+  event.preventDefault();
+  const status = document.getElementById("manual-pile-status");
+  const submit = document.querySelector('#manual-pile-form button[type="submit"]');
+  if (submit.disabled) return;
+  submit.disabled = true;
+  try {
+    const circleId = state.manualSelection.circleId;
+    const circle = state.circleMap.get(circleId);
+    if (!circle) throw new Error("수정할 파일을 먼저 선택하세요.");
+    const sourceCircles = Array.isArray(state.sourceCircles) ? state.sourceCircles : state.circles;
+    const sourceTexts = Array.isArray(state.sourceTexts) ? state.sourceTexts : state.texts;
+    const allCircles = [...new Map([...sourceCircles, ...state.circles].map((item) => [item.id, item])).values()];
+    const allTexts = [...new Map([...sourceTexts, ...state.texts].map((item) => [item.id, item])).values()];
+    const selected = document.getElementById("manual-pile-building").value;
+    const assignment = resolveManualPileEditBuilding(selected, state.buildings, state.pendingNames || []);
+    const target = assignment.target;
+    const edit = buildManualPileEditRecords(circle, {
+      number: document.getElementById("manual-pile-number").value,
+      buildingName: target ? target.name : resolveManualPileBuildingName(circle, state.buildings),
+      buildingNameOverride: target?.name || null, textHeight: state.filter?.textHeightMin,
+    }, allCircles, allTexts, crypto.randomUUID(), state.manualOverrides || {});
+    const source = applyManualPileEditToDataset(edit, circleId, sourceCircles, sourceTexts);
+    const visible = applyManualPileEditToDataset(edit, circleId, state.circles, state.texts);
+    state.sourceCircles = source.circles;
+    state.sourceTexts = source.texts;
+    state.circles = visible.circles;
+    state.texts = visible.texts;
+    state.buildings = assignment.buildings;
+    state.circleMap = new Map(state.circles.map((item) => [item.id, item]));
+    state.textMap = new Map(state.texts.map((item) => [item.id, item]));
+    state.manualOverrides[circleId] = edit.text.id;
+    state.matchCorrections = (state.matchCorrections || []).filter((item) => item.circle_id !== circleId);
+    state.activeBuildingFilter = "ALL";
+    refreshMatchDerivedUIState();
+    refreshManualPileBuildingSummary();
+    updateSummaryCards(); updateCircleTable(); updateDuplicatesTable(); updateErrorsTable();
+    renderBuildingTabs(); renderMatchCorrectionsPanel();
+    updateCanvasSearchAvailability(); syncMeissaCompareBtnEnabled();
+    updateManualSelectionDisplay(); updateManualPileEditorSelection(true);
+    notifyWorkContextChanged(); requestRedraw();
+    if (saveWorkBtn) saveWorkBtn.disabled = false;
+    if (saveWorkUpdateBtn) saveWorkUpdateBtn.disabled = false;
+    status.classList.remove("is-error");
+    status.textContent = `${edit.text.text} 파일 · ${edit.circle.building_name || "미할당"}로 수정했습니다. 좌표·직경은 유지됩니다. 변경 사항은 상단에서 저장하세요.`;
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message || "선택 파일을 수정하지 못했습니다.";
+  } finally { submit.disabled = false; }
+}
+
+function removePileFromDataset(circleId, circles, texts, removableTextIds) {
+  return {
+    circles: circles.filter((circle) => circle.id !== circleId),
+    texts: texts.filter((text) => !removableTextIds.has(text.id)).map((text) => ({
+      ...text,
+      matched_circle_ids: (text.matched_circle_ids || []).filter((id) => id !== circleId),
+    })),
+  };
+}
+
+function updateManualPileDeleteSelection() {
+  updateManualPileEditorSelection();
+  const label = document.getElementById("manual-pile-selected");
+  const button = document.getElementById("manual-pile-delete");
+  const circle = state.circleMap.get(state.manualSelection.circleId);
+  if (button) button.disabled = !circle;
+  if (label) label.textContent = circle
+    ? `선택: ${circle.matched_text?.text || "번호 없음"} · ${circle.building_name || "미할당"} · X ${circle.center_y} · Y ${circle.center_x}`
+    : "선택된 파일 없음";
+}
+
+function handleDeleteSelectedPile() {
+  const circleId = state.manualSelection.circleId;
+  const circle = state.circleMap.get(circleId);
+  if (!circle) return;
+  const sourceCircles = Array.isArray(state.sourceCircles) ? state.sourceCircles : state.circles;
+  const sourceTexts = Array.isArray(state.sourceTexts) ? state.sourceTexts : state.texts;
+  const allCircles = [...sourceCircles, ...state.circles];
+  // 직접 추가 당시 번호가 나중에 다른 번호로 재매칭되었어도 원래 글자를 정리한다.
+  const originalTextId = circleId.startsWith("manual-circle-")
+    ? circleId.replace("manual-circle-", "manual-text-") : null;
+  const candidateTextIds = new Set(allCircles.filter((item) => item.id === circleId)
+    .map((item) => item.matched_text_id || item.matched_text?.id).filter(Boolean));
+  if (originalTextId) candidateTextIds.add(originalTextId);
+  const removableTextIds = new Set([...candidateTextIds].filter((textId) =>
+    !allCircles.some((item) => item.id !== circleId
+      && (item.matched_text_id === textId || item.matched_text?.id === textId))
+    && !Object.entries(state.manualOverrides || {}).some(([id, tid]) => id !== circleId && tid === textId)));
+  const source = removePileFromDataset(circleId, sourceCircles, sourceTexts, removableTextIds);
+  const visible = removePileFromDataset(circleId, state.circles, state.texts, removableTextIds);
+  state.sourceCircles = source.circles;
+  state.sourceTexts = source.texts;
+  state.circles = visible.circles;
+  state.texts = visible.texts;
+  state.circleMap = new Map(state.circles.map((item) => [item.id, item]));
+  state.textMap = new Map(state.texts.map((item) => [item.id, item]));
+  for (const key of ["manualOverrides", "foundationThicknessByPileId", "foundationPitOffsetByPileId", "drillingStartByPileId", "foundationTopByPileId"]) {
+    if (state[key]) delete state[key][circleId];
+  }
+  state.matchCorrections = (state.matchCorrections || []).filter((item) => item.circle_id !== circleId);
+  state.summary = { ...(state.summary || {}), total_circles: state.circles.length };
+  if (state.circles.length) {
+    refreshMatchDerivedUIState();
+  } else {
+    state.errors = buildErrorsFromCirclesAndTexts([], state.texts);
+    state.duplicates = [];
+    Object.assign(state.summary, { total_texts: countMatchableTexts(state.texts), matched_pairs: 0, duplicate_groups: 0 });
+  }
+  resetManualSelection();
+  updateSummaryCards();
+  updateCircleTable();
+  updateDuplicatesTable();
+  updateErrorsTable();
+  renderBuildingTabs();
+  renderMatchCorrectionsPanel();
+  updateCanvasSearchAvailability();
+  syncMeissaCompareBtnEnabled();
+  notifyWorkContextChanged();
+  requestRedraw();
+  const status = document.getElementById("manual-pile-status");
+  status.classList.remove("is-error");
+  status.textContent = `${circle.matched_text?.text || "선택한"} 파일을 삭제했습니다. 변경 사항은 상단에서 저장하세요.`;
+}
+
+document.getElementById("manual-pile-pick")?.addEventListener("click", () => {
+  if (state.buildingEditMode) toggleBuildingEditMode();
+  state.areaRectCreate = null;
+  state.buildingOutlinePickMode = null;
+  state.retainingWallPickMode = false;
+  activateManualPick("circle");
+  updateCanvasModeHint();
+});
+document.getElementById("manual-pile-delete")?.addEventListener("click", handleDeleteSelectedPile);
+document.getElementById("manual-pile-new")?.addEventListener("click", () => {
+  setManualCircleSelection("", false);
+  updateManualPileEditorSelection(true);
+  const status = document.getElementById("manual-pile-status");
+  status.textContent = "새 파일 번호와 좌표를 입력하세요.";
+  status.classList.remove("is-error");
+  document.getElementById("manual-pile-number")?.focus();
+});
+
 function populateBuildingSelect() {
+  populateManualPileBuildingSelect();
   if (!buildingSelect) return;
   buildingSelect.innerHTML = "";
   const defaultOption = document.createElement("option");
@@ -6091,12 +6723,18 @@ function renderAreaNameEditor(kind) {
       if (order >= 0 && order < pend.length) pend.splice(order, 1);
       const pendFound = getPendingFoundationTopArray(normalizedKind);
       if (order >= 0 && order < pendFound.length) pendFound.splice(order, 1);
-      if (actualIndex !== null) {
+      if (actualIndex !== null || isSlotAreaKind(normalizedKind)) {
         setAreasByKind(
           normalizedKind,
           areas
             .filter((entry) => entry.actualIndex !== actualIndex)
-            .map((entry) => entry.building),
+            .map((entry, index) => {
+              const slot = getAreaSlot(entry, entry.order);
+              return {
+                ...entry.building,
+                slot: isSlotAreaKind(normalizedKind) ? slot - (slot > order ? 1 : 0) : index,
+              };
+            }),
         );
         if (state.highlightedBuildingNameIndex === actualIndex) {
           state.highlightedBuildingNameIndex = -1;
@@ -7661,6 +8299,8 @@ async function handleApplyTowerCranes() {
 }
 
 async function applyAreaDefinitions(kind) {
+  if (!ensureDrawingReadyForSave()) return false;
+  const drawingRevision = state.drawingRevision;
   const normalizedKind = normalizeAreaKind(kind);
   // 입력란 포커스가 남아 change 이벤트가 누락되는 모바일 케이스를 방지한다.
   flushDrillingInputsFromDom(normalizedKind);
@@ -7681,8 +8321,12 @@ async function applyAreaDefinitions(kind) {
       : normalizedKind === AREA_KIND_TOWER_CRANE
         ? applyTowerCranesBtn
         : applyBuildingsBtn;
+  const preservedClusterPolylines =
+    Array.isArray(state.clusterPolylines) && state.clusterPolylines.length
+      ? state.clusterPolylines.map((p) => ({ ...p, points: (p.points || []).map((pt) => ({ ...pt })) }))
+      : [];
   const serializedBuildings = serializeBuildingDefinitions(state.buildings);
-  const targetAreas = serializedBuildings.filter((area) => normalizeAreaKind(area.kind) === normalizedKind);
+  const targetAreas = serializedBuildings.filter((area) => normalizeAreaKind(area.kind) === normalizedKind && area.vertices.length >= 3);
   if (!targetAreas.length) {
     const message =
       normalizedKind === AREA_KIND_PARKING
@@ -7691,17 +8335,39 @@ async function applyAreaDefinitions(kind) {
           ? "타워크레인 폴리라인을 먼저 생성하세요."
           : "적용할 동 정의가 없습니다.";
     setUploadStatus(message, true);
-    return;
+    return false;
   }
   if (!state.circles || state.circles.length === 0) {
     setUploadStatus(`${label} 정보를 적용하려면 먼저 DXF를 업로드하거나 작업(불러오기)을 불러오세요.`, true);
-    return;
+    return false;
+  }
+
+  // 불러온 작업 원본이 있으면 그 기준으로 재적용 (이미 필터된 화면 데이터만내면 객체가 줄어들 수 있음)
+  let circlesForApply = state.circles;
+  let textsForApply = state.texts;
+  try {
+    const snapshot = await resolveCirclesTextsForFilterApply();
+    if (drawingRevision !== state.drawingRevision) return;
+    if (snapshot?.circles?.length) {
+      circlesForApply = snapshot.circles;
+      textsForApply = snapshot.texts || [];
+    }
+  } catch (snapshotErr) {
+    console.warn("동 정보 적용용 원본 스냅샷 확보 실패, 화면 데이터로 진행:", snapshotErr);
   }
 
   const payload = {
     buildings: serializedBuildings,
-    circles: state.circles && state.circles.length ? state.circles : undefined,
-    texts: state.texts && state.texts.length ? state.texts : undefined,
+    filter: {
+      min_diameter: state.filter.minDiameter,
+      max_diameter: state.filter.maxDiameter,
+      text_height_min: state.filter.textHeightMin,
+      text_height_max: state.filter.textHeightMax,
+      max_match_distance: state.filter.maxMatchDistance,
+      text_reference_point: state.filter.textReferencePoint || "center",
+    },
+    circles: circlesForApply && circlesForApply.length ? circlesForApply : undefined,
+    texts: textsForApply && textsForApply.length ? textsForApply : undefined,
     polylines:
       state.rawPolylines && state.rawPolylines.length ? state.rawPolylines : undefined,
     manual_overrides: computeManualOverridesForSave(),
@@ -7719,6 +8385,7 @@ async function applyAreaDefinitions(kind) {
       throw new Error(await response.text());
     }
     const data = await response.json();
+    if (drawingRevision !== state.drawingRevision) return false;
 
     if (!data.circles || !Array.isArray(data.circles) || data.circles.length === 0) {
       if (data.buildings && Array.isArray(data.buildings)) {
@@ -7726,20 +8393,38 @@ async function applyAreaDefinitions(kind) {
         syncPendingNamesWithBuildings();
         renderBuildingTabs();
         populateBuildingSelect();
+        requestRedraw();
       }
       setUploadStatus(`${label} 정보가 적용되었지만 Circle 데이터를 업데이트할 수 없습니다.`, true);
-      return;
+      return false;
     }
 
     handlePayload(data);
-    const successMessage = `${label} 정보를 적용했습니다. (${data.circles.length}개 Circle)`;
-    const synced = await syncCurrentWorkToServer(successMessage);
-    if (!synced) {
-      setUploadStatus(`${successMessage} (서버 동기화 실패 — 연결을 확인하세요)`, true);
+    // 서버가 cluster_polylines를 비워 보내면 불러온 동 윤곽(클러스터) 잔상이 사라지므로 유지
+    if (
+      preservedClusterPolylines.length &&
+      (!Array.isArray(data.cluster_polylines) || data.cluster_polylines.length === 0) &&
+      (!state.clusterPolylines || !state.clusterPolylines.length)
+    ) {
+      state.clusterPolylines = preservedClusterPolylines;
+      state.polylines = preservedClusterPolylines;
+      requestRedraw();
     }
+    const successMessage = `${label} 정보를 적용했습니다. (${data.circles.length}개 Circle)`;
+    // 불러온 작업이 있을 때만 PUT 동기화. ID가 없으면 대용량 POST로 화면이 멈춘 것처럼 보임.
+    if (state.loadedWorkId) {
+      const synced = await syncCurrentWorkToServer(successMessage);
+      if (!synced) {
+        setUploadStatus(`${successMessage} (서버 동기화 실패 — 연결을 확인하세요)`, true);
+      }
+    } else {
+      setUploadStatus(successMessage);
+    }
+    return true;
   } catch (error) {
     console.error(error);
     setUploadStatus(parseErrorMessage(error), true);
+    return false;
   } finally {
     if (button) button.disabled = false;
   }
@@ -8519,7 +9204,7 @@ function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
           model: {
             wx: qx,
             wy: qy,
-            lines: ["검토 쿼리점 (도면 m)", `X ${formatNumber(qx)} · Y ${formatNumber(qy)}`],
+            lines: ["검토 쿼리점 (도면 m)", `X ${formatCoordNumber(qx)} · Y ${formatCoordNumber(qy)}`],
             clientX,
             clientY,
           },
@@ -8538,7 +9223,7 @@ function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
     const line2 =
       secondLineOverride != null && String(secondLineOverride) !== ""
         ? String(secondLineOverride)
-        : `X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}`;
+        : `X ${formatCoordNumber(wx)} · Y ${formatCoordNumber(wy)}${suffix}`;
     cands.push({
       d,
       z,
@@ -8561,7 +9246,7 @@ function pickParcelReviewCoordHoverModel(canvasX, canvasY, clientX, clientY) {
       const wx = pts[i].x;
       const wy = pts[i].y;
       const suffix = onSel ? " (선택·꼭짓점)" : " (꼭짓점)";
-      const override = lxVertexNumbers ? `번호 ${i + 1} · X ${formatNumber(wx)} · Y ${formatNumber(wy)}${suffix}` : null;
+      const override = lxVertexNumbers ? `번호 ${i + 1} · X ${formatCoordNumber(wx)} · Y ${formatCoordNumber(wy)}${suffix}` : null;
       tryVertex(wx, wy, edgeLabel, onSel, override);
     }
   };
@@ -8588,7 +9273,7 @@ function pilexyPinnedParcelQueryCoordModel() {
   return {
     wx,
     wy,
-    lines: ["검토 쿼리점 (고정)", `X ${formatNumber(wx)} · Y ${formatNumber(wy)}`],
+    lines: ["검토 쿼리점 (고정)", `X ${formatCoordNumber(wx)} · Y ${formatCoordNumber(wy)}`],
     clientX: cl.clientX,
     clientY: cl.clientY,
   };
@@ -9589,14 +10274,36 @@ function drawTextLabels() {
     }
   });
 }
+function positionCanvasTooltipAt(clientX, clientY) {
+  tooltip.classList.remove("hidden");
+  const pad = 6;
+  tooltip.style.left = `${clientX + pad}px`;
+  tooltip.style.top = `${clientY + pad}px`;
+  tooltip.style.transform = "translate(0, -100%)";
+
+  const margin = 8;
+  const rect = tooltip.getBoundingClientRect();
+  const controlsEl = document.querySelector(".canvas-top-controls");
+  const controlsRect = controlsEl?.getBoundingClientRect();
+  const overlapsControls =
+    controlsRect &&
+    rect.left < controlsRect.right &&
+    rect.right > controlsRect.left &&
+    rect.top < controlsRect.bottom &&
+    rect.bottom > controlsRect.top;
+
+  if (rect.top < margin || overlapsControls) {
+    tooltip.style.top = `${clientY + pad}px`;
+    tooltip.style.transform = "translate(0, 0)";
+  }
+}
+
 function drawTooltip() {
   const parcelCoord = pilexyParcelReviewCoordTooltipModel();
   if (!hoveredCircleId) {
     if (parcelCoord && Array.isArray(parcelCoord.lines) && parcelCoord.lines.length) {
-      tooltip.style.left = `${parcelCoord.clientX + 6}px`;
-      tooltip.style.top = `${parcelCoord.clientY + 6}px`;
       tooltip.innerHTML = parcelCoord.lines.map((ln) => `<span>${escapeHtml(String(ln))}</span>`).join("<br/>");
-      tooltip.classList.remove("hidden");
+      positionCanvasTooltipAt(parcelCoord.clientX, parcelCoord.clientY);
       return;
     }
     hideTooltip();
@@ -9605,29 +10312,25 @@ function drawTooltip() {
   const circle = state.circleMap.get(hoveredCircleId);
   if (!circle) {
     if (parcelCoord && Array.isArray(parcelCoord.lines) && parcelCoord.lines.length) {
-      tooltip.style.left = `${parcelCoord.clientX + 6}px`;
-      tooltip.style.top = `${parcelCoord.clientY + 6}px`;
       tooltip.innerHTML = parcelCoord.lines.map((ln) => `<span>${escapeHtml(String(ln))}</span>`).join("<br/>");
-      tooltip.classList.remove("hidden");
+      positionCanvasTooltipAt(parcelCoord.clientX, parcelCoord.clientY);
       return;
     }
     hideTooltip();
     return;
   }
-  tooltip.style.left = `${tooltipMouseClientX + 4}px`;
-  tooltip.style.top = `${tooltipMouseClientY + 4}px`;
   const displayNumber = getCircleDisplayNumber(circle);
   const areaInfo = getCircleAreaClassification(circle);
   const numberLabel = displayNumber ? `번호 ${displayNumber}` : "번호 미확인";
   const areaStr = circle.area != null ? formatNumber(circle.area) : (circle.radius != null ? formatNumber(Math.PI * circle.radius * circle.radius) : "");
   const compact = pilexyMobileCompactUi();
   if (compact) {
-    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}`;
+    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />좌표: ${formatCoordNumber(circle.center_x)}, ${formatCoordNumber(circle.center_y)}`;
   } else {
     const geomLine = `Φ ${formatNumber(circle.diameter)} / R ${formatNumber(circle.radius)}${areaStr ? ` / 면적 ${areaStr}` : ""}`;
-    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />${geomLine}<br />좌표: ${formatNumber(circle.center_x)}, ${formatNumber(circle.center_y)}`;
+    tooltip.innerHTML = `<strong>${numberLabel}</strong> · ${areaInfo.label}<br />${geomLine}<br />좌표: ${formatCoordNumber(circle.center_x)}, ${formatCoordNumber(circle.center_y)}`;
   }
-  tooltip.classList.remove("hidden");
+  positionCanvasTooltipAt(tooltipMouseClientX, tooltipMouseClientY);
 }
 
 function getCircleAreaClassification(circle) {
@@ -10230,6 +10933,7 @@ function activateManualPick(mode) {
 }
 
 function updateManualSelectionDisplay() {
+  updateManualPileDeleteSelection();
   manualCircleValue.textContent = state.manualSelection.circleId || "-";
   if (state.manualSelection.textId) {
     const record = state.textMap.get(state.manualSelection.textId);
@@ -10558,6 +11262,7 @@ async function handleManualRemoveLink() {
 }
 
 async function triggerDownload(format) {
+  if (!ensureDrawingReadyForSave()) return;
   if (!state.hasDataset) {
     setUploadStatus("다운로드 전에 DXF를 업로드하세요.", true);
     return false;
@@ -10619,6 +11324,11 @@ function parseErrorMessage(error) {
 function formatNumber(value, fractionDigits = 2) {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return Number(value).toFixed(fractionDigits);
+}
+
+/** 도면 X/Y 좌표 표시 — m 단위 소수 3자리 */
+function formatCoordNumber(value) {
+  return formatNumber(value, 3);
 }
 
 /**
@@ -10909,6 +11619,8 @@ function computeManualOverridesForSave() {
 
 /** 현재 화면 상태 + 설정값을 저장용 객체로 수집 */
 function collectCurrentStateForSave() {
+  const blocked = drawingSaveBlockReason();
+  if (blocked) throw new Error(blocked);
   const filterValues = getFilterValuesFromInputs();
   const filter = filterValues
     ? {
@@ -10930,6 +11642,7 @@ function collectCurrentStateForSave() {
   return {
     title: state.lastUploadedFileName || `저장_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}`,
     sourceFileName: state.lastUploadedFileName || null,
+    sourceMetadata: state.sourceMetadata || null,
     project: getActiveProjectName(),
     sourceType: getActiveSourceType(),
     timestamp: new Date().toISOString(),
@@ -11016,6 +11729,8 @@ function collectCircleIdsWithDifferentFingerprint(prevFpMap, circles) {
  * @returns {Promise<boolean>}
  */
 async function syncManualMatchDeltaToServer(prevManualOverrides, statusMessage, changedCircleIds) {
+  if (!ensureDrawingReadyForSave()) return false;
+  const drawingRevision = state.drawingRevision;
   if (!state.hasDataset || !state.circles?.length) return false;
 
   const newMo = computeManualOverridesForSave();
@@ -11041,6 +11756,7 @@ async function syncManualMatchDeltaToServer(prevManualOverrides, statusMessage, 
   try {
     const body = {
       manualOverrides: newMo,
+      sourceMetadata: state.sourceMetadata || null,
       circlePatches,
       summary: state.summary,
       sourceType: state.loadedWorkMeta?.sourceType || getActiveSourceType(),
@@ -11053,6 +11769,7 @@ async function syncManualMatchDeltaToServer(prevManualOverrides, statusMessage, 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (drawingRevision !== state.drawingRevision) return false;
     if (res.ok) {
       if (statusMessage) setUploadStatus(`${statusMessage} 서버에 저장했습니다.`);
       return true;
@@ -11061,6 +11778,7 @@ async function syncManualMatchDeltaToServer(prevManualOverrides, statusMessage, 
     return syncCurrentWorkToServer(statusMessage);
   } catch (e) {
     console.warn("수동 매칭 증분 저장 예외:", e);
+    if (drawingRevision !== state.drawingRevision) return false;
     return syncCurrentWorkToServer(statusMessage);
   }
 }
@@ -11071,6 +11789,8 @@ async function syncManualMatchDeltaToServer(prevManualOverrides, statusMessage, 
  * @returns {Promise<boolean>}
  */
 async function syncCurrentWorkToServer(statusMessage) {
+  if (!ensureDrawingReadyForSave()) return false;
+  const drawingRevision = state.drawingRevision;
   if (!state.hasDataset || !state.circles?.length) return false;
   try {
     const saveData = collectCurrentStateForSave();
@@ -11091,6 +11811,7 @@ async function syncCurrentWorkToServer(statusMessage) {
       });
       if (res.ok) {
         const entry = await res.json().catch(() => ({}));
+        if (drawingRevision !== state.drawingRevision) return false;
         state.loadedWorkMeta = {
           title: entry.title || saveData.title,
           project: entry.project || saveData.project || DEFAULT_PROJECT_NAME,
@@ -11122,6 +11843,7 @@ async function syncCurrentWorkToServer(statusMessage) {
       return false;
     }
     const entry = await res.json();
+    if (drawingRevision !== state.drawingRevision) return false;
     state.loadedWorkId = entry.id;
     state.loadedWorkMeta = {
       title: entry.title || saveData.title,
@@ -11163,6 +11885,7 @@ function getSaveWorkAuthorValue() {
 
 /** 저장 모달 열기. isOverwrite: true면 수정 저장(덮어쓰기) 모드 */
 async function openSaveWorkModal(isOverwrite = false) {
+  if (!ensureDrawingReadyForSave()) return;
   if (!state.hasDataset) {
     setUploadStatus("저장할 데이터가 없습니다. DXF를 업로드한 뒤 저장하세요.", true);
     return;
@@ -11190,9 +11913,14 @@ async function openSaveWorkModal(isOverwrite = false) {
     saveWorkOverwriteSelect.innerHTML = "";
     saveWorkOverwriteSelect.removeEventListener("change", saveWorkOverwriteSelect._overwriteChange);
     try {
-      const list = savedWorksListForModal;
+      const list = savedWorksListForModal.filter((item) =>
+        normalizeProjectName(item.project) === getActiveProjectName());
       // await 이후 한 번 더 비움: 연속으로 모달이 열리면 이전 비동기 호출이 나중에 끝나며 옵션이 이중으로 붙는 것을 방지
       saveWorkOverwriteSelect.innerHTML = "";
+      const prompt = document.createElement("option");
+      prompt.value = "";
+      prompt.textContent = "덮어쓸 작업 버전을 선택하세요.";
+      saveWorkOverwriteSelect.appendChild(prompt);
       list.forEach((item) => {
         const opt = document.createElement("option");
         opt.value = item.id || "";
@@ -11202,6 +11930,8 @@ async function openSaveWorkModal(isOverwrite = false) {
         opt.textContent = (item.title || item.id) + (item.timestamp ? " · " + new Date(item.timestamp).toLocaleString("ko-KR") : "");
         saveWorkOverwriteSelect.appendChild(opt);
       });
+      saveWorkOverwriteSelect.value = list.some((item) => item.id === state.loadedWorkId)
+        ? state.loadedWorkId : "";
       if (list.length === 0) {
         const empty = document.createElement("option");
         empty.value = "";
@@ -11312,6 +12042,7 @@ async function openSaveWorkModal(isOverwrite = false) {
     saveWorkModal.classList.add("open");
     saveWorkModal.setAttribute("aria-hidden", "false");
     saveWorkModal.dataset.saveMode = isOverwrite ? "overwrite" : "new";
+    saveWorkModal.dataset.loadedWorkId = state.loadedWorkId || "";
   }
   if (isOverwrite && saveWorkOverwriteSelect && saveWorkOverwriteSelect.options.length) {
     saveWorkOverwriteSelect.focus();
@@ -11330,12 +12061,18 @@ function closeSaveWorkModal() {
 
 /** 저장 모달에서 저장 실행: 신규면 POST, 수정 저장이면 PUT */
 async function submitSaveWorkModal() {
+  if (!ensureDrawingReadyForSave() || saveWorkModalSubmit?.disabled) return;
+  const drawingRevision = state.drawingRevision;
   const isOverwrite = saveWorkModal && saveWorkModal.dataset.saveMode === "overwrite";
   const overwriteId = isOverwrite && saveWorkOverwriteSelect ? (saveWorkOverwriteSelect.value || "").trim() : "";
 
   if (isOverwrite && !overwriteId) {
     setUploadStatus("덮어쓸 작업 버전을 선택하세요.", true);
     if (saveWorkOverwriteSelect) saveWorkOverwriteSelect.focus();
+    return;
+  }
+  if (isOverwrite && saveWorkModal.dataset.loadedWorkId !== (state.loadedWorkId || "")) {
+    setUploadStatus("불러온 작업이 변경되었습니다. 수정 저장 창을 다시 열어 주세요.", true);
     return;
   }
 
@@ -11358,6 +12095,10 @@ async function submitSaveWorkModal() {
     return;
   }
   const author = getSaveWorkAuthorValue();
+  if (isOverwrite && project !== getActiveProjectName()) {
+    setUploadStatus("다른 프로젝트에 덮어쓸 수 없습니다. 수정 저장 창을 다시 열어 주세요.", true);
+    return;
+  }
   const data = collectCurrentStateForSave();
   data.title = title;
   data.project = project;
@@ -11391,6 +12132,7 @@ async function submitSaveWorkModal() {
       throw new Error(err || response.statusText);
     }
     const entry = await response.json().catch(() => ({}));
+    if (drawingRevision !== state.drawingRevision) return;
     state.loadedWorkId = entry.id || overwriteId || state.loadedWorkId;
     if (state.loadedWorkId) {
       state.manualHistoryReferenceWorkId = state.loadedWorkId;
@@ -11404,6 +12146,7 @@ async function submitSaveWorkModal() {
     setProjectContext(state.loadedWorkMeta.project, state.loadedWorkMeta.sourceType);
     notifyWorkContextChanged({ resetParcelReview: true });
     await refetchLoadWorkCache();
+    if (drawingRevision !== state.drawingRevision) return;
     closeSaveWorkModal();
     setUploadStatus(
       isOverwrite ? `"${title}"(이)가 덮어쓰기 되었습니다.` : `"${title}" 저장되었습니다. (${new Date().toLocaleString("ko-KR")})`
@@ -11413,12 +12156,13 @@ async function submitSaveWorkModal() {
     if (headerUpdateBtn) headerUpdateBtn.disabled = true;
   } catch (e) {
     console.error(isOverwrite ? "작업 덮어쓰기 실패:" : "작업 저장 실패:", e);
+    if (drawingRevision !== state.drawingRevision) return;
     setUploadStatus(isOverwrite ? "덮어쓰기에 실패했습니다." : "저장에 실패했습니다. 서버 연결을 확인하세요.", true);
     if (headerSaveBtn) headerSaveBtn.disabled = false;
     if (headerUpdateBtn) headerUpdateBtn.disabled = false;
   } finally {
-    if (submitBtn) {
-      submitBtn.disabled = false;
+    if (submitBtn && drawingRevision === state.drawingRevision) {
+      submitBtn.disabled = !!drawingSaveBlockReason();
       submitBtn.textContent = isOverwrite ? "덮어쓰기" : "저장";
     }
   }
@@ -11427,6 +12171,12 @@ async function submitSaveWorkModal() {
 /** 저장된 작업 불러오기 (중앙 저장소에서 조회). loadBtn: 클릭한 불러오기 버튼(작업 중 비활성화용). */
 async function handleLoadWork(id, loadBtn) {
   if (!id) return;
+  if (state.drawingUploadStatus === "pending") {
+    setUploadStatus("업로드 완료 후 저장된 작업을 불러오세요.", true);
+    return;
+  }
+  const drawingRevision = state.drawingRevision = (state.drawingRevision || 0) + 1;
+  window.pilexyBeginDrawingSession?.();
   if (loadBtn) loadBtn.disabled = true;
   try {
     const url = `${API_BASE_URL}/api/saved-works/${encodeURIComponent(id)}`;
@@ -11441,10 +12191,13 @@ async function handleLoadWork(id, loadBtn) {
       return;
     }
     const data = await response.json();
+    if (drawingRevision !== state.drawingRevision) return;
     if (loadBtn) loadBtn.disabled = false;
     loadBtn = null;
 
     state.lastUploadedFileName = data.sourceFileName || data.title || "";
+    state.sourceMetadata = data.sourceMetadata || null;
+    updateDrawingUploadState("ready", state.lastUploadedFileName);
 
     state.summary = data.summary || null;
     state.buildingSummary = Array.isArray(data.buildingSummary) ? data.buildingSummary : [];
@@ -11691,7 +12444,7 @@ function renderLoadWorkProjects() {
   const favNames = projectNames.filter((n) => favSet.has(n));
   const restNames = projectNames.filter((n) => !favSet.has(n));
   const q = loadWorkSearchNorm(loadWorkProjectSearch && loadWorkProjectSearch.value);
-  const matchName = (n) => !q || n.toLowerCase().includes(q);
+  const matchName = (n) => loadWorkProjectMatchesQuery(n, q);
   const favFiltered = favNames.filter(matchName);
   const restFiltered = restNames.filter(matchName);
 
@@ -12032,29 +12785,114 @@ function getBuildingKey(circleOrName) {
 }
 
 /**
- * 버전 비교: circle의 매칭 넘버 (matched_text.text)
+ * 버전 비교용 텍스트 id → text 맵
  */
-function getMatchNumber(circle) {
-  const mt = circle && circle.matched_text;
-  if (!mt) return null;
-  const t = mt.text;
-  return t !== undefined && t !== null ? String(t).trim() : null;
+function buildVersionCompareTextLookup(texts) {
+  const map = new Map();
+  (Array.isArray(texts) ? texts : []).forEach((t) => {
+    if (!t || t.id == null) return;
+    map.set(String(t.id), t);
+  });
+  return map;
+}
+
+/**
+ * 버전 비교: circle의 매칭 넘버 (matched_text / id 조회 / 보조 필드)
+ */
+function getMatchNumber(circle, textLookup) {
+  if (!circle) return null;
+  const mt = circle.matched_text;
+  if (typeof mt === "string" && mt.trim()) return mt.trim();
+  if (mt && mt.text !== undefined && mt.text !== null && String(mt.text).trim() !== "") {
+    return String(mt.text).trim();
+  }
+  const tid = circle.matched_text_id ?? circle.matchedTextId;
+  if (tid != null && tid !== "" && textLookup instanceof Map) {
+    const t = textLookup.get(String(tid));
+    if (t && t.text != null && String(t.text).trim() !== "") return String(t.text).trim();
+  }
+  for (const key of ["pile_number", "pileNumber", "number", "label"]) {
+    if (circle[key] != null && String(circle[key]).trim() !== "") {
+      return String(circle[key]).trim();
+    }
+  }
+  return null;
 }
 
 const COORD_EPS = 1e-4;
+/** 1m 넘게 떨어진 같은 번호는 이동이 아니라 삭제+추가로 본다. 작은 좌표 차이는 화면의 mm 조절로 걸러 본다. */
+const VERSION_COMPARE_SAME_METERS = COORD_EPS;
+const VERSION_COMPARE_SPLIT_METERS = 1;
 
 function coordsEqual(ax, ay, bx, by) {
   return Math.abs(ax - bx) < COORD_EPS && Math.abs(ay - by) < COORD_EPS;
 }
 
+function versionCompareMoveMeters(circleA, circleB) {
+  if (!circleA || !circleB) return Infinity;
+  const dx = Number(circleB.center_x) - Number(circleA.center_x);
+  const dy = Number(circleB.center_y) - Number(circleA.center_y);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return Infinity;
+  return Math.hypot(dx, dy);
+}
+
+function getVersionCompareMinMoveMeters() {
+  if (typeof document === "undefined") return 0;
+  const el = document.getElementById("version-compare-min-move-mm");
+  const mm = Number(el && el.value);
+  if (!Number.isFinite(mm) || mm < 0) return 0;
+  return mm / 1000;
+}
+
+function versionCompareNumberPoint(circle, textLookup) {
+  if (!circle) return null;
+  const mt = circle.matched_text;
+  if (mt && typeof mt === "object") {
+    const x = Number(mt.text_center_x ?? mt.center_x ?? mt.insert_x);
+    const y = Number(mt.text_center_y ?? mt.center_y ?? mt.insert_y);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  }
+  const tid = circle.matched_text_id ?? circle.matchedTextId;
+  if (tid != null && tid !== "" && textLookup instanceof Map) {
+    const text = textLookup.get(String(tid));
+    if (text) {
+      const x = Number(text.text_center_x ?? text.center_x ?? text.insert_x);
+      const y = Number(text.text_center_y ?? text.center_y ?? text.insert_y);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+    }
+  }
+  return null;
+}
+
+function versionCompareMatchedCircles(circles, textLookup) {
+  return (Array.isArray(circles) ? circles : []).filter((circle) => {
+    const number = getMatchNumber(circle, textLookup);
+    return number != null && String(number).trim() !== "";
+  });
+}
+
+function versionCompareVisibleStatus(item) {
+  if (!item || item.status !== "coord-changed") return item ? item.status : "";
+  if (versionCompareMoveMeters(item.circleA, item.circleB) <= getVersionCompareMinMoveMeters()) return "same";
+  return "coord-changed";
+}
+
+function versionComparePairKey(circle, textLookup) {
+  const building = getBuildingKey(circle);
+  const number = String(getMatchNumber(circle, textLookup) || "").replace(/\u2212|\u2013|\u2014/g, "-").trim();
+  return { building, number, key: `${building}\u0001${number}` };
+}
+
 /**
- * 두 버전 데이터로 동별·매칭넘버별 diff 생성
- * 반환: { byGroup: { 동이름: [ { status, circleA, circleB, number, buildingKey } ] }, allItems: [] }
- * status: "same" | "only-old" | "only-new" | "coord-changed"
+ * 두 버전(현재 화면·저장된 이전 버전 모두)의 매칭된 번호·좌표 쌍을 비교한다.
+ * 같은 객체는 건물명 + 매칭 번호가 같은 쌍이다. 그 쌍의 좌표를 서로 비교한다.
+ * 번호가 없는 원은 빠짐·추가로 세지 않는다.
  */
 function buildVersionDiff(versionA, versionB) {
-  const circlesA = Array.isArray(versionA.circles) ? versionA.circles : [];
-  const circlesB = Array.isArray(versionB.circles) ? versionB.circles : [];
+  const textLookupA = buildVersionCompareTextLookup(versionA.texts);
+  const textLookupB = buildVersionCompareTextLookup(versionB.texts);
+  const circlesA = versionCompareMatchedCircles(versionA.circles, textLookupA);
+  const circlesB = versionCompareMatchedCircles(versionB.circles, textLookupB);
   const byGroup = {};
   const allItems = [];
 
@@ -12063,65 +12901,102 @@ function buildVersionDiff(versionA, versionB) {
     return byGroup[key];
   }
 
-  const keyA = (c) => `${getBuildingKey(c)}|${getMatchNumber(c) ?? ""}`;
-  const groupCirclesByKey = (circles) => {
+  function pushItem(item) {
+    item.numberPointA = versionCompareNumberPoint(item.circleA, textLookupA);
+    item.numberPointB = versionCompareNumberPoint(item.circleB, textLookupB);
+    ensureGroup(item.buildingKey).push(item);
+    allItems.push(item);
+  }
+
+  function resolveNumber(circleA, circleB) {
+    return (
+      getMatchNumber(circleA, textLookupA) ||
+      getMatchNumber(circleB, textLookupB) ||
+      null
+    );
+  }
+
+  const usedA = new Set();
+  const usedB = new Set();
+
+  // 현재 화면이든 저장된 이전이든 건물명 + 매칭 번호로 쌍을 맞춘 뒤 좌표를 비교한다.
+  const keyOf = (c, lookup) => versionComparePairKey(c, lookup).key;
+  const groupRemaining = (circles, used, lookup) => {
     const map = new Map();
-    circles.forEach((c) => {
-      const k = keyA(c);
+    circles.forEach((c, idx) => {
+      if (used.has(idx)) return;
+      const k = keyOf(c, lookup);
       if (!map.has(k)) map.set(k, []);
-      map.get(k).push(c);
+      map.get(k).push({ circle: c, idx });
     });
     return map;
   };
 
-  const mapA = groupCirclesByKey(circlesA);
-  const mapB = groupCirclesByKey(circlesB);
+  const mapA = groupRemaining(circlesA, usedA, textLookupA);
+  const mapB = groupRemaining(circlesB, usedB, textLookupB);
   const allKeys = new Set([...mapA.keys(), ...mapB.keys()]);
 
   allKeys.forEach((key) => {
     const listA = mapA.get(key) || [];
     const listB = mapB.get(key) || [];
-    const buildingKey = key.split("|")[0];
-    const number = key.split("|")[1] || null;
+    const sep = key.indexOf("\u0001");
+    const buildingKey = sep >= 0 ? key.slice(0, sep) : key;
+    const numberFromKey = sep >= 0 ? key.slice(sep + 1) : "";
+    const pairedB = new Set();
 
-    const usedB = new Set();
-    listA.forEach((circleA) => {
+    listA.forEach((entryA) => {
+      const circleA = entryA.circle;
       let bestB = null;
       let bestDist = Infinity;
-      listB.forEach((circleB, idx) => {
-        if (usedB.has(idx)) return;
+      listB.forEach((entryB, j) => {
+        if (pairedB.has(j)) return;
+        const circleB = entryB.circle;
         const dx = circleB.center_x - circleA.center_x;
         const dy = circleB.center_y - circleA.center_y;
         const d = dx * dx + dy * dy;
         if (d < bestDist) {
           bestDist = d;
-          bestB = { circle: circleB, idx };
+          bestB = { entry: entryB, j };
         }
       });
-      if (bestB) {
-        usedB.add(bestB.idx);
-        const circleB = bestB.circle;
-        const sameCoord = coordsEqual(
-          circleA.center_x,
-          circleA.center_y,
-          circleB.center_x,
-          circleB.center_y,
-        );
-        const status = sameCoord ? "same" : "coord-changed";
-        const item = { status, circleA, circleB, number, buildingKey };
-        ensureGroup(buildingKey).push(item);
-        allItems.push(item);
+      const closeEnough = bestB && versionCompareMoveMeters(circleA, bestB.entry.circle) <= VERSION_COMPARE_SPLIT_METERS;
+      if (bestB && (numberFromKey || closeEnough)) {
+        pairedB.add(bestB.j);
+        usedA.add(entryA.idx);
+        usedB.add(bestB.entry.idx);
+        const circleB = bestB.entry.circle;
+        const number = numberFromKey || resolveNumber(circleA, circleB);
+        const moved = versionCompareMoveMeters(circleA, circleB);
+        pushItem({
+          status: moved <= VERSION_COMPARE_SAME_METERS ? "same" : "coord-changed",
+          circleA,
+          circleB,
+          number,
+          buildingKey,
+        });
       } else {
-        const item = { status: "only-old", circleA, circleB: null, number, buildingKey };
-        ensureGroup(buildingKey).push(item);
-        allItems.push(item);
+        usedA.add(entryA.idx);
+        pushItem({
+          status: "only-old",
+          circleA,
+          circleB: null,
+          number: numberFromKey || getMatchNumber(circleA, textLookupA),
+          buildingKey,
+        });
       }
     });
-    listB.forEach((circleB, idx) => {
-      if (usedB.has(idx)) return;
-      const item = { status: "only-new", circleA: null, circleB, number, buildingKey };
-      ensureGroup(buildingKey).push(item);
-      allItems.push(item);
+
+    listB.forEach((entryB, j) => {
+      if (pairedB.has(j)) return;
+      usedB.add(entryB.idx);
+      const circleB = entryB.circle;
+      pushItem({
+        status: "only-new",
+        circleA: null,
+        circleB,
+        number: numberFromKey || getMatchNumber(circleB, textLookupB),
+        buildingKey,
+      });
     });
   });
 
@@ -12496,7 +13371,7 @@ async function restoreVersionCompareExcelResultFromCache() {
   if (!lookupKey) {
     try {
       const latest = await fetchLatestVersionCompareExcelResultFromServer();
-      if (!latest?.result) return false;
+      if (!latest?.result || latest.result.summary?.missingExcel == null) return false;
       const renderOptions = {
         singleVersion: true,
         targetLabel: getSelectedVersionCompareLabel("new"),
@@ -12511,14 +13386,14 @@ async function restoreVersionCompareExcelResultFromCache() {
   }
   const cacheMap = readVersionCompareExcelCacheMap();
   const hit = cacheMap[lookupKey];
-  if (hit && hit.result) {
+  if (hit && hit.result && hit.result.summary?.missingExcel != null) {
     renderVersionCompareExcelResult(hit.result, hit.options || {});
     setVersionCompareExcelStatus("이전에 저장된 엑셀 비교 결과를 불러왔습니다.");
     return true;
   }
   try {
     const serverHit = await fetchVersionCompareExcelResultFromServer(file);
-    if (!serverHit?.result) return false;
+    if (!serverHit?.result || serverHit.result.summary?.missingExcel == null) return false;
     const renderOptions = {
       singleVersion: true,
       targetLabel: getSelectedVersionCompareLabel("new"),
@@ -12656,11 +13531,14 @@ function getVersionCompareExcelHeaderRowNumber(sheetInfo) {
     : null;
   if (stored != null) {
     const n = Number(stored);
-    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+    if (Number.isFinite(n) && n >= 0) return Math.trunc(n);
   }
-  const fallback = Number(sheetInfo?.suggestedHeaderRow) || 1;
+  const suggested = sheetInfo?.suggestedHeaderRow;
+  if (suggested != null && Number.isFinite(Number(suggested)) && Number(suggested) >= 0) {
+    return Math.trunc(Number(suggested));
+  }
   const rowNumber = Number(versionCompareExcelHeaderRow?.value);
-  return Number.isFinite(rowNumber) && rowNumber > 0 ? Math.trunc(rowNumber) : fallback;
+  return Number.isFinite(rowNumber) && rowNumber >= 0 ? Math.trunc(rowNumber) : 1;
 }
 
 function getVersionCompareExcelHeaderRowValues(sheetInfo) {
@@ -12745,6 +13623,16 @@ function getVersionCompareSelectedSheetInfo() {
   return versionCompareExcelInspection.sheets.find((sheet) => sheet.name === sheetName) || null;
 }
 
+function getVersionCompareExcelFieldFallbackIndex(fieldKey) {
+  if (getVersionCompareExcelBuildingSourceMode() === "sheet") {
+    const sheetOffsets = { number: 0, x: 1, y: 2 };
+    if (Object.prototype.hasOwnProperty.call(sheetOffsets, fieldKey)) {
+      return sheetOffsets[fieldKey];
+    }
+  }
+  return getVersionCompareExcelFieldMeta(fieldKey).fallbackIndex;
+}
+
 function guessExcelColumnSpec(sheetInfo, keywords, fallbackIndex) {
   if (!sheetInfo) return "";
   const values = getVersionCompareExcelHeaderRowValues(sheetInfo);
@@ -12765,7 +13653,11 @@ function applyVersionCompareExcelSuggestions(sheetInfo) {
   getVersionCompareExcelAssignableFields().forEach((field) => {
     const input = getVersionCompareExcelFieldInput(field.key);
     if (input) {
-      input.value = guessExcelColumnSpec(sheetInfo, field.keywords, field.fallbackIndex);
+      input.value = guessExcelColumnSpec(
+        sheetInfo,
+        field.keywords,
+        getVersionCompareExcelFieldFallbackIndex(field.key),
+      );
     }
   });
   if (getVersionCompareExcelBuildingSourceMode() === "sheet" && versionCompareExcelBuildingColumn) {
@@ -12970,7 +13862,7 @@ function setVersionCompareExcelActiveField(fieldKey) {
 function setVersionCompareExcelHeaderRow(rowNumber, options = {}) {
   const { applySuggestions = false } = options;
   const sheetInfo = getVersionCompareSelectedSheetInfo();
-  const nextRow = Math.max(1, Number(rowNumber) || Number(sheetInfo?.suggestedHeaderRow) || 1);
+  const nextRow = Math.max(0, Number(rowNumber) ?? Number(sheetInfo?.suggestedHeaderRow) ?? 1);
   if (sheetInfo?.name) {
     ensureVersionCompareExcelSelectionState();
     versionCompareExcelSelectionState.headerRowBySheet[sheetInfo.name] = nextRow;
@@ -12998,7 +13890,7 @@ function handleVersionCompareExcelSheetChange(sheetName, options = {}) {
   const rowToUse =
     saved != null && Number(saved) > 0
       ? Number(saved)
-      : sheetInfo?.suggestedHeaderRow || 1;
+      : (sheetInfo?.suggestedHeaderRow ?? 1);
   setVersionCompareExcelHeaderRow(rowToUse, { applySuggestions });
   resetVersionCompareExcelCompareResult();
 }
@@ -13135,7 +14027,7 @@ async function inspectVersionCompareExcelFile() {
     const headerRowBySheetInit = {};
     (versionCompareExcelInspection.sheets || []).forEach((sh) => {
       if (sh?.name) {
-        headerRowBySheetInit[sh.name] = Math.max(1, Number(sh.suggestedHeaderRow) || 1);
+        headerRowBySheetInit[sh.name] = Math.max(0, Number.isFinite(Number(sh.suggestedHeaderRow)) ? Number(sh.suggestedHeaderRow) : 1);
       }
     });
     versionCompareExcelSelectionState = {
@@ -13208,6 +14100,7 @@ function versionCompareExcelIssueRowFillArgb(kind) {
 }
 
 function versionCompareExcelExportNumeric(value) {
+  if (value == null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -13314,6 +14207,7 @@ async function downloadVersionCompareExcelIssuesExport() {
       "missing-old": `${targetLabel} 누락`,
       "missing-new": `${targetLabel} 누락`,
       "coord-mismatch": "좌표 불일치",
+      "missing-excel": "엑셀에 없음 (도면에만 있음)",
     }
     : {
       "match-old-only": `${labels.old}만 일치`,
@@ -13322,6 +14216,7 @@ async function downloadVersionCompareExcelIssuesExport() {
       "missing-old": `${labels.old} 누락`,
       "missing-new": `${labels.new} 누락`,
       "coord-mismatch": "좌표 불일치",
+      "missing-excel": "엑셀에 없음 (도면에만 있음)",
     };
 
   const thinBorder = {
@@ -13376,6 +14271,7 @@ async function downloadVersionCompareExcelIssuesExport() {
       kvPairs.push(["좌표 불일치", summary.coordMismatch ?? 0]);
     }
 
+    kvPairs.push(["엑셀에 없음 (도면에만 있음)", summary.missingExcel ?? 0]);
     let rowIdx = 3;
     kvPairs.forEach(([k, v]) => {
       const row = wsSum.getRow(rowIdx);
@@ -13654,6 +14550,7 @@ function renderVersionCompareExcelResult(result, options = {}) {
       { label: "양쪽 누락", value: summary.missingBoth ?? 0 },
       { label: "좌표 불일치", value: summary.coordMismatch ?? 0 },
     ];
+  cards.push({ label: "엑셀에 없음 (도면에만 있음)", value: summary.missingExcel ?? 0 });
   versionCompareExcelSummary.innerHTML = `
     <div class="version-compare-excel-summary-grid">
       ${cards.map((card) => `
@@ -13680,6 +14577,7 @@ function renderVersionCompareExcelResult(result, options = {}) {
               ? `<span>누락 ${sh.missingBoth ?? 0}</span>`
               : `<span>${escapeHtml(labels.old)}만 ${sh.matchOldOnly ?? 0}</span><span>${escapeHtml(labels.new)}만 ${sh.matchNewOnly ?? 0}</span>`}
             <span>불일치 ${sh.coordMismatch ?? 0}</span>
+            <span>엑셀에 없음 ${sh.missingExcel ?? 0}</span>
           </div>
         `;
         }).join("")}
@@ -13696,6 +14594,7 @@ function renderVersionCompareExcelResult(result, options = {}) {
       "missing-old": `${targetLabel} 누락`,
       "missing-new": `${targetLabel} 누락`,
       "coord-mismatch": "좌표 불일치",
+      "missing-excel": "엑셀에 없음 (도면에만 있음)",
     }
     : {
       "match-old-only": `${labels.old}만 일치`,
@@ -13704,6 +14603,7 @@ function renderVersionCompareExcelResult(result, options = {}) {
       "missing-old": `${labels.old} 누락`,
       "missing-new": `${labels.new} 누락`,
       "coord-mismatch": "좌표 불일치",
+      "missing-excel": "엑셀에 없음 (도면에만 있음)",
     };
   const issues = Array.isArray(result.issues) ? result.issues : [];
   if (!issues.length) {
@@ -13788,10 +14688,10 @@ function renderVersionCompareExcelResult(result, options = {}) {
               <td>${escapeHtml(issue.sheetName || "-")} · ${escapeHtml(issue.number || "-")}</td>
               <td>${escapeHtml(statusLabel[issue.status] || issue.status || "-")}</td>
               <td>${escapeHtml(issue.buildingName || "-")}</td>
-              <td>${formatNumber(issue.excelX)}, ${formatNumber(issue.excelY)}</td>
+              <td>${issue.status === "missing-excel" ? "엑셀 행 없음" : `${formatCoordNumber(issue.excelX)}, ${formatCoordNumber(issue.excelY)}`}</td>
               ${singleVersion
-                ? `<td>${(issue.newCircle || issue.oldCircle) ? `${formatNumber((issue.newCircle || issue.oldCircle).x)}, ${formatNumber((issue.newCircle || issue.oldCircle).y)} (${formatNumber((issue.newCircle || issue.oldCircle).distance, 3)}) · 번호 ${(issue.newCircle || issue.oldCircle).number ?? "-"}` : "-"}</td>`
-                : `<td>${issue.oldCircle ? `${formatNumber(issue.oldCircle.x)}, ${formatNumber(issue.oldCircle.y)} (${formatNumber(issue.oldCircle.distance, 3)}) · 번호 ${issue.oldCircle.number ?? "-"}` : "-"}</td><td>${issue.newCircle ? `${formatNumber(issue.newCircle.x)}, ${formatNumber(issue.newCircle.y)} (${formatNumber(issue.newCircle.distance, 3)}) · 번호 ${issue.newCircle.number ?? "-"}` : "-"}</td>`}
+                ? `<td>${(issue.newCircle || issue.oldCircle) ? `${formatCoordNumber((issue.newCircle || issue.oldCircle).x)}, ${formatCoordNumber((issue.newCircle || issue.oldCircle).y)} (${formatNumber((issue.newCircle || issue.oldCircle).distance, 3)}) · 번호 ${(issue.newCircle || issue.oldCircle).number ?? "-"}` : "-"}</td>`
+                : `<td>${issue.oldCircle ? `${formatCoordNumber(issue.oldCircle.x)}, ${formatCoordNumber(issue.oldCircle.y)} (${formatNumber(issue.oldCircle.distance, 3)}) · 번호 ${issue.oldCircle.number ?? "-"}` : "-"}</td><td>${issue.newCircle ? `${formatCoordNumber(issue.newCircle.x)}, ${formatCoordNumber(issue.newCircle.y)} (${formatNumber(issue.newCircle.distance, 3)}) · 번호 ${issue.newCircle.number ?? "-"}` : "-"}</td>`}
             </tr>
           `;
           }).join("")}
@@ -13949,6 +14849,9 @@ function runVersionCompare() {
       const { versionA, versionB, labels } = await resolveVersionCompareSelection();
       const diff = buildVersionDiff(versionA, versionB);
       versionCompareState = { versionA, versionB, diff, labels };
+      versionCompareFocusBuilding = "";
+      versionCompareSelectedItem = null;
+      renderVersionCompareBuildingFocus("");
       renderVersionCompareSummary(versionA, versionB, diff);
       renderVersionCompareLists(diff);
       fitVersionCompareView(versionA, versionB);
@@ -13963,8 +14866,116 @@ function runVersionCompare() {
   })();
 }
 
+let versionCompareFocusBuilding = "";
+let versionCompareSelectedItem = null;
+
+function selectVersionCompareItem(item, listElement) {
+  versionCompareSelectedItem = item || null;
+  document.querySelectorAll(".version-compare-list li.is-selected, .version-compare-building-detail-list li.is-selected").forEach((el) => {
+    el.classList.remove("is-selected");
+  });
+  if (listElement) listElement.classList.add("is-selected");
+  if (!item) return;
+  showVersionCompareDetail(item);
+  const points = [item.circleA, item.circleB].filter((circle) => circle && Number.isFinite(Number(circle.center_x)));
+  if (!points.length) return;
+  const minX = Math.min(...points.map((circle) => Number(circle.center_x)));
+  const maxX = Math.max(...points.map((circle) => Number(circle.center_x)));
+  const minY = Math.min(...points.map((circle) => Number(circle.center_y)));
+  const maxY = Math.max(...points.map((circle) => Number(circle.center_y)));
+  const span = Math.max(maxX - minX, maxY - minY, 6);
+  compareView.offsetX = (minX + maxX) / 2;
+  compareView.offsetY = (minY + maxY) / 2;
+  const { width, height } = getVersionCompareCanvasSize();
+  compareView.scale = Math.min(width, height) / (span * 2.4);
+  compareView.scale = Math.max(0.5, Math.min(800, compareView.scale));
+  if (versionCompareState && versionCompareState.diff) {
+    drawVersionCompareCanvas(versionCompareState.diff);
+  }
+}
+
+function refreshVersionComparePresentation() {
+  const current = versionCompareState;
+  if (!current?.diff) return;
+  renderVersionCompareSummary(current.versionA, current.versionB, current.diff);
+  renderVersionCompareLists(current.diff);
+  renderVersionCompareBuildingFocus(versionCompareFocusBuilding);
+  drawVersionCompareCanvas(current.diff);
+}
+
+function versionComparePileLabel(item) {
+  const raw = item?.number != null ? String(item.number).trim() : "";
+  return raw || "번호 없음";
+}
+
+function versionCompareDiameterLabel(circle) {
+  if (!circle) return "";
+  if (Number.isFinite(Number(circle.diameter))) return `⌀${Number(circle.diameter)}`;
+  if (Number.isFinite(Number(circle.radius))) return `⌀${Number(circle.radius) * 2}`;
+  return "";
+}
+
+function renderVersionCompareBuildingFocus(buildingKey) {
+  versionCompareFocusBuilding = buildingKey || "";
+  const box = document.getElementById("version-compare-building-detail");
+  const title = document.getElementById("version-compare-building-detail-title");
+  const list = document.getElementById("version-compare-building-detail-list");
+  if (!box || !title || !list) return;
+  const diff = versionCompareState?.diff;
+  const minMeters = getVersionCompareMinMoveMeters();
+  const changes = buildingKey && diff?.byGroup?.[buildingKey]
+    ? diff.byGroup[buildingKey].filter((item) => versionCompareVisibleStatus(item) !== "same")
+    : [];
+  if (!buildingKey) {
+    box.hidden = true;
+    title.textContent = "";
+    list.innerHTML = "";
+    return;
+  }
+  if (!changes.length) {
+    box.hidden = false;
+    title.textContent = `${buildingKey} · ${formatCoordNumber(minMeters * 1000)}mm 이상만 보면 표시할 삭제·추가·좌표 변경이 없습니다.`;
+    list.innerHTML = "";
+    return;
+  }
+  const removed = changes.filter((item) => item.status === "only-old");
+  const added = changes.filter((item) => item.status === "only-new");
+  const moved = changes
+    .filter((item) => versionCompareVisibleStatus(item) === "coord-changed")
+    .sort((a, b) => versionCompareMoveMeters(b.circleA, b.circleB) - versionCompareMoveMeters(a.circleA, a.circleB));
+  box.hidden = false;
+  title.textContent = `${buildingKey}에서 확인할 변경 · 삭제 ${removed.length} · 추가 ${added.length} · 좌표 변경 ${moved.length}`;
+  const rows = [...removed, ...added, ...moved];
+  list.innerHTML = rows
+    .map((item) => {
+      const globalIndex = diff.allItems.indexOf(item);
+      const label = versionComparePileLabel(item);
+      const diam = versionCompareDiameterLabel(item.circleA || item.circleB);
+      const oldText = item.circleA
+        ? `이전 번호 ${escapeHtml(versionComparePileLabel(item))} 좌표 (${formatCoordNumber(item.circleA.center_x)}, ${formatCoordNumber(item.circleA.center_y)})`
+        : "이전 쌍 없음";
+      const newText = item.circleB
+        ? `현재 번호 ${escapeHtml(versionComparePileLabel({ number: getMatchNumber(item.circleB) || item.number }))} 좌표 (${formatCoordNumber(item.circleB.center_x)}, ${formatCoordNumber(item.circleB.center_y)})`
+        : "현재 쌍 없음";
+      const moveText =
+        item.circleA && item.circleB
+          ? ` · 이동 ${formatCoordNumber(versionCompareMoveMeters(item.circleA, item.circleB) * 1000)}mm`
+          : "";
+      const tag = item.status === "only-old" ? "삭제" : item.status === "only-new" ? "추가" : "좌표변경";
+      return `<li data-index="${globalIndex}"><span class="version-compare-list-tag">${tag}</span><strong>${escapeHtml(label)}</strong> ${diam ? `· ${escapeHtml(diam)} ` : ""}· ${escapeHtml(oldText)} · ${escapeHtml(newText)}${escapeHtml(moveText)}</li>`;
+    })
+    .join("");
+  list.querySelectorAll("li[data-index]").forEach((li) => {
+    li.addEventListener("click", () => {
+      const item = diff.allItems[parseInt(li.getAttribute("data-index"), 10)];
+      if (!item) return;
+      selectVersionCompareItem(item, li);
+    });
+  });
+}
+
 /**
- * 이전만 / 현재만 / 좌표변경 목록을 우측 패널에 채움
+ * 이전만(삭제) / 현재만(추가) / 좌표변경 목록을 우측 패널에 채움
  */
 function renderVersionCompareLists(diff) {
   if (!diff || !diff.allItems) return;
@@ -13973,36 +14984,58 @@ function renderVersionCompareLists(diff) {
     "only-new": versionCompareListOnlyNew,
     "coord-changed": versionCompareListCoordChanged,
   };
+  const statusPrefix = {
+    "only-old": "삭제",
+    "only-new": "추가",
+    "coord-changed": "좌표변경",
+  };
+  const statusHeading = {
+    "only-old": "삭제 · 이전만",
+    "only-new": "추가 · 현재만",
+    "coord-changed": "좌표 변경",
+  };
+  const focus = versionCompareFocusBuilding || "";
   const items = diff.allItems;
   ["only-old", "only-new", "coord-changed"].forEach((status) => {
     const ul = statusToId[status];
     if (!ul) return;
-    const listItems = items.filter((it) => it.status === status);
+    const heading = ul.closest(".version-compare-list-section")?.querySelector(".version-compare-list-heading-text");
+    const listItems = items
+      .map((it, globalIndex) => ({ it, globalIndex }))
+      .filter(({ it }) => versionCompareVisibleStatus(it) === status && (!focus || it.buildingKey === focus))
+      .sort((a, b) => {
+        const bk = String(a.it.buildingKey || "").localeCompare(String(b.it.buildingKey || ""), "ko");
+        if (bk !== 0) return bk;
+        return String(a.it.number ?? "").localeCompare(String(b.it.number ?? ""), "ko", { numeric: true });
+      });
+    if (heading) {
+      heading.textContent = `${focus ? `${focus} ` : ""}${statusHeading[status]} ${listItems.length}`;
+    }
     if (!listItems.length) {
       ul.innerHTML = '<li class="version-compare-list-empty">없음</li>';
       return;
     }
     ul.innerHTML = listItems
-      .map((item, idx) => {
-        const circle = item.circleA || item.circleB;
-        const num = item.number != null ? String(item.number) : "-";
-        const x = circle ? formatNumber(circle.center_x) : "-";
-        const y = circle ? formatNumber(circle.center_y) : "-";
-        const globalIndex = items.indexOf(item);
-        return `<li data-index="${globalIndex}" title="클릭 시 상세 비교">동 ${escapeHtml(item.buildingKey)} · 번호 ${escapeHtml(num)} · (${x}, ${y})</li>`;
+      .map(({ it: item, globalIndex }) => {
+        const prefix = statusPrefix[status] || "";
+        const oldPair = item.circleA
+          ? `이전 번호 ${escapeHtml(versionComparePileLabel(item))} 좌표 (${formatCoordNumber(item.circleA.center_x)}, ${formatCoordNumber(item.circleA.center_y)})`
+          : "이전 쌍 없음";
+        const newPair = item.circleB
+          ? `현재 번호 ${escapeHtml(versionComparePileLabel({ number: getMatchNumber(item.circleB) || item.number }))} 좌표 (${formatCoordNumber(item.circleB.center_x)}, ${formatCoordNumber(item.circleB.center_y)})`
+          : "현재 쌍 없음";
+        const move =
+          item.circleA && item.circleB
+            ? ` · ${formatCoordNumber(versionCompareMoveMeters(item.circleA, item.circleB) * 1000)}mm`
+            : "";
+        return `<li data-index="${globalIndex}" title="클릭 시 상세 비교"><span class="version-compare-list-tag">${escapeHtml(prefix)}</span> 동 ${escapeHtml(item.buildingKey)} · ${oldPair} · ${newPair}${escapeHtml(move)}</li>`;
       })
       .join("");
     ul.querySelectorAll("li[data-index]").forEach((li) => {
       li.addEventListener("click", () => {
         const index = parseInt(li.getAttribute("data-index"), 10);
         const item = items[index];
-        if (item) {
-          showVersionCompareDetail(item);
-          const circle = item.circleA || item.circleB;
-          if (circle && typeof circle.center_x === "number" && typeof circle.center_y === "number") {
-            focusVersionCompareOn(circle.center_x, circle.center_y);
-          }
-        }
+        if (item) selectVersionCompareItem(item, li);
       });
     });
   });
@@ -14010,8 +15043,12 @@ function renderVersionCompareLists(diff) {
 
 function renderVersionCompareSummary(versionA, versionB, diff) {
   if (!versionCompareSummaryBody) return;
-  const countA = countByBuilding(versionA);
-  const countB = countByBuilding(versionB);
+  const countA = countByBuilding({
+    circles: versionCompareMatchedCircles(versionA && versionA.circles, buildVersionCompareTextLookup(versionA && versionA.texts)),
+  });
+  const countB = countByBuilding({
+    circles: versionCompareMatchedCircles(versionB && versionB.circles, buildVersionCompareTextLookup(versionB && versionB.texts)),
+  });
   const allBuildings = new Set([
     ...Object.keys(countA.circleByBuilding),
     ...Object.keys(countB.circleByBuilding),
@@ -14029,12 +15066,16 @@ function renderVersionCompareSummary(versionA, versionB, diff) {
       const tB = countB.textByBuilding[buildingKey] || 0;
       const cDiff = cB - cA;
       const tDiff = tB - tA;
-      const hasDiff = cDiff !== 0 || tDiff !== 0;
+      const changes = diff?.byGroup?.[buildingKey] || [];
+      const onlyOld = changes.filter((item) => versionCompareVisibleStatus(item) === "only-old").length;
+      const onlyNew = changes.filter((item) => versionCompareVisibleStatus(item) === "only-new").length;
+      const coordChanged = changes.filter((item) => versionCompareVisibleStatus(item) === "coord-changed").length;
+      const hasDiff = cDiff !== 0 || tDiff !== 0 || onlyOld > 0 || onlyNew > 0 || coordChanged > 0;
       const rowClass = hasDiff ? "version-compare-row-diff" : "version-compare-row-same";
       const cDiffClass = cDiff > 0 ? "diff-plus" : cDiff < 0 ? "diff-minus" : "";
       const tDiffClass = tDiff > 0 ? "diff-plus" : tDiff < 0 ? "diff-minus" : "";
       return `
-        <tr class="${rowClass}">
+        <tr class="${rowClass}" data-building="${escapeHtml(buildingKey)}">
           <td>${escapeHtml(buildingKey)}</td>
           <td>${cA}</td>
           <td>${cB}</td>
@@ -14042,10 +15083,32 @@ function renderVersionCompareSummary(versionA, versionB, diff) {
           <td>${tA}</td>
           <td>${tB}</td>
           <td class="${tDiffClass}">${tDiff >= 0 ? "+" : ""}${tDiff}</td>
+          <td>${onlyOld}</td>
+          <td>${onlyNew}</td>
+          <td>${coordChanged}</td>
         </tr>
       `;
     })
     .join("");
+  if (typeof versionCompareSummaryBody.querySelectorAll === "function") {
+    versionCompareSummaryBody.querySelectorAll("tr[data-building]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const buildingKey = row.getAttribute("data-building") || "";
+        versionCompareFocusBuilding = buildingKey;
+        versionCompareSummaryBody.querySelectorAll("tr[data-building]").forEach((other) => {
+          other.classList.toggle(
+            "version-compare-row-selected",
+            (other.getAttribute("data-building") || "") === buildingKey,
+          );
+        });
+        renderVersionCompareBuildingFocus(buildingKey);
+        if (versionCompareState?.diff) renderVersionCompareLists(versionCompareState.diff);
+      });
+      if ((row.getAttribute("data-building") || "") === versionCompareFocusBuilding) {
+        row.classList.add("version-compare-row-selected");
+      }
+    });
+  }
 }
 
 function getVersionCompareCanvasSize() {
@@ -14125,7 +15188,7 @@ function drawVersionCompareCanvas(diff) {
   const colors = { same: "#9ca3af", "only-old": "#22c55e", "only-new": "#dc2626", "coord-changed": "#f97316" };
   order.forEach((status) => {
     items
-      .filter((it) => it.status === status)
+      .filter((it) => versionCompareVisibleStatus(it) === status)
       .forEach((it) => {
         const circle = it.circleA || it.circleB;
         if (!circle) return;
@@ -14138,8 +15201,35 @@ function drawVersionCompareCanvas(diff) {
         ctx.strokeStyle = "#1e293b";
         ctx.lineWidth = 1;
         ctx.stroke();
+        if (versionCompareSelectedItem === it) {
+          ctx.beginPath();
+          ctx.arc(x, y, r + 7, 0, Math.PI * 2);
+          ctx.strokeStyle = "#facc15";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
       });
   });
+  const selected = versionCompareSelectedItem;
+  if (selected && selected.circleA && selected.circleB) {
+    const a = worldToCompareCanvas(selected.circleA.center_x, selected.circleA.center_y);
+    const b = worldToCompareCanvas(selected.circleB.center_x, selected.circleB.center_y);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    [selected.circleA, selected.circleB].forEach((circle) => {
+      const point = worldToCompareCanvas(circle.center_x, circle.center_y);
+      const radius = Math.max(8, (circle.radius || 0.2) * compareView.scale + 6);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = "#facc15";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    });
+  }
 }
 
 function compareCanvasToWorld(clientX, clientY) {
@@ -14297,13 +15387,19 @@ function showVersionCompareDetail(item) {
   if (!ph || !content) return;
   ph.classList.add("hidden");
   content.classList.remove("hidden");
-  const numA = item.circleA ? getMatchNumber(item.circleA) : null;
-  const numB = item.circleB ? getMatchNumber(item.circleB) : null;
+  const numA = item.number || (item.circleA ? getMatchNumber(item.circleA) : null);
+  const numB = item.number || (item.circleB ? getMatchNumber(item.circleB) : null);
   const coordA = item.circleA
-    ? `(${formatNumber(item.circleA.center_x)}, ${formatNumber(item.circleA.center_y)})`
+    ? `(${formatCoordNumber(item.circleA.center_x)}, ${formatCoordNumber(item.circleA.center_y)})`
     : "-";
   const coordB = item.circleB
-    ? `(${formatNumber(item.circleB.center_x)}, ${formatNumber(item.circleB.center_y)})`
+    ? `(${formatCoordNumber(item.circleB.center_x)}, ${formatCoordNumber(item.circleB.center_y)})`
+    : "-";
+  const numberPointA = item.numberPointA
+    ? `(${formatCoordNumber(item.numberPointA.x)}, ${formatCoordNumber(item.numberPointA.y)})`
+    : "-";
+  const numberPointB = item.numberPointB
+    ? `(${formatCoordNumber(item.numberPointB.x)}, ${formatCoordNumber(item.numberPointB.y)})`
     : "-";
   const numberChanged = numA !== numB;
   const coordChanged =
@@ -14316,8 +15412,8 @@ function showVersionCompareDetail(item) {
       item.circleB.center_y,
     );
   let html = "";
-  html += '<div class="detail-row">이전: 번호 ' + (numA != null ? escapeHtml(String(numA)) : "없음") + ", 좌표 " + coordA + "</div>";
-  html += '<div class="detail-row">현재: 번호 ' + (numB != null ? escapeHtml(String(numB)) : "없음") + ", 좌표 " + coordB + "</div>";
+  html += `<div class="detail-row">이전 쌍: 번호 ${numA != null ? escapeHtml(String(numA)) : "없음"}, 좌표 ${coordA}, 번호좌표 ${numberPointA}</div>`;
+  html += `<div class="detail-row">현재 쌍: 번호 ${numB != null ? escapeHtml(String(numB)) : "없음"}, 좌표 ${coordB}, 번호좌표 ${numberPointB}</div>`;
   if (numberChanged) html += '<div class="detail-row number-changed">넘버가 변경되었습니다.</div>';
   if (coordChanged) html += '<div class="detail-row coord-changed">좌표가 변경되었습니다.</div>';
   content.innerHTML = html;
@@ -14331,7 +15427,7 @@ function handleVersionCompareCanvasClick(event) {
   if (!world) return;
   const item = findClosestCompareItem(world.x, world.y);
   if (!item) return;
-  showVersionCompareDetail(item);
+  selectVersionCompareItem(item);
 }
 
 function handleVersionCompareCanvasMouseMove(event) {
@@ -14359,7 +15455,7 @@ function handleVersionCompareCanvasMouseMove(event) {
   }
   const circle = item.circleA || item.circleB;
   const num = getMatchNumber(circle);
-  const statusLabel = { same: "동일", "only-old": "이전만", "only-new": "현재만", "coord-changed": "좌표 변경" }[item.status];
+  const statusLabel = { same: "동일", "only-old": "삭제(이전만)", "only-new": "추가(현재만)", "coord-changed": "좌표 변경" }[item.status];
   versionCompareTooltip.textContent = `번호 ${num ?? "-"} · ${statusLabel}`;
   const wrapper = versionCompareCanvas && versionCompareCanvas.closest(".version-compare-canvas-wrapper");
   if (wrapper) {
@@ -14798,31 +15894,196 @@ async function handleUpdateProject() {
 }
 
 /**
- * 프로젝트 불러오기 (프로젝트명 + 버전별로 고유하게 복원, 동 윤곽선·클러스터 포함)
+ * 서버에 저장된 윤곽 설정 단건을 가져와 localStorage에 캐시.
+ * @returns {Promise<object|null>}
  */
-function handleLoadProject(projectName, versionId) {
+async function fetchAndCacheSavedSetting(projectName, versionId, contextProject, contextProjectId) {
+  const name = normalizeProjectName(projectName);
+  const version = versionId != null ? String(versionId) : "";
+  if (!name || !version) return null;
+  const params = new URLSearchParams({ name, version });
+  const ctx = contextProject ? normalizeProjectName(contextProject) : "";
+  const ctxId = normalizeSettingsContextProjectId(contextProjectId);
+  if (ctx) params.set("contextProject", ctx);
+  if (ctxId) params.set("contextProjectId", ctxId);
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/saved-settings/item?${params.toString()}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || typeof data !== "object") return null;
+    const vid = data.versionId != null ? String(data.versionId) : version;
+    const pname = normalizeProjectName(data.projectName || name);
+    localStorage.setItem(getProjectStorageKey(pname, vid), JSON.stringify(data));
+    return data;
+  } catch (err) {
+    console.warn("서버 윤곽 설정 조회 실패:", err);
+    return null;
+  }
+}
+
+/** 동·지하·타워 윤곽 꼭짓점 수. 필터만 있는 저장본과 윤곽이 있는 저장본을 구분한다. */
+function countSettingOutlineVertices(data) {
+  let count = 0;
+  const buildings = Array.isArray(data?.buildings) ? data.buildings : [];
+  buildings.forEach((building) => {
+    const vertices = Array.isArray(building?.vertices) ? building.vertices : [];
+    if (vertices.length >= 3) count += vertices.length;
+  });
+  const clusters = Array.isArray(data?.clusterPolylines) ? data.clusterPolylines : [];
+  clusters.forEach((polyline) => {
+    const points = Array.isArray(polyline?.points) ? polyline.points : [];
+    if (points.length >= 3 && polyline?.closed !== false) count += points.length;
+  });
+  return count;
+}
+
+function readLocalSavedSetting(projectName, versionId) {
+  const name = normalizeProjectName(projectName);
+  const vid = versionId != null ? String(versionId) : "legacy";
+  if (!name) return null;
+  const keys = [getProjectStorageKey(name, vid)];
+  if (vid === "legacy") keys.push(PROJECT_KEY_PREFIX + name);
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const data = JSON.parse(raw);
+      if (data && typeof data === "object") return data;
+    } catch (_) {}
+  }
+  return null;
+}
+
+/**
+ * 로컬 캐시와 서버 저장본 중 동 윤곽 좌표가 더 많은 쪽을 고른다.
+ * 다른 PC 로컬 저장이 서버에만 윤곽을 남긴 경우, 이 PC의 필터-only 캐시가 윤곽을 가리지 않게 한다.
+ */
+async function resolveSavedSettingForLoad(projectName, versionId, hint = {}) {
+  const name = normalizeProjectName(projectName);
+  const vid = versionId != null ? String(versionId) : "legacy";
+  let best = readLocalSavedSetting(name, vid);
+  const contexts = [];
+  function addContext(project, projectId) {
+    const ctx = project ? normalizeProjectName(project) : "";
+    const ctxId = normalizeSettingsContextProjectId(projectId);
+    const token = `${ctx}::${ctxId}`;
+    if (contexts.some((item) => item.token === token)) return;
+    contexts.push({ token, project: ctx, projectId: ctxId });
+  }
+  addContext(hint.contextProject, hint.contextProjectId);
+  addContext(best?.contextProject, best?.contextProjectId);
+  addContext(getCurrentSettingsContextProject(), getCurrentSettingsContextProjectId());
+  addContext(state.loadedWorkMeta?.project, state.settingsContextProjectId);
+  addContext("", "");
+  for (const ctx of contexts) {
+    const remote = await fetchAndCacheSavedSetting(name, vid, ctx.project, ctx.projectId);
+    if (!remote) continue;
+    if (!best || countSettingOutlineVertices(remote) > countSettingOutlineVertices(best)) {
+      best = remote;
+    }
+    if (countSettingOutlineVertices(best) > 0) break;
+  }
+  if (countSettingOutlineVertices(best) > 0) return best;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/saved-settings`);
+    if (res.ok) {
+      const index = await res.json();
+      const hits = (Array.isArray(index) ? index : []).filter((entry) => {
+        const entryName = normalizeProjectName(entry?.name || entry?.projectName);
+        const entryVersion = entry?.versionId != null ? String(entry.versionId) : "";
+        return entryName === name && entryVersion === vid;
+      });
+      for (const hit of hits) {
+        const remote = await fetchAndCacheSavedSetting(
+          hit.name || hit.projectName || name,
+          hit.versionId,
+          hit.contextProject,
+          hit.contextProjectId,
+        );
+        if (remote && (!best || countSettingOutlineVertices(remote) > countSettingOutlineVertices(best))) {
+          best = remote;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("설정 목록에서 윤곽 저장본 검색 실패:", err);
+  }
+  return best;
+}
+
+/**
+ * 현재 컨텍스트 기준으로 서버 윤곽 설정 목록을 가져와 로컬 목록·캐시를 보강.
+ */
+async function syncSavedSettingsFromServer() {
+  const contextProject = getCurrentSettingsContextProject();
+  const contextProjectId = getCurrentSettingsContextProjectId();
+  const params = new URLSearchParams();
+  if (contextProject && normalizeProjectName(contextProject) !== DEFAULT_PROJECT_NAME) {
+    params.set("contextProject", contextProject);
+  }
+  if (contextProjectId) params.set("contextProjectId", contextProjectId);
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/saved-settings?${params.toString()}`);
+    if (!res.ok) return;
+    const index = await res.json();
+    if (!Array.isArray(index) || !index.length) return;
+    const list = getProjectList();
+    let listChanged = false;
+    for (const entry of index) {
+      const rec = normalizeProjectRecord({
+        name: entry.name || entry.projectName,
+        versionId: entry.versionId,
+        timestamp: entry.timestamp,
+        buildingCount: entry.buildingCount,
+        sourceType: entry.sourceType,
+        contextProject: entry.contextProject,
+        contextProjectId: entry.contextProjectId,
+      });
+      if (!rec.name || !rec.versionId) continue;
+      const existsIdx = list.findIndex(
+        (p) =>
+          p.name === rec.name &&
+          p.versionId === rec.versionId &&
+          isProjectRecordInSettingsContext(p, rec.contextProject || contextProject, rec.contextProjectId || contextProjectId),
+      );
+      if (existsIdx < 0) {
+        list.push(rec);
+        listChanged = true;
+      } else {
+        const prev = list[existsIdx];
+        if ((rec.timestamp || "") > (prev.timestamp || "")) {
+          list[existsIdx] = { ...prev, ...rec };
+          listChanged = true;
+        }
+      }
+      const key = getProjectStorageKey(rec.name, rec.versionId);
+      if (!localStorage.getItem(key)) {
+        await fetchAndCacheSavedSetting(rec.name, rec.versionId, rec.contextProject, rec.contextProjectId);
+      }
+    }
+    if (listChanged) {
+      list.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+      saveProjectList(list);
+    }
+  } catch (err) {
+    console.warn("서버 윤곽 설정 목록 동기화 실패:", err);
+  }
+}
+
+/**
+ * 프로젝트 불러오기 (프로젝트명 + 버전별로 고유하게 복원, 동 윤곽선·클러스터 포함)
+ * 객체 설정(필터)과 동 윤곽선을 한 번에 복원한 뒤, 도면이 있으면 바로 적용한다.
+ * 현재 불러온 작업(loadedWorkId)·원본 스냅샷은 유지한다 — 지우면 적용 후 대용량 신규 저장으로 화면이 멈춘 것처럼 보인다.
+ */
+async function handleLoadProject(projectName, versionId, hint = {}) {
   if (!projectName) return;
   const vid = versionId != null ? String(versionId) : "legacy";
-  const projectKey = getProjectStorageKey(projectName, vid);
-  const legacyKey = vid === "legacy" ? PROJECT_KEY_PREFIX + projectName : null;
   try {
-    let stored = localStorage.getItem(projectKey);
-    let usedLegacyKey = false;
-    if (!stored && legacyKey) {
-      stored = localStorage.getItem(legacyKey);
-      usedLegacyKey = !!stored;
-    }
-    if (!stored) {
+    setUploadStatus(`윤곽 설정 "${projectName}" 불러오는 중...`);
+    const projectData = await resolveSavedSettingForLoad(projectName, vid, hint);
+    if (!projectData) {
       setUploadStatus(`윤곽 설정 "${projectName}"을(를) 찾을 수 없습니다.`, true);
       return;
-    }
-
-    const projectData = JSON.parse(stored);
-    if (usedLegacyKey && legacyKey) {
-      projectData.versionId = "legacy";
-      const newKey = getProjectStorageKey(projectData.projectName || projectName, "legacy");
-      localStorage.setItem(newKey, JSON.stringify(projectData));
-      localStorage.removeItem(legacyKey);
     }
 
     if (projectNameInput) projectNameInput.value = projectData.projectName || projectName;
@@ -14833,17 +16094,14 @@ function handleLoadProject(projectName, versionId) {
     state.loadedProjectName = projectData.projectName || projectName;
     state.loadedProjectVersionId = projectData.versionId != null ? String(projectData.versionId) : vid;
     state.loadedProjectSourceType = normalizeSourceType(projectData.sourceType);
-    // 프로젝트(윤곽 설정) 전환 시 이전 "작업 버전" 원본 스냅샷이 남아 있으면
-    // apply-filter가 다른 프로젝트의 원본 circles/texts를 재사용할 수 있으므로 초기화한다.
-    state.sourceCircles = null;
-    state.sourceTexts = null;
-    state.loadedWorkId = null;
-    state.loadedWorkMeta = null;
-    state.manualOverrides = {};
-    state.manualHistoryReferenceWorkId = null;
+    // 작업 버전·원본 스냅샷·수동매칭은 유지. 윤곽 설정만 덮어쓴다.
+    // 설정 컨텍스트는 "현재 작업 프로젝트"를 우선해 목록이 다른 현장으로 튀지 않게 한다.
     persistSettingsContext(
-      projectData.contextProject || (projectData.projectName || projectName) || previousLoadedWorkProject,
-      projectData.contextProjectId || "",
+      previousLoadedWorkProject ||
+        projectData.contextProject ||
+        state.settingsContextProject ||
+        (projectData.projectName || projectName),
+      state.settingsContextProjectId || projectData.contextProjectId || "",
     );
     updateProjectButtonState();
 
@@ -14936,10 +16194,54 @@ function handleLoadProject(projectName, versionId) {
     renderBuildingTabs();
     populateBuildingSelect();
     state.areaRectCreate = null;
+    fitViewToData();
     requestRedraw();
-
-    setUploadStatus(`윤곽 설정 "${projectData.projectName || projectName}"을(를) 불러왔습니다.`);
     notifyWorkContextChanged({ resetParcelReview: true });
+
+    const settingLabel = projectData.projectName || projectName;
+    const outlineAreas = (state.buildings || []).filter(
+      (b) => Array.isArray(b.vertices) && b.vertices.length >= 3,
+    );
+    const hasOutline = outlineAreas.length > 0;
+    const canApply = state.hasDataset && Array.isArray(state.circles) && state.circles.length > 0;
+    const outlineSummary = outlineAreas
+      .map((b) => b.name || "이름없음")
+      .slice(0, 12)
+      .join(", ");
+    if (canApply && hasOutline) {
+      setUploadStatus(`윤곽 설정 "${settingLabel}" 불러옴 · 객체 설정과 동 윤곽을 함께 적용 중...`);
+      const applyKind = outlineAreas.some((b) => normalizeAreaKind(b.kind) === AREA_KIND_BUILDING)
+        ? AREA_KIND_BUILDING
+        : outlineAreas.some((b) => normalizeAreaKind(b.kind) === AREA_KIND_PARKING)
+          ? AREA_KIND_PARKING
+          : AREA_KIND_TOWER_CRANE;
+      const applied = await applyAreaDefinitions(applyKind);
+      const stillThere = (state.buildings || []).filter(
+        (b) => Array.isArray(b.vertices) && b.vertices.length >= 3,
+      ).length;
+      if (applied && stillThere > 0) {
+        setUploadStatus(
+          `윤곽 설정 "${settingLabel}" 객체 설정과 동 윤곽 ${stillThere}개를 적용했습니다. (${outlineSummary})`,
+        );
+      } else if (stillThere > 0) {
+        setUploadStatus(
+          `윤곽 ${stillThere}개는 화면에 올렸습니다. 파일 구역 반영은 실패했습니다. 「동 정보 적용」을 한 번 더 누르세요.`,
+          true,
+        );
+      }
+    } else if (canApply) {
+      await applyFilterFromPanel();
+      setUploadStatus(
+        `윤곽 설정 "${settingLabel}"의 객체 설정만 적용했습니다. 저장본에서 동 윤곽 좌표를 찾지 못했습니다.`,
+        true,
+      );
+    } else {
+      setUploadStatus(
+        hasOutline
+          ? `윤곽 설정 "${settingLabel}" 동 윤곽 ${outlineAreas.length}개를 불러왔습니다. 도면을 연 뒤 다시 불러오면 파일에 적용됩니다.`
+          : `윤곽 설정 "${settingLabel}"을(를) 불러왔습니다.`,
+      );
+    }
   } catch (error) {
     console.error("프로젝트 불러오기 실패:", error);
     setUploadStatus("윤곽 설정 불러오기에 실패했습니다.", true);
@@ -15160,7 +16462,12 @@ function renderProjectList() {
         }
       });
     });
-    loadBtn.addEventListener("click", () => handleLoadProject(project.name, project.versionId || "legacy"));
+    loadBtn.addEventListener("click", () => {
+      void handleLoadProject(project.name, project.versionId || "legacy", {
+        contextProject: project.contextProject,
+        contextProjectId: project.contextProjectId,
+      });
+    });
     deleteBtn.addEventListener("click", (e) => handleDeleteProject(project.name, e, project.versionId || "legacy"));
 
     fragment.appendChild(item);

@@ -115,6 +115,8 @@ DOWNLOAD_PATH_GUESSES = (
     "/new/report/downloadAllReport?reportId={report_id}",
 )
 
+PDAM_DOWNLOAD_JS_FUNCTIONS = ("downloadAllReport", "exportAllExcel")
+
 
 def _normalize_project_context(value: Optional[str]) -> str:
     text = (value or "").strip()
@@ -2181,6 +2183,22 @@ def _build_method_matrix(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     return {"rows": methods, "columns": pile_types, "cells": cells}
 
 
+def _is_location_name_near_miss(left: Any, right: Any) -> bool:
+    """정규화 후 한쪽 이름이 다른 쪽에 통째로 들어 있으면 오타·유사명으로 본다.
+
+    예: 도면 '공동시설' 과 PDAM '국민공동시설'. 숫자 동(101동) 일치는 여기서 다루지 않는다.
+    """
+    a = _normalize_location(left)
+    b = _normalize_location(right)
+    if not a or not b or a == b:
+        return False
+    if a in {UNSPECIFIED_LOCATION, "주차장", "B"} or b in {UNSPECIFIED_LOCATION, "주차장", "B"}:
+        return False
+    if len(a) < 2 or len(b) < 2:
+        return False
+    return a in b or b in a
+
+
 def _location_score(circle_location: str, record_location: str) -> int:
     if not circle_location or not record_location:
         return 0
@@ -2199,8 +2217,7 @@ def _location_score(circle_location: str, record_location: str) -> int:
             return 3
         return 2
 
-    if circle_location in record_location or record_location in circle_location:
-        return 1
+    # '공동시설' ⊂ '국민공동시설' 처럼 이름 일부만 같으면 같은 부위로 보지 않는다.
     return 0
 
 
@@ -2742,6 +2759,10 @@ def map_records_to_circles(
                 and parking_unified_location
                 and circle_kind != "dong"
                 and _normalize_location(parking_unified_location) != circle_location
+                and (
+                    circle_kind == "basement"
+                    or _is_parking_like_placeholder_location(circle_location_display)
+                )
             ):
                 parking_loc = _normalize_location(parking_unified_location)
                 fallback: List[Dict[str, Any]] = []
@@ -2780,10 +2801,25 @@ def map_records_to_circles(
                             alias_hits.append(record)
                             break
                 alias_hits = _dedupe_records(alias_hits)
-                if len(alias_hits) == 1:
-                    matched_record = alias_hits[0]
-                    match_type = "globally_unique_pile_alias"
-                    break
+                if len(alias_hits) != 1:
+                    continue
+                record_location = _record_location_for_pdam_match(alias_hits[0], parking_unified_location)
+                record_kind, _record_number = _location_kind_and_number(record_location)
+                if record_kind == "dong" and record_location != circle_location:
+                    continue
+                if record_kind == "basement" and circle_location != record_location:
+                    continue
+                if (
+                    _is_parking_like_placeholder_location(record_location)
+                    and circle_kind != "basement"
+                    and not _is_parking_like_placeholder_location(circle_location)
+                ):
+                    continue
+                if _is_location_name_near_miss(record_location, circle_location):
+                    continue
+                matched_record = alias_hits[0]
+                match_type = "globally_unique_pile_alias"
+                break
         if matched_record:
             matched_record_keys.add(
                 _record_dedupe_key_for_latest(matched_record, parking_unified_location=parking_unified_location)
@@ -2889,19 +2925,6 @@ def map_records_to_circles(
             1 for item in overlays if item.get("autoMatched") and item.get("status") == "installed"
         ),
     }
-
-
-def _parking_location_dong_hyphen_pile_format_issue(record: Dict[str, Any]) -> bool:
-    """시공위치가 '주차장'으로만 적혀 있는데 파일번호가 동-번호 형식(예: 8-12)인 경우 오입력 의심."""
-    if _normalize_location(record.get("location")) != "주차장":
-        return False
-    raw = _cell_text(record.get("pile_number"))
-    if not raw:
-        return False
-    t = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw.strip())
-    if re.match(r"(?i)^[BbT]", t):
-        return False
-    return bool(re.match(r"^\d{1,3}\s*-\s*\d+$", t))
 
 
 def _build_mapping_diagnostics(
@@ -3062,31 +3085,38 @@ def _build_mapping_diagnostics(
         )
     )
 
-    parking_pile_format_issues: List[Dict[str, Any]] = []
-    for record in records_for_pdam_duplicates:
-        if not _parking_location_dong_hyphen_pile_format_issue(record):
+    # 동-번호는 지원하는 파일번호 형식이다. 기존 진단 응답 필드는 호환성을 위해 유지한다.
+
+    drawing_locations = {
+        _normalize_location(circle.get("building_name"))
+        for circle in circles
+        if _normalize_location(circle.get("building_name")) not in {UNSPECIFIED_LOCATION, ""}
+    }
+    location_name_groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for record in latest_records:
+        raw_location = _cell_text(record.get("location"))
+        normalized = _normalize_location(raw_location)
+        near = [name for name in drawing_locations if _is_location_name_near_miss(normalized, name)]
+        if len(near) != 1:
             continue
-        pile_raw = _cell_text(record.get("pile_number"))
-        parking_pile_format_issues.append(
-            {
-                "rawLocation": _cell_text(record.get("location")),
-                "locationNormalized": _normalize_location(record.get("location")),
-                "pileNumber": pile_raw,
-                "rawPileNumber": pile_raw,
-                "constructionDate": record.get("construction_date"),
-                "equipment": record.get("equipment"),
-                "constructionMethod": _normalize_construction_method(record.get("construction_method")),
-                "recordRowNumber": record.get("row_number"),
-                "issueType": "숫자 오류",
-                "issueDetail": "시공위치가 주차장인데 파일번호가 동-번호(예: 8-12) 형식입니다. 지하구역은 B2-번호, B2--번호 등으로 맞추는지 확인하세요.",
+        key = (normalized, near[0])
+        bucket = location_name_groups.get(key)
+        if bucket is None:
+            bucket = {
+                "pdamLocation": raw_location or normalized,
+                "pdamLocationNormalized": normalized,
+                "drawingLocation": near[0],
+                "count": 0,
+                "pileNumbers": [],
             }
-        )
-    parking_pile_format_issues.sort(
-        key=lambda item: (
-            item.get("constructionDate") or "",
-            int(item.get("recordRowNumber") or 0),
-            item.get("pileNumber") or "",
-        )
+            location_name_groups[key] = bucket
+        bucket["count"] += 1
+        pile_text = _cell_text(record.get("pile_number"))
+        if pile_text and pile_text not in bucket["pileNumbers"] and len(bucket["pileNumbers"]) < 8:
+            bucket["pileNumbers"].append(pile_text)
+    location_name_mismatches = sorted(
+        location_name_groups.values(),
+        key=lambda item: (-int(item.get("count") or 0), item.get("pdamLocation") or ""),
     )
 
     return {
@@ -3096,14 +3126,16 @@ def _build_mapping_diagnostics(
             "pdamOnlyCount": len(pdam_only),
             "projectDuplicateCount": len(project_duplicates),
             "pdamDuplicateCount": len(pdam_duplicates),
-            "parkingPileFormatIssueCount": len(parking_pile_format_issues),
+            "parkingPileFormatIssueCount": 0,
+            "locationNameMismatchCount": len(location_name_mismatches),
         },
         "autoMatched": auto_matched[:MAX_DIAGNOSTIC_ITEMS],
         "projectOnly": project_only[:MAX_DIAGNOSTIC_ITEMS],
         "pdamOnly": pdam_only[:MAX_DIAGNOSTIC_ITEMS],
         "projectDuplicates": project_duplicates[:MAX_DIAGNOSTIC_ITEMS],
         "pdamDuplicates": pdam_duplicates[:MAX_DIAGNOSTIC_ITEMS],
-        "parkingPileFormatIssues": parking_pile_format_issues[:MAX_DIAGNOSTIC_ITEMS],
+        "parkingPileFormatIssues": [],
+        "locationNameMismatches": location_name_mismatches[:MAX_DIAGNOSTIC_ITEMS],
     }
 
 
@@ -3592,11 +3624,22 @@ def _html_contains_login_form(html: str) -> bool:
     return 'id="loginform"' in lowered or ('name="userid"' in lowered and 'name="password"' in lowered)
 
 
-def _extract_report_id_from_html(html: str) -> Optional[int]:
-    match = re.search(r"downloadAllReport\((\d+)\)", html)
-    if not match:
-        return None
-    return int(match.group(1))
+def _extract_report_id_from_html(html: str, page_url: Optional[str] = None) -> Optional[int]:
+    patterns = (
+        r"downloadAllReport\((\d+)\)",
+        r"exportAllExcel\((\d+)\)",
+        r"exportAllPdf\((\d+)\)",
+        r"constructionIdx=(\d+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return int(match.group(1))
+    if page_url:
+        match = re.search(r"constructionIdx=(\d+)", page_url)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def _extract_download_candidates_from_js(js_body: str, arg_name: str, report_id: int, base_url: str) -> List[str]:
@@ -3620,24 +3663,25 @@ def _extract_download_candidates_from_js(js_body: str, arg_name: str, report_id:
 
 def _extract_download_candidates(html: str, base_url: str, report_id: Optional[int]) -> List[str]:
     scripts = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, flags=re.S | re.I))
-    resolved_report_id = report_id if report_id is not None else _extract_report_id_from_html(html)
+    resolved_report_id = report_id if report_id is not None else _extract_report_id_from_html(html, base_url)
     candidates: List[str] = []
 
     if resolved_report_id is not None:
-        body_match = re.search(
-            r"function\s+downloadAllReport\s*\(\s*(\w+)\s*\)\s*\{(?P<body>.*?)\}",
-            scripts,
-            re.S,
-        )
-        if body_match:
-            candidates.extend(
-                _extract_download_candidates_from_js(
-                    body_match.group("body"),
-                    body_match.group(1),
-                    resolved_report_id,
-                    base_url,
-                )
+        for func_name in PDAM_DOWNLOAD_JS_FUNCTIONS:
+            body_match = re.search(
+                rf"function\s+{func_name}\s*\(\s*(\w+)\s*\)\s*\{{(?P<body>.*?)\}}",
+                scripts,
+                re.S,
             )
+            if body_match:
+                candidates.extend(
+                    _extract_download_candidates_from_js(
+                        body_match.group("body"),
+                        body_match.group(1),
+                        resolved_report_id,
+                        base_url,
+                    )
+                )
         for template in DOWNLOAD_PATH_GUESSES:
             candidates.append(urljoin(base_url, template.format(report_id=resolved_report_id)))
 
@@ -3710,12 +3754,15 @@ def sync_pdam_workbook(
         response = session.get(candidate, timeout=30)
         if _looks_like_excel_response(response):
             filename = _response_filename(response, f"pdam_report_{report_id or 'latest'}.xlsx")
+            resolved_report_id = report_id or _extract_report_id_from_html(
+                page_response.text, page_response.url or report_page_url or source_url
+            )
             result = import_workbook_bytes(
                 response.content,
                 filename=filename,
                 source_type="pdam-sync",
                 source_url=page_response.url or report_page_url or source_url,
-                report_id=report_id or _extract_report_id_from_html(page_response.text),
+                report_id=resolved_report_id,
                 login_user=user_id,
                 dataset_name=dataset_name,
                 project_context=project_context,
@@ -3727,7 +3774,7 @@ def sync_pdam_workbook(
             result["download"] = {
                 "url": candidate,
                 "filename": filename,
-                "resolvedReportId": report_id or _extract_report_id_from_html(page_response.text),
+                "resolvedReportId": resolved_report_id,
             }
             return result
         last_error = response.headers.get("Content-Type") or "unknown response"

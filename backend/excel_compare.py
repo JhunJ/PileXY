@@ -41,7 +41,86 @@ def _column_letter(index: int) -> str:
 
 
 def _load_excel_file(file_bytes: bytes) -> pd.ExcelFile:
-    return pd.ExcelFile(io.BytesIO(file_bytes))
+    try:
+        return pd.ExcelFile(io.BytesIO(file_bytes))
+    except Exception as exc:
+        message = str(exc)
+        if "OLE2" in message or "Can't find workbook" in message:
+            raise ValueError(
+                "이 파일은 엑셀 시트로 열리지 않습니다. "
+                "확장자가 xls여도 안에 통합문서가 없거나, 암호가 걸려 있거나, 엑셀이 아닌 파일일 수 있습니다. "
+                "엑셀에서 연 다음 Excel 통합 문서(.xlsx)로 다시 저장해 올려 주세요."
+            ) from exc
+        raise
+
+
+_HEADER_LABEL_HINTS = (
+    "번호",
+    "no",
+    "num",
+    "pile",
+    "좌표",
+    "coordinate",
+    "building",
+    "동",
+    "x좌표",
+    "y좌표",
+)
+
+
+def _row_values_look_like_header(row_values: Sequence[str]) -> bool:
+    cells = [str(v or "").strip().lower() for v in row_values if str(v or "").strip()]
+    if not cells:
+        return False
+    for cell in cells:
+        for hint in _HEADER_LABEL_HINTS:
+            if hint in cell:
+                return True
+    first = cells[0]
+    if first in {"x", "y", "z"}:
+        return True
+    if len(cells) >= 2 and cells[0] in {"x", "no", "num"} and cells[1] in {"y", "x"}:
+        return True
+    return False
+
+
+def _row_values_look_like_pile_data(row_values: Sequence[str]) -> bool:
+    if len(row_values) < 3:
+        return False
+    if _row_values_look_like_header(row_values):
+        return False
+    number_raw = _cell_text(row_values[0])
+    if not number_raw:
+        return False
+    if _parse_float(row_values[1]) is None or _parse_float(row_values[2]) is None:
+        return False
+    if re.fullmatch(r"(?i)(T|TC)\d+-\d+", re.sub(r"\s+", "", number_raw)):
+        return True
+    if re.fullmatch(r"[\d\-]+", re.sub(r"\s+", "", number_raw)):
+        return True
+    return False
+
+
+def _suggest_header_row_from_preview(preview_rows_data: List[Dict[str, Any]]) -> int:
+    """0 = 헤더 없음(1행부터 데이터). 1 이상 = 해당 행이 컬럼 헤더."""
+    if not preview_rows_data:
+        return 1
+    first_values = preview_rows_data[0].get("values") or []
+    if _row_values_look_like_pile_data(first_values):
+        for row in preview_rows_data[: min(12, len(preview_rows_data))]:
+            values = row.get("values") or []
+            if _row_values_look_like_header(values):
+                return int(row.get("rowNumber") or 1)
+        return 0
+    best_header_row = 1
+    best_score = -1
+    for row in preview_rows_data:
+        row_values = row.get("values") or []
+        non_empty = sum(1 for value in row_values if _cell_text(value))
+        if non_empty > best_score:
+            best_score = non_empty
+            best_header_row = int(row.get("rowNumber") or 1)
+    return best_header_row
 
 
 def inspect_excel_workbook(
@@ -62,14 +141,8 @@ def inspect_excel_workbook(
         )
         df = df.iloc[:, :preview_cols]
         preview_rows_data: List[Dict[str, Any]] = []
-        best_header_row = 1
-        best_score = -1
         for row_index in range(len(df.index)):
             row_values = [_cell_text(value) for value in df.iloc[row_index].tolist()]
-            non_empty = sum(1 for value in row_values if value)
-            if non_empty > best_score:
-                best_score = non_empty
-                best_header_row = row_index + 1
             preview_rows_data.append(
                 {
                     "rowNumber": row_index + 1,
@@ -80,7 +153,7 @@ def inspect_excel_workbook(
             {
                 "name": sheet_name,
                 "columnLetters": [_column_letter(i) for i in range(df.shape[1])],
-                "suggestedHeaderRow": best_header_row,
+                "suggestedHeaderRow": _suggest_header_row_from_preview(preview_rows_data),
                 "preview": preview_rows_data,
             }
         )
@@ -110,6 +183,11 @@ def _normalize_excel_building_key(value: Any) -> str:
     m = re.match(r"(?i)^T(\d+)(?:동)?$", compact)
     if m:
         return f"T{int(m.group(1))}"
+    # 101 / 101동 등 숫자 동명 통일 — 시트명·윤곽 building_name 표기 차이로 행 전체가 빠지지 않게
+    if not _is_parking_building_name(text):
+        m_dong = re.match(r"^(\d+)동?$", compact)
+        if m_dong:
+            return f"{int(m_dong.group(1))}동"
     return text
 
 
@@ -228,50 +306,40 @@ def _dedupe_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     return out
 
 
-def _circle_lookup_entry_pairs(circle: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """(building_key, pile_token) — 원을 엑셀 (동키, 번호)로 조회할 때 쓰는 키 목록.
+def _pile_match_lookup_pairs(
+    building_name: Any,
+    text_raw: Any,
+    pile_norm: str,
+) -> List[Tuple[str, str]]:
+    """(building_key, pile_token) — 도면·엑셀 양쪽에서 동일하게 쓰는 조회 키 별칭.
 
-    - 삼중 번호(112-116-2) 등은 _leading_dong_digit_chain_split 과 짝.
-    - CAD 텍스트가 1-2 한 자리쌍이면 뒷자리만(엑셀 단순 번호) 추가.
-    - 10-1 처럼 앞이 전체 동 번호와 같으면(10동) 또는 끝부분만 같으면(110동+10-1, 111동+11-1 …)
-      엑셀 시트/동 열의 전체 동명 + 말뚝 번호와 맞춘다.
-    - 엑셀 쪽 동은 시트명 또는 사용자가 지정한 동 컬럼으로 이미 확정되며, 여기서는 **원의 building_name·matched_text**
-      (도면에서 온 값)만으로 별칭을 만든다.
+    - 삼중 번호(112-116-2), 한 자리-한 자리(1-1→뒤 1), 10-1/110-1 축약 등
+      프론트 동-번호 집계(parseHyphenPileText)와 같은 축으로 맞춘다.
+    - 도면 matched_text·엑셀 번호 열 모두 이 함수를 거쳐 행 단위 1:1 비교가 되게 한다.
     """
-    if not isinstance(circle, dict):
-        return []
-    matched = circle.get("matched_text")
-    if not isinstance(matched, dict):
-        return []
-    pile_norm = _normalize_number(matched.get("text"))
     if not pile_norm:
         return []
-    base_bn = _normalize_excel_building_key(circle.get("building_name"))
+    base_bn = _normalize_excel_building_key(building_name)
     pairs: List[Tuple[str, str]] = [(base_bn, pile_norm)]
-    trip = _leading_dong_digit_chain_split(_compact_digit_hyphen_token(matched.get("text")))
+    trip = _leading_dong_digit_chain_split(_compact_digit_hyphen_token(text_raw))
     if trip:
         d0, rest = trip
         if rest == pile_norm:
             for suf in _dong_building_key_suffixes(d0):
                 pairs.append((_normalize_excel_building_key(suf), rest))
-    # 화면 표기 "1-1"·"1-2"(한 자리-한 자리): 앞은 구역/그리드, 뒤가 동 내 파일 번호인 경우가 많음.
-    # 엑셀은 "1","2"만 적는 경우가 있어 뒤쪽 숫자로도 같은 원을 찾을 수 있게 한다. (전체 "1-2" 키는 pile_norm에 이미 있음)
-    compact = _compact_digit_hyphen_token(matched.get("text"))
+    compact = _compact_digit_hyphen_token(text_raw)
     mm = re.fullmatch(r"(\d)-(\d)", compact) if compact else None
     if mm:
         suf = mm.group(2)
         if suf:
             pairs.append((base_bn, suf))
-    # "10-1" = 10동 1번: 앞 세그먼트가 동 번호·뒤가 말뚝 번호. 엑셀은 시트 10동 + 번호 1.
-    # "10-1" + building 110동: 화면에 동 번호 끝자리만(10) 붙이는 표기 ↔ 엑셀 110동 + 번호 1.
-    # 한 자리-한 자리(1-2)는 위 mm에서만 처리.
     m2 = re.fullmatch(r"(\d+)-(\d+)", compact) if compact else None
     if m2:
         a_digits, b_digits = m2.group(1), m2.group(2)
         if not (len(a_digits) == 1 and len(b_digits) == 1):
             dong_prefix = int(a_digits)
             pile_suffix = str(int(b_digits))
-            bd_dong = _leading_dong_int_from_building_name(circle.get("building_name"))
+            bd_dong = _leading_dong_int_from_building_name(building_name)
             bd_str = str(bd_dong) if bd_dong is not None else ""
 
             if bd_dong is not None and bd_dong == dong_prefix:
@@ -291,14 +359,25 @@ def _circle_lookup_entry_pairs(circle: Dict[str, Any]) -> List[Tuple[str, str]]:
     return _dedupe_pairs(pairs)
 
 
+def _circle_lookup_entry_pairs(circle: Dict[str, Any]) -> List[Tuple[str, str]]:
+    if not isinstance(circle, dict):
+        return []
+    matched = circle.get("matched_text")
+    if not isinstance(matched, dict):
+        return []
+    pile_norm = _normalize_number(matched.get("text"))
+    if not pile_norm:
+        return []
+    return _pile_match_lookup_pairs(circle.get("building_name"), matched.get("text"), pile_norm)
+
+
 def _excel_row_lookup_pairs(building_name: str, number_raw: Any, number_norm: str) -> List[Tuple[str, str]]:
     """엑셀 한 행에서 조회할 (동키, 파일토큰) 후보.
 
     - 번호 열에 T4-1 / TC4-7 처럼 **타워 전체 표기**가 있으면 **호기 T4 + 파일 번호 1**로만 조회한다.
       (시트명이 다른 동이어도 T4호기 1번과 매칭 — 엑셀에 흔한 형식)
-    - 그 외에는 시트명/동 열 + 정규화 번호, 삼중 112-116-2 동 접두 처리.
+    - 그 외에는 도면과 동일한 _pile_match_lookup_pairs 로 동-번호·단순 번호 별칭을 맞춘다.
     """
-    pairs: List[Tuple[str, str]] = []
     raw = str(number_raw or "").strip()
     raw = re.sub(r"[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+", "-", raw)
     raw = re.sub(r"\s+", "", raw)
@@ -306,17 +385,10 @@ def _excel_row_lookup_pairs(building_name: str, number_raw: Any, number_norm: st
     if tower_m:
         tower_bn = _normalize_excel_building_key(f"T{int(tower_m.group(2))}")
         pile_tok = str(int(tower_m.group(3)))
-        pairs.append((tower_bn, pile_tok))
-    elif number_norm:
-        pairs.append((_normalize_excel_building_key(building_name), number_norm))
-
-    trip = _leading_dong_digit_chain_split(_compact_digit_hyphen_token(number_raw))
-    if trip and number_norm:
-        d0, rest = trip
-        if rest == number_norm:
-            for suf in _dong_building_key_suffixes(d0):
-                pairs.append((_normalize_excel_building_key(suf), rest))
-    return _dedupe_pairs(pairs)
+        return [(tower_bn, pile_tok)]
+    if not number_norm:
+        return []
+    return _pile_match_lookup_pairs(building_name, number_raw, number_norm)
 
 
 def _number_aliases(value: Any) -> List[str]:
@@ -439,6 +511,7 @@ def _empty_summary() -> Dict[str, int]:
         "missingNew": 0,
         "missingBoth": 0,
         "coordMismatch": 0,
+        "missingExcel": 0,
     }
 
 
@@ -535,8 +608,17 @@ def _read_sheet_dataframe(
     sheet_name: str,
     header_row: int,
 ) -> pd.DataFrame:
-    if header_row < 1:
-        raise ValueError("header_row must be 1 or greater.")
+    if header_row < 0:
+        raise ValueError("header_row must be 0 or greater.")
+    if header_row == 0:
+        df = pd.read_excel(
+            excel_file,
+            sheet_name=sheet_name,
+            header=None,
+            dtype=object,
+        )
+        df.columns = [_column_letter(index) for index in range(df.shape[1])]
+        return df
     df = pd.read_excel(
         excel_file,
         sheet_name=sheet_name,
@@ -565,7 +647,9 @@ def _read_sheet_dataframe_with_header_markers(
     번호/X/Y 열에 적힌 헤더 글자로 헤더 행을 찾는다.
     실패 시 header_row_fallback(1-based) 사용.
     """
-    hb = max(1, int(header_row_fallback))
+    hb = max(0, int(header_row_fallback))
+    if hb == 0:
+        return _read_sheet_dataframe(excel_file, sheet_name=sheet_name, header_row=0), 0
     num_i = _excel_column_letter_to_index(number_column)
     x_i = _excel_column_letter_to_index(x_column)
     y_i = _excel_column_letter_to_index(y_column)
@@ -635,6 +719,8 @@ def _compare_single_sheet(
     skipped_details: List[Dict[str, Any]] = []
     single_parking_building_a = _single_parking_building_name(lookup_a)
     single_parking_building_b = _single_parking_building_name(lookup_b)
+    excel_pairs = set()
+    compared_buildings = {_normalize_excel_building_key(sheet_name)} if building_source_mode == BUILDING_SOURCE_SHEET else set()
 
     for data_index, row in df.iterrows():
         building_ctx = (
@@ -644,6 +730,17 @@ def _compare_single_sheet(
         )
         number_raw = row.get(resolved_number_column)
         number = _normalize_number(number_raw)
+        # Presence is based on building/number even when coordinates are invalid.
+        # Aggregate across sheets before checking the reverse (drawing -> Excel) direction.
+        pairs = _excel_row_lookup_pairs(_normalize_excel_building_key(building_ctx), number_raw, number)
+        if number:
+            excel_pairs.update(pairs)
+            compared_buildings.update(bn for bn, _ in pairs)
+            if _is_parking_building_name(_normalize_excel_building_key(building_ctx)):
+                for parking in (single_parking_building_a, single_parking_building_b):
+                    if parking:
+                        compared_buildings.add(parking)
+                        excel_pairs.update((parking, token) for _, token in pairs)
         x = _parse_float(row.get(resolved_x_column))
         y = _parse_float(row.get(resolved_y_column))
         excel_row_1based = int(data_index) + header_row + 1
@@ -786,6 +883,8 @@ def _compare_single_sheet(
         "summary": summary,
         "issues": issues,
         "skippedDetails": skipped_details,
+        "excelPairs": excel_pairs,
+        "comparedBuildings": compared_buildings,
     }
 
 
@@ -829,6 +928,9 @@ def compare_excel_workbook(
     aggregate_issues: List[Dict[str, Any]] = []
     aggregate_skipped: List[Dict[str, Any]] = []
     sheet_summaries: List[Dict[str, Any]] = []
+    excel_pairs = set()
+    compared_buildings = set()
+    building_sheets = {}
 
     for current_sheet_name in selected_sheet_names:
         effective_header = int(header_row)
@@ -839,7 +941,7 @@ def compare_excel_workbook(
             if raw_h is not None:
                 try:
                     parsed_h = int(raw_h)
-                    if parsed_h >= 1:
+                    if parsed_h >= 0:
                         effective_header = parsed_h
                 except (TypeError, ValueError):
                     pass
@@ -887,6 +989,30 @@ def compare_excel_workbook(
             aggregate_summary[key] += int(value or 0)
         aggregate_issues.extend(result["issues"])
         aggregate_skipped.extend(result.get("skippedDetails") or [])
+        excel_pairs.update(result["excelPairs"])
+        compared_buildings.update(result["comparedBuildings"])
+        for building in result["comparedBuildings"]:
+            building_sheets.setdefault(building, current_sheet_name)
+
+    missing_excel = {}
+    for field, circles in (("oldCircle", circles_a), ("newCircle", circles_b)):
+        for circle in circles:
+            pairs = set(_circle_lookup_entry_pairs(circle))
+            if not pairs or pairs & excel_pairs or not any(bn in compared_buildings for bn, _ in pairs):
+                continue
+            building = _normalize_excel_building_key(circle.get("building_name"))
+            number = _normalize_number(_match_number(circle))
+            issue = missing_excel.setdefault((building, number), {
+                "status": "missing-excel", "sheetName": building_sheets.get(building, ""), "excelRow": None,
+                "buildingName": building, "number": number, "excelX": None, "excelY": None,
+                "oldCircle": None, "newCircle": None,
+            })
+            issue[field] = {"x": float(circle["center_y"]), "y": float(circle["center_x"]),
+                            "number": _match_number(circle), "distance": None}
+    aggregate_summary["missingExcel"] = len(missing_excel)
+    aggregate_issues.extend(missing_excel.values())
+    for sheet in sheet_summaries:
+        sheet["summary"]["missingExcel"] = sum(issue["sheetName"] == sheet["sheetName"] for issue in missing_excel.values())
 
     return {
         "sheetName": selected_sheet_names[0],

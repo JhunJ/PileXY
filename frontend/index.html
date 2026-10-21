@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>파일 마스터</title>
-    <link rel="stylesheet" href="/frontend/styles.css?v=202605154" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=20260929pairs2" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WS5RRTXTKW"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -194,7 +194,7 @@
                 </div>
               </div>
               <div class="version-compare-summary-section">
-                <h3>동별 요약(개수 차이) <span class="version-compare-summary-hint">* 좌표 차이는 우측 참고</span></h3>
+                <h3>동별 비교 요약 <span class="version-compare-summary-hint">* 현재 화면과 이전 버전 모두 건물명·매칭 번호·좌표 쌍으로 비교합니다. 오른쪽 목록을 누르면 확대됩니다.</span></h3>
                 <div class="version-compare-table-wrapper">
                   <table class="version-compare-table">
                     <thead>
@@ -206,16 +206,23 @@
                         <th>이전 텍스트</th>
                         <th>현재 텍스트</th>
                         <th>텍스트 차이</th>
+                        <th>이전만</th>
+                        <th>현재만</th>
+                        <th>좌표 변경</th>
                       </tr>
                     </thead>
-                    <tbody id="version-compare-summary-body"></tbody>
-                  </table>
+                  <tbody id="version-compare-summary-body"></tbody>
+                </table>
+                </div>
+                <div id="version-compare-building-detail" class="version-compare-building-detail" hidden>
+                  <h4 id="version-compare-building-detail-title"></h4>
+                  <ul id="version-compare-building-detail-list" class="version-compare-building-detail-list"></ul>
                 </div>
               </div>
               <div class="version-compare-legend">
                 <span class="version-legend-item" data-status="same"><i></i> 동일</span>
-                <span class="version-legend-item" data-status="only-old"><i></i> 이전만</span>
-                <span class="version-legend-item" data-status="only-new"><i></i> 현재만</span>
+                <span class="version-legend-item" data-status="only-old"><i></i> 삭제(이전만)</span>
+                <span class="version-legend-item" data-status="only-new"><i></i> 추가(현재만)</span>
                 <span class="version-legend-item" data-status="coord-changed"><i></i> 좌표 변경</span>
               </div>
               <div class="version-compare-canvas-wrapper">
@@ -230,15 +237,15 @@
             </div>
             <div class="version-compare-lists">
               <div class="version-compare-list-section" data-status="only-old">
-                <h4><i class="list-dot"></i> 이전만</h4>
+                <h4><i class="list-dot"></i> <span class="version-compare-list-heading-text">삭제 · 이전만</span></h4>
                 <ul id="version-compare-list-only-old" class="version-compare-list"></ul>
               </div>
               <div class="version-compare-list-section" data-status="only-new">
-                <h4><i class="list-dot"></i> 현재만</h4>
+                <h4><i class="list-dot"></i> <span class="version-compare-list-heading-text">추가 · 현재만</span></h4>
                 <ul id="version-compare-list-only-new" class="version-compare-list"></ul>
               </div>
               <div class="version-compare-list-section" data-status="coord-changed">
-                <h4><i class="list-dot"></i> 좌표 변경</h4>
+                <h4><i class="list-dot"></i> <span class="version-compare-list-heading-text">좌표 변경</span></h4>
                 <ul id="version-compare-list-coord-changed" class="version-compare-list"></ul>
               </div>
             </div>
@@ -296,7 +303,7 @@
                 </div>
                 <div class="version-compare-excel-hidden-inputs" hidden>
                   <select id="version-compare-excel-sheet"></select>
-                  <input type="number" id="version-compare-excel-header-row" min="1" value="1" />
+                  <input type="number" id="version-compare-excel-header-row" min="0" value="1" />
                   <input type="text" id="version-compare-excel-building-column" />
                   <input type="text" id="version-compare-excel-number-column" />
                   <input type="text" id="version-compare-excel-x-column" />
@@ -711,6 +718,36 @@
             </table>
           </div>
         </div>
+
+        <form id="manual-pile-form" class="manual-pile-panel">
+          <h3 id="manual-pile-title">파일 마스터 · 직접 추가</h3>
+          <p class="muted">도면의 원이나 파일 목록의 행을 선택하면 파일 번호와 동을 수정할 수 있습니다.</p>
+          <div class="manual-pile-selection-tools">
+            <button type="button" class="ghost" id="manual-pile-pick">파일 선택</button>
+            <button type="button" class="ghost" id="manual-pile-new" hidden>새 파일 추가</button>
+            <p id="manual-pile-selected" aria-live="polite">선택된 파일 없음</p>
+          </div>
+          <div class="manual-pile-grid">
+            <label>파일 번호<input id="manual-pile-number" type="text" placeholder="예: 125, T4-1" required maxlength="40" /></label>
+            <label>배정할 동<select id="manual-pile-building"><option value="">자동 판정</option></select></label>
+          </div>
+          <div class="manual-pile-grid" id="manual-pile-coordinates">
+            <label>X (토목 · CAD Y)<input id="manual-pile-x" type="number" step="any" required /></label>
+            <label>Y (토목 · CAD X)<input id="manual-pile-y" type="number" step="any" required /></label>
+          </div>
+          <div id="manual-pile-add-help">
+            <p class="muted">새 파일은 번호·좌표와 동을 입력하세요. 직경은 가까운 파일에 맞춰 자동 적용합니다.</p>
+            <p class="muted">선택한 동 밖이면 새 파일 주변만 좁게 확장합니다. 기존 좌표·번호가 추가로 포함되면 중단합니다.</p>
+            <p class="muted">X·Y가 뒤바뀐 것으로 판단되면 자동 교정 후 안내합니다. 추가한 파일은 상단에서 저장하세요.</p>
+          </div>
+          <p class="muted" id="manual-pile-edit-help" hidden>선택한 파일의 좌표·직경은 유지합니다. 번호와 동을 수정한 뒤 상단에서 저장하세요.</p>
+          <button type="submit">파일 추가</button>
+          <div class="manual-pile-delete-tools">
+            <p class="muted">잘못 입력한 파일은 선택한 뒤 삭제할 수 있습니다.</p>
+            <button type="button" class="ghost" id="manual-pile-delete" disabled>선택 파일 삭제</button>
+          </div>
+          <p id="manual-pile-status" role="status" aria-live="polite"></p>
+        </form>
 
         <div class="building-panel">
           <div class="building-panel-header">
@@ -1664,14 +1701,14 @@
       </div>
     </aside>
 
-    <script src="/frontend/pilexy-session.js?v=1"></script>
+    <script src="/frontend/pilexy-session.js?v=20260921isolation1"></script>
     <script src="/frontend/api-json-helpers.js?v=1"></script>
-    <script src="/frontend/app.js?v=202604248clean1"></script>
+    <script src="/frontend/app.js?v=20261008load1"></script>
     <!-- 자재: app.js 직후 로드 — 앞선 CDN/시공 스크립트 오류로 materials.js가 스킵되는 일 방지 -->
-    <script src="/frontend/materials.js?v=202605154b"></script>
+    <script src="/frontend/materials.js?v=20260921matrixfixed"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="/frontend/construction.js?v=202605154"></script>
+    <script src="/frontend/construction.js?v=20261006pdam-loc"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <script src="/frontend/meissa-compare.js?v=202604201"></script>
   </body>

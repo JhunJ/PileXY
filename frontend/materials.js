@@ -6,7 +6,7 @@
 (function () {
   const MATERIALS_EMPTY_PROJECT_KEY = "__materials_empty__";
   const LENS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-  /** 단본(한 구간) 최대 길이(m) — 이음은 두 구간 합이 총연장 */
+  /** 단본(한 구간) 최대 길이(m) — 이음은 두 구간 또는 세 구간 합이 총연장 */
   const LENS_MAX_SINGLE_M = 15;
 
   function defaultJoinLengthSpecsFromLegacy() {
@@ -17,27 +17,33 @@
     return out;
   }
 
-  function clampSegM(n) {
-    const v = Math.round(Number(n));
-    if (!Number.isFinite(v)) return 0;
-    return Math.max(1, Math.min(LENS_MAX_SINGLE_M, v));
+  function suggestedJoinSpec(totalM, count = totalM > 30 ? 3 : 2) {
+    if (!Number.isInteger(totalM) || ![2, 3].includes(count) || totalM < 16 || totalM > count * LENS_MAX_SINGLE_M) return null;
+    const first = count === 2 ? Math.max(10, totalM - 15) : Math.ceil(totalM / 3);
+    const second = count === 2 ? totalM - first : Math.ceil((totalM - first) / 2);
+    return { totalM, seg1M: first, seg2M: second, ...(count === 3 ? { seg3M: totalM - first - second } : {}) };
+  }
+
+  function joinSegments(spec) {
+    return [spec.seg1M, spec.seg2M, ...(Number(spec.seg3M) > 0 ? [spec.seg3M] : [])].map(Number);
   }
 
   function normalizeJoinSpec(raw) {
-    const totalM = Math.round(Number(raw && raw.totalM));
-    if (!Number.isFinite(totalM) || totalM < 16 || totalM > 30) return null;
-    let seg1M = Math.round(Number(raw.seg1M));
-    let seg2M = Math.round(Number(raw.seg2M));
-    if (!Number.isFinite(seg1M) || !Number.isFinite(seg2M)) {
-      seg1M = Math.min(LENS_MAX_SINGLE_M, Math.max(1, totalM - 10));
-      seg2M = totalM - seg1M;
-    }
-    if (seg1M < 1) seg1M = 1;
-    if (seg1M > LENS_MAX_SINGLE_M) seg1M = LENS_MAX_SINGLE_M;
-    seg2M = totalM - seg1M;
-    if (seg2M < 1 || seg2M > LENS_MAX_SINGLE_M) return null;
-    if (seg1M + seg2M !== totalM) return null;
-    return { totalM, seg1M, seg2M };
+    const totalM = Number(raw?.totalM);
+    if (!Number.isInteger(totalM) || totalM < 16 || totalM > 45) return null;
+    if (raw.seg1M == null && raw.seg2M == null) return suggestedJoinSpec(totalM);
+    const segments = joinSegments(raw);
+    if (segments.some((v) => !Number.isInteger(v) || v < 1 || v > LENS_MAX_SINGLE_M)) return null;
+    if (segments.reduce((a, b) => a + b, 0) !== totalM) return null;
+    return { totalM, seg1M: segments[0], seg2M: segments[1], ...(segments.length === 3 ? { seg3M: segments[2] } : {}) };
+  }
+
+  function validateJoinInputs(totalM, count, segments) {
+    if (!Number.isInteger(totalM) || totalM < 16 || totalM > 45) return "총연장은 16~45m 정수로 입력하세요.";
+    if (totalM > count * LENS_MAX_SINGLE_M) return `${count}구간 이음은 최대 ${count * LENS_MAX_SINGLE_M}m입니다. 3구간 이음을 선택하세요.`;
+    if (segments.some((v) => !Number.isInteger(v) || v < 5 || v > LENS_MAX_SINGLE_M)) return "각 구간은 단본 규격 5~15m 정수로 입력하세요.";
+    if (segments.reduce((a, b) => a + b, 0) !== totalM) return "구간 길이의 합이 총연장과 같아야 합니다.";
+    return "";
   }
 
   function ensureJoinLengthSpecs(b) {
@@ -77,7 +83,8 @@
       totalM: s.totalM,
       seg1M: s.seg1M,
       seg2M: s.seg2M,
-      label: `${s.seg1M}+${s.seg2M}`,
+      seg3M: s.seg3M,
+      label: joinSegments(s).join("+"),
     }));
   }
 
@@ -93,42 +100,6 @@
     (bundle.receipts || []).forEach((r) => {
       if (r.qtyByLength && Object.prototype.hasOwnProperty.call(r.qtyByLength, jkey)) delete r.qtyByLength[jkey];
     });
-  }
-
-  function applyJoinSegEdit(totalM, part, rawVal) {
-    ensureJoinLengthSpecs(bundle);
-    const s = bundle.joinLengthSpecs.find((x) => x.totalM === totalM);
-    if (!s) return;
-    let seg1 = s.seg1M;
-    let seg2 = s.seg2M;
-    const v = clampSegM(rawVal);
-    if (part === "1") {
-      seg1 = v;
-      seg2 = totalM - seg1;
-      if (seg2 < 1) {
-        seg2 = 1;
-        seg1 = totalM - 1;
-      }
-      if (seg2 > LENS_MAX_SINGLE_M) {
-        seg2 = LENS_MAX_SINGLE_M;
-        seg1 = totalM - seg2;
-      }
-    } else {
-      seg2 = v;
-      seg1 = totalM - seg2;
-      if (seg1 < 1) {
-        seg1 = 1;
-        seg2 = totalM - 1;
-      }
-      if (seg1 > LENS_MAX_SINGLE_M) {
-        seg1 = LENS_MAX_SINGLE_M;
-        seg2 = totalM - seg1;
-      }
-    }
-    if (seg1 < 1 || seg2 < 1 || seg1 > LENS_MAX_SINGLE_M || seg2 > LENS_MAX_SINGLE_M) return;
-    s.seg1M = seg1;
-    s.seg2M = seg2;
-    bundle.joinLengthSpecs.sort((a, c) => a.totalM - c.totalM);
   }
 
   let bundle = null;
@@ -226,6 +197,94 @@
     return [];
   }
 
+  function ensurePlanRows(b, names = []) {
+    if (!b.planByBuilding || typeof b.planByBuilding !== "object") b.planByBuilding = {};
+    if (!Array.isArray(b.planRows)) {
+      const labels = [...new Set([...names, ...Object.keys(b.planByBuilding)])];
+      b.planRows = labels.map((label) => ({ id: label, label }));
+    }
+    return b.planRows;
+  }
+
+  function planRows() {
+    return bundle ? ensurePlanRows(bundle, buildingNames()) : [];
+  }
+
+  function addPlanRow(label, afterId = null) {
+    const name = String(label || "").trim();
+    if (!name) return null;
+    const rows = planRows();
+    const row = { id: rid(), label: name };
+    const after = rows.findIndex((r) => r.id === afterId);
+    rows.splice(after >= 0 ? after + 1 : rows.length, 0, row);
+    bundle.planByBuilding[row.id] = {};
+    return row;
+  }
+
+  function movePlanRow(id, targetIndex) {
+    const rows = planRows();
+    const from = rows.findIndex((r) => r.id === id);
+    if (from < 0) return;
+    const [row] = rows.splice(from, 1);
+    rows.splice(Math.max(0, Math.min(rows.length, targetIndex)), 0, row);
+  }
+
+  function removePlanRow(id) {
+    const rows = planRows();
+    const index = rows.findIndex((r) => r.id === id);
+    if (index < 0) return null;
+    const [row] = rows.splice(index, 1);
+    const quantities = { ...(bundle.planByBuilding[id] || {}) };
+    delete bundle.planByBuilding[id];
+    return { row, index, quantities };
+  }
+
+  function sortPlanRows(mode) {
+    const rank = (label) => {
+      const number = /^\d/.test(label), english = /^[A-Za-z]/.test(label);
+      return mode === "english" ? (english ? 0 : number ? 1 : 2) : (number ? 0 : english ? 1 : 2);
+    };
+    planRows().sort((a, b) => rank(a.label) - rank(b.label) || a.label.localeCompare(b.label, "ko", { numeric: true, sensitivity: "base" }));
+  }
+
+  let removedPlanRow = null;
+  function renderPlanRowManager() {
+    const mount = document.getElementById("materials-plan-rows");
+    if (!mount) return;
+    mount.innerHTML = `<div class="materials-plan-row-toolbar">
+      <button type="button" class="ghost" id="materials-plan-delete-selected" disabled>선택 행 삭제</button>
+      <button type="button" class="ghost" id="materials-plan-undo" ${removedPlanRow?.owner !== bundle ? "disabled" : ""}>삭제 취소</button>
+      <button type="button" class="ghost" id="materials-plan-import">도면 동 추가</button>
+    </div>`;
+    const commit = () => { bundle.planRowSort = null; matrixSelectionToRestore = null; scheduleSave(); fullRender(); };
+    mount.querySelector("#materials-plan-import").onclick = () => {
+      buildingNames().forEach((name) => { if (!planRows().some((r) => r.label === name)) addPlanRow(name); }); commit();
+    };
+    mount.querySelector("#materials-plan-undo").onclick = () => {
+      if (!removedPlanRow || removedPlanRow.owner !== bundle) return;
+      [...removedPlanRow.items].sort((a, b) => a.index - b.index).forEach(({ row, index, quantities }) => {
+        planRows().splice(Math.min(index, planRows().length), 0, row); bundle.planByBuilding[row.id] = quantities;
+      });
+      removedPlanRow = null; commit();
+    };
+  }
+
+  function focusPlanRowName(id) {
+    const input = [...document.querySelectorAll("[data-plan-row-name]")].find((el) => el.getAttribute("data-plan-row-name") === id);
+    input?.focus(); input?.select();
+  }
+
+  function deletePlanRows(ids) {
+    const items = ids.map((id) => {
+      const index = planRows().findIndex((row) => row.id === id);
+      return index < 0 ? null : { row: planRows()[index], index, quantities: { ...(bundle.planByBuilding[id] || {}) } };
+    }).filter(Boolean);
+    if (!items.length) return;
+    items.forEach(({ row }) => removePlanRow(row.id));
+    removedPlanRow = { owner: bundle, items };
+    matrixSelectionToRestore = null; scheduleSave(); fullRender();
+  }
+
   function parseDateLoose(raw) {
     const s = String(raw || "").trim();
     if (!s) return null;
@@ -313,15 +372,13 @@
           row.totalM += qb * L;
         }
       });
-      getJoinLengthRows().forEach(({ key, totalM, seg1M, seg2M }) => {
+      getJoinLengthRows().forEach((spec) => {
+        const { key, totalM } = spec;
         const q = Number(r.qtyByLength && r.qtyByLength[key]) || 0;
         if (!q) return;
         row.totalPieces += q;
         row.totalM += q * totalM;
-        const a = seg1M;
-        const b = seg2M;
-        segQty[String(a)] = (segQty[String(a)] || 0) + q;
-        segQty[String(b)] = (segQty[String(b)] || 0) + q;
+        joinSegments(spec).forEach((length) => { segQty[String(length)] = (segQty[String(length)] || 0) + q; });
       });
       LENS.forEach((L) => {
         const k = String(L);
@@ -347,7 +404,7 @@
   function planTotalLen(lenKey) {
     let n = 0;
     const plans = bundle.planByBuilding || {};
-    Object.keys(plans).forEach((b) => {
+    planRows().forEach(({ id: b }) => {
       const cell = plans[b] && plans[b][lenKey];
       n += Number(cell) || 0;
     });
@@ -376,7 +433,7 @@
   }
 
   /**
-   * 단본 이음(J총연장) 본수를 설정된 두 구간(m)으로 나눠 합산.
+   * 단본 이음(J총연장) 본수를 설정된 각 구간(m)으로 나눠 합산.
    * 길이별 요약·입고(업체)·상차 힌트 표시용. 가중 연장(m)·시멘트 tf는 이음 총연장을 그대로 쓰는 로직과 별개.
    */
   function planTotalLenSplitForSummary(L) {
@@ -386,10 +443,7 @@
     getJoinLengthRows().forEach((j) => {
       const q = planTotalLen(j.key);
       if (!q) return;
-      const a = j.seg1M;
-      const b = j.seg2M;
-      if (a === len) n += q;
-      if (b === len) n += q;
+      joinSegments(j).forEach((segment) => { if (segment === len) n += q; });
     });
     return n;
   }
@@ -403,10 +457,7 @@
       getJoinLengthRows().forEach((j) => {
         const q = Number(r.qtyByLength && r.qtyByLength[j.key]) || 0;
         if (!q) return;
-        const a = j.seg1M;
-        const b = j.seg2M;
-        if (a === len) n += q;
-        if (b === len) n += q;
+        joinSegments(j).forEach((segment) => { if (segment === len) n += q; });
       });
     });
     return n;
@@ -419,10 +470,7 @@
     getJoinLengthRows().forEach((j) => {
       const q = usedFromPdamLength(j.key);
       if (!q) return;
-      const a = j.seg1M;
-      const b = j.seg2M;
-      if (a === len) n += q;
-      if (b === len) n += q;
+      joinSegments(j).forEach((segment) => { if (segment === len) n += q; });
     });
     return n;
   }
@@ -686,7 +734,7 @@
             ${cementMode === "detail" ? '<span class="materials-cement-pick-badge">요약·미발주에 적용</span>' : '<span class="materials-cement-pick-hint">클릭하여 선택</span>'}
           </button>
         </div>
-        <p class="construction-placeholder-hint materials-cement-req-line">계획 반영 연장(m) 약 <strong>${cementEst.totalMeter.toFixed(2)}</strong> m · 적용값 <strong id="materials-cement-req">${reqTon.toFixed(3)}</strong> tf</p>
+        <p class="construction-placeholder-hint materials-cement-req-line">계획 반영 연장(m) 약 <strong id="materials-cement-plan-meter">${cementEst.totalMeter.toFixed(2)}</strong> m · 적용값 <strong id="materials-cement-req">${reqTon.toFixed(3)}</strong> tf</p>
       </div>
     </div>
   </div>
@@ -700,6 +748,8 @@
           <span class="materials-collapse-title" title="동×길이 계획 본수">동별 계획</span>
         </summary>
         <div class="materials-collapse-panel">
+          <div id="materials-plan-rows"></div>
+          <p>이름 머리글 클릭으로 정렬 · 행 이름을 클릭해 수정 · 왼쪽 번호로 행 선택(Shift로 여러 행) · 번호를 끌어 순서 이동 · ⋮에서 행 추가/삭제 · Delete는 선택한 셀 값만 삭제</p>
           <div class="materials-table-shell materials-table-shell--wide materials-table-shell--matrix">
             <table class="construction-records-table materials-matrix" id="materials-table-matrix">
               <thead id="materials-thead-matrix"></thead>
@@ -713,8 +763,8 @@
     <section class="materials-block materials-block--wide">
       <details class="materials-collapse" id="materials-collapse-join"${collapseJoinOpen ? " open" : ""}>
         <summary class="materials-collapse-summary">
-          <span class="materials-collapse-title" title="16m를 넘는 파일 단본(한 본 연장)을 쓸 때, PDAM·입고 집계에 맞게 두 구간(m)으로 나누는 규격">단본 이음 규격</span>
-          <span class="materials-collapse-subhint">· 16m 초과 말뚝을 파일 단본으로 쓸 때만 필요 — 연장을 두 구간으로 어떻게 쪼갤지 정합니다</span>
+          <span class="materials-collapse-title" title="16m 이상 이음 말뚝의 2구간·3구간 구성과 길이 열 추가">단본 이음 규격</span>
+          <span class="materials-collapse-subhint">· 길이 열 추가 · 2구간/3구간 설정 · 원하는 길이까지 한 번에 추가</span>
         </summary>
         <div class="materials-collapse-panel">
           <div class="materials-join-manager-wrap" id="materials-join-manager-wrap"></div>
@@ -746,7 +796,7 @@
 
     <section class="materials-block">
       <h3 class="materials-h3" title="길이별 집계">길이별 요약</h3>
-      <p class="construction-placeholder-hint materials-block-intro-hint">반입=기간 내 입고 합 · 사용=PDAM 시공 완료(단본·합계 m) · 미발주=계획−반입 · 단본 이음=규격의 두 구간(m)으로 총연장 본수를 길이 열에 나눔${pdamOrphanLine}</p>
+      <p class="construction-placeholder-hint materials-block-intro-hint">반입=기간 내 입고 합 · 사용=PDAM 시공 완료(단본·합계 m) · 미발주=계획−반입 · 단본 이음=규격의 각 구간(m)으로 총연장 본수를 길이 열에 나눔${pdamOrphanLine}</p>
       <div class="materials-table-shell">
         <table class="construction-records-table materials-summary-table">
           <thead><tr><th>길이</th><th>계획</th><th>반입</th><th title="PDAM 시공 완료 본수(파일구분 단본 또는 합계 m)">사용</th><th title="파손·반출 합">파손</th><th>재고</th><th title="계획−반입">미발주</th></tr></thead>
@@ -820,11 +870,11 @@
             </tr>
             <tr>
               <th scope="row">필요<span class="materials-cement-summary-sub">(추정)</span></th>
-              <td><strong class="materials-cement-summary-num">${reqTon.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
+              <td><strong id="materials-cement-plan-req" class="materials-cement-summary-num">${reqTon.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
             </tr>
             <tr class="materials-cement-summary-row--em">
               <th scope="row">미발주<span class="materials-cement-summary-sub" title="필요(추정) − 입고 누적">(필요−입고)</span></th>
-              <td><strong class="materials-cement-summary-num">${unOrd.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
+              <td><strong id="materials-cement-plan-unordered" class="materials-cement-summary-num">${unOrd.toFixed(3)}</strong><span class="materials-cement-summary-unit"> tf</span></td>
             </tr>
           </tbody>
         </table>
@@ -861,7 +911,8 @@
     renderSuppliers();
     renderTruckRules();
     renderReceiptsHeadAndBody(supOpts);
-    renderMatrix(bnames);
+    renderPlanRowManager();
+    renderMatrix(planRows().map((r) => r.id));
     renderJoinLengthManager();
     wireJoinLengthManager();
     renderSummary();
@@ -1252,18 +1303,6 @@
     return Math.max(0, Math.round(n));
   }
 
-  /** 엑셀에서 동명+숫자 블록을 통째로 복사했을 때, 맨 왼열이 전부 비숫자이면 숫자 열만 남긴다. */
-  function matrixPasteStripLeadingLabelColumn(grid, startColIdx) {
-    if (startColIdx !== 0 || !Array.isArray(grid) || !grid.length) return grid;
-    const firstAllSkippable = grid.every((row) => {
-      if (!row || !row.length) return true;
-      return parseMatrixPasteCell(row[0]) === null;
-    });
-    const hasSecondColNumber = grid.some((row) => row && row.length > 1 && parseMatrixPasteCell(row[1]) !== null);
-    if (!firstAllSkippable || !hasSecondColNumber) return grid;
-    return grid.map((row) => (Array.isArray(row) && row.length ? row.slice(1) : row));
-  }
-
   /** 행마다 끝의 빈 칸만 제거(탭만 많이 붙은 경우 열 밀림 완화). */
   function matrixPasteTrimTrailingEmptyCols(grid) {
     if (!Array.isArray(grid) || !grid.length) return grid;
@@ -1294,12 +1333,11 @@
     const startB = startInp.getAttribute("data-plan-b");
     const startK = startInp.getAttribute("data-plan-k");
     const columnsOrder = matrixColumnKeys();
-    const rowsOrder = buildingNames().length ? buildingNames() : ["(동 없음)"];
+    const rowsOrder = planRows().map((r) => r.id);
     const startRowIdx = rowsOrder.indexOf(startB);
     const startColIdx = columnsOrder.indexOf(startK);
     if (startRowIdx < 0 || startColIdx < 0) return false;
-    let g = matrixPasteTrimTrailingEmptyCols(grid.map((row) => (Array.isArray(row) ? row.slice() : row)));
-    g = matrixPasteStripLeadingLabelColumn(g, startColIdx);
+    const g = grid;
     let changed = false;
     g.forEach((pasteRow, dr) => {
       const r = startRowIdx + dr;
@@ -1322,90 +1360,57 @@
     return changed;
   }
 
-  /** 엑셀 병합 등으로 빈 칸이 끼어 있어도, 읽는 순서(행→열)로 숫자만 모아 연속 채우기에 사용 */
-  function flattenPasteGridDense(grid) {
-    const out = [];
-    (grid || []).forEach((row) => {
-      if (!Array.isArray(row)) return;
-      row.forEach((cell) => {
-        const v = parseMatrixPasteCell(cell);
-        if (v !== null) out.push(v);
-      });
-    });
-    return out;
-  }
-
-  /** 시작 칸부터 행 우선 순서로 flat 값을 한 칸씩 채움(병합·빈 칸 무시한 순서 붙여넣기) */
-  function applyDensePasteToMatrix(startInp, flatValues) {
-    if (!flatValues || !flatValues.length) return false;
-    const columnsOrder = matrixColumnKeys();
-    const rowsOrder = buildingNames().length ? buildingNames() : ["(동 없음)"];
-    const startB = startInp.getAttribute("data-plan-b");
-    const startK = startInp.getAttribute("data-plan-k");
-    const startRowIdx = rowsOrder.indexOf(startB);
-    const startColIdx = columnsOrder.indexOf(startK);
-    if (startRowIdx < 0 || startColIdx < 0) return false;
-    let vi = 0;
-    let changed = false;
-    for (let r = startRowIdx; r < rowsOrder.length && vi < flatValues.length; r += 1) {
-      const bname = rowsOrder[r];
-      if (bname === "(동 없음)") continue;
-      const c0 = r === startRowIdx ? startColIdx : 0;
-      for (let c = c0; c < columnsOrder.length && vi < flatValues.length; c += 1) {
-        const key = columnsOrder[c];
-        const v = flatValues[vi];
-        vi += 1;
-        if (!bundle.planByBuilding[bname]) bundle.planByBuilding[bname] = {};
-        const prev = Number(bundle.planByBuilding[bname][key]) || 0;
-        if (prev !== v) changed = true;
-        bundle.planByBuilding[bname][key] = v;
-      }
-    }
-    return changed;
-  }
+  let matrixSelectionToRestore = null;
 
   function renderMatrix(bnames) {
     const thead = document.getElementById("materials-thead-matrix");
     const tbody = document.getElementById("materials-tbody-matrix");
     const tbl = document.getElementById("materials-table-matrix");
     if (!thead || !tbody) return;
+    if (tbl) tbl.matrixEventController?.abort();
+    const matrixEventController = new AbortController();
+    if (tbl) tbl.matrixEventController = matrixEventController;
     const joinRows = getJoinLengthRows();
     const joinTh = joinRows
       .map((j) => {
         const tm = Number(j.totalM);
-        const s1 = Number(j.seg1M);
-        const s2 = Number(j.seg2M);
-        return `<th class="materials-matrix-col--join" scope="col" title="단본 이음 ${tm}m (${s1}+${s2}) — 구간은 표 아래에서 수정">${tm}m</th>`;
+        return `<th class="materials-matrix-col--join" scope="col" title="단본 이음 ${tm}m (${joinSegments(j).join("+")}) — 구간은 표 아래에서 수정">${tm}m</th>`;
       })
       .join("");
     const lenTh = LENS.map((L) => `<th title="${L}m">${L}</th>`).join("");
-    thead.innerHTML = `<tr><th title="동·주차장">동</th>${lenTh}${joinTh}<th>합계</th></tr>`;
+    const sortDirection = bundle.planRowSort || "none";
+    thead.innerHTML = `<tr><th aria-sort="${sortDirection}" scope="col"><button type="button" id="materials-plan-sort-name" class="materials-plan-sort-name" title="클릭하여 이름 오름차순/내림차순 정렬">행 / 이름 ${sortDirection === "ascending" ? "▲" : sortDirection === "descending" ? "▼" : "↕"}</button></th>${lenTh}${joinTh}<th>합계</th></tr>`;
+    document.getElementById("materials-plan-sort-name").onclick = () => {
+      sortPlanRows("number");
+      const descending = bundle.planRowSort === "ascending";
+      if (descending) planRows().reverse();
+      bundle.planRowSort = descending ? "descending" : "ascending";
+      matrixSelectionToRestore = null; scheduleSave(); fullRender();
+    };
     const nDataCols = LENS.length + joinRows.length;
     if (tbl) {
       tbl.querySelector("colgroup")?.remove();
       const cg = document.createElement("colgroup");
-      const cDong = document.createElement("col");
-      cDong.className = "materials-matrix-col-dong";
-      cg.appendChild(cDong);
-      const wEdge = 6.5;
-      const cSum = document.createElement("col");
-      cSum.className = "materials-matrix-col-sum";
-      if (nDataCols === 0) {
-        cDong.style.width = "50%";
-        cSum.style.width = "50%";
-      } else {
-        const wEach = (100 - 2 * wEdge) / nDataCols;
-        for (let i = 0; i < nDataCols; i += 1) {
-          const c = document.createElement("col");
-          c.className = "materials-matrix-col-data";
-          c.style.width = `${wEach}%`;
-          cg.appendChild(c);
-        }
-        cDong.style.width = `${wEdge}%`;
-        cSum.style.width = `${wEdge}%`;
-      }
-      cg.appendChild(cSum);
+      for (let i = 0; i < nDataCols + 2; i++) cg.appendChild(document.createElement("col"));
       tbl.insertBefore(cg, thead);
+    }
+    function fitMatrixColumns() {
+      if (!tbl) return;
+      const context = document.createElement("canvas").getContext("2d");
+      context.font = "13px sans-serif";
+      const measure = (value) => Math.ceil(context.measureText(String(value)).width);
+      const widths = [Math.max(130, ...planRows().map((row) => measure(row.label) + 88))];
+      const headings = [...thead.querySelectorAll("th")];
+      for (let c = 0; c < nDataCols; c++) {
+        const values = [...tbody.querySelectorAll(`input[data-matrix-c="${c}"]`)].map((input) => input.value);
+        values.push(tbody.querySelector(".materials-total-row")?.children[c + 1]?.textContent || "");
+        widths.push(Math.max(44, measure(headings[c + 1]?.textContent || "") + 16, ...values.map((value) => measure(value) + 18)));
+      }
+      const sums = [...tbody.querySelectorAll(".materials-matrix-row-sum, .materials-matrix-grand-total")].map((el) => measure(el.textContent) + 20);
+      widths.push(Math.max(48, ...sums));
+      tbl.querySelectorAll("colgroup col").forEach((col, i) => { col.style.width = `${widths[i]}px`; });
+      const total = widths.reduce((a, b) => a + b, 0);
+      tbl.style.width = `${total}px`; tbl.style.minWidth = `${total}px`;
     }
     const rows = bnames.length ? bnames : ["(동 없음)"];
     const ncol = LENS.length + joinRows.length;
@@ -1428,7 +1433,7 @@
           colByLen[String(L)] += v;
           const dis = bname === "(동 없음)" ? "disabled" : "";
           const fill = v > 0 ? " materials-matrix-qty-td--filled" : "";
-          return `<td class="materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${L}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
+          return `<td class="materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${L}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${plan[String(L)] == null ? "" : v}" ${dis} /></td>`;
         }).join("");
         const jtds = joinRows.map(({ key }, ji) => {
           const v = Number(plan[key]) || 0;
@@ -1437,10 +1442,14 @@
           const dis = bname === "(동 없음)" ? "disabled" : "";
           const ci = LENS.length + ji;
           const fill = v > 0 ? " materials-matrix-qty-td--filled materials-matrix-qty-td--join-filled" : "";
-          return `<td class="materials-matrix-col--join materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${escapeHtml(key)}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${v}" ${dis} /></td>`;
+          return `<td class="materials-matrix-col--join materials-matrix-qty-td${fill}"><input type="number" min="0" class="save-work-input materials-cell-inp materials-matrix-qty-inp" data-plan-b="${escapeHtml(bname)}" data-plan-k="${escapeHtml(key)}" data-matrix-r="${ri}" data-matrix-c="${ci}" value="${plan[key] == null ? "" : v}" ${dis} /></td>`;
         }).join("");
         grand += rowSum;
-        return `<tr><th>${escapeHtml(bname)}</th>${tds}${jtds}<td class="materials-matrix-row-sum">${rowSum}</td></tr>`;
+        return `<tr data-plan-row-id="${escapeHtml(bname)}"><th class="materials-plan-name-cell">${bname === "(동 없음)" ? "계획 행 없음" : `<div class="materials-plan-inline-row">
+          <button type="button" class="materials-plan-row-handle" data-plan-row-select="${ri}" draggable="true" title="행 선택 · 끌어서 순서 이동">${ri + 1}</button>
+          <input data-plan-row-name="${escapeHtml(bname)}" value="${escapeHtml(planRows().find((r) => r.id === bname)?.label || bname)}" maxlength="100" aria-label="${ri + 1}번 행 이름" />
+          <select data-plan-row-action="${escapeHtml(bname)}" aria-label="${ri + 1}번 행 메뉴"><option value="">⋮</option><option value="before">위에 행 추가</option><option value="after">아래에 행 추가</option><option value="same">같은 이름 추가</option><option value="up">위로 이동</option><option value="down">아래로 이동</option><option value="delete">이 행 삭제</option></select>
+        </div>`}</th>${tds}${jtds}<td class="materials-matrix-row-sum">${rowSum}</td></tr>`;
       })
       .join("");
     const lenTotCells = LENS.map((L) => `<td class="materials-matrix-total-cell">${colByLen[String(L)]}</td>`).join("");
@@ -1449,16 +1458,102 @@
     ).join("");
     tbody.innerHTML += `<tr class="materials-total-row"><th>합계</th>${lenTotCells}${joinTotCells}<td class="materials-matrix-total-cell materials-matrix-grand-total">${grand}</td></tr>`;
 
+    fitMatrixColumns();
+    let addRowBar = document.getElementById("materials-plan-add-row");
+    if (!addRowBar) {
+      addRowBar = document.createElement("div");
+      addRowBar.id = "materials-plan-add-row";
+      addRowBar.className = "materials-add-plan-row";
+      (tbl.closest(".materials-table-shell--matrix") || tbl).after(addRowBar);
+    }
+    addRowBar.innerHTML = `<input id="materials-plan-bottom-label" placeholder="＋ 추가할 행 이름 입력" aria-label="추가할 행 이름" maxlength="100" /><button type="button" id="materials-plan-bottom-add">행 추가</button>`;
+    const commitRows = () => { bundle.planRowSort = null; matrixSelectionToRestore = null; scheduleSave(); fullRender(); };
+    const addBottom = () => {
+      const input = document.getElementById("materials-plan-bottom-label");
+      const row = addPlanRow(input.value); if (!row) { input.focus(); return; }
+      commitRows(); focusPlanRowName(row.id);
+    };
+    document.getElementById("materials-plan-bottom-add").onclick = addBottom;
+    document.getElementById("materials-plan-bottom-label").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addBottom(); } };
+    tbody.querySelectorAll("[data-plan-row-name]").forEach((input) => {
+      input.onchange = () => {
+        const row = planRows().find((r) => r.id === input.getAttribute("data-plan-row-name"));
+        if (!input.value.trim()) { input.value = row.label; return; }
+        row.label = input.value.trim(); bundle.planRowSort = null; scheduleSave(); fitMatrixColumns();
+        const header = document.getElementById("materials-plan-sort-name");
+        if (header) { header.textContent = "행 / 이름 ↕"; header.parentElement.setAttribute("aria-sort", "none"); }
+      };
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { input.value = planRows().find((r) => r.id === input.getAttribute("data-plan-row-name")).label; input.blur(); }
+      };
+    });
+    tbody.querySelectorAll("[data-plan-row-action]").forEach((select) => {
+      select.onchange = () => {
+        const id = select.getAttribute("data-plan-row-action"), action = select.value;
+        const index = planRows().findIndex((r) => r.id === id);
+        if (action === "delete") { deletePlanRows([id]); return; }
+        let created;
+        if (["before", "after", "same"].includes(action)) {
+          created = addPlanRow(action === "same" ? planRows()[index].label : "새 행", id);
+          if (action === "before") movePlanRow(created.id, index);
+        } else if (action === "up") movePlanRow(id, index - 1);
+        else if (action === "down") movePlanRow(id, index + 1);
+        commitRows(); if (created) focusPlanRowName(created.id);
+      };
+    });
+    let draggedRowId = null;
+    tbody.querySelectorAll("[data-plan-row-select]").forEach((handle) => {
+      handle.ondragstart = (e) => {
+        draggedRowId = rows[Number(handle.getAttribute("data-plan-row-select"))];
+        e.dataTransfer.setData("text/plain", draggedRowId); e.dataTransfer.effectAllowed = "move";
+      };
+      handle.ondragend = () => { draggedRowId = null; };
+    });
+    tbody.querySelectorAll("[data-plan-row-id]").forEach((tr) => {
+      tr.ondragover = (e) => { if (draggedRowId) e.preventDefault(); };
+      tr.ondrop = (e) => {
+        if (!draggedRowId) return; e.preventDefault();
+        const target = planRows().findIndex((r) => r.id === tr.getAttribute("data-plan-row-id"));
+        if (target >= 0) { movePlanRow(draggedRowId, target); commitRows(); }
+      };
+    });
+
     tbody.querySelectorAll("input[data-plan-b]").forEach((inp) => {
-      inp.addEventListener("change", () => {
+      const updateValue = () => {
         const b = inp.getAttribute("data-plan-b");
         const k = inp.getAttribute("data-plan-k");
         if (!bundle.planByBuilding[b]) bundle.planByBuilding[b] = {};
-        bundle.planByBuilding[b][k] = Number(inp.value) || 0;
+        if (inp.value === "") delete bundle.planByBuilding[b][k];
+        else bundle.planByBuilding[b][k] = Number(inp.value) || 0;
         scheduleSave();
-        fullRender();
-      });
+        refreshMatrixTotals();
+        fitMatrixColumns();
+        refreshPlanCalculationViews();
+      };
+      inp.addEventListener("input", updateValue);
+      inp.addEventListener("change", updateValue);
     });
+
+    function refreshMatrixTotals() {
+      const totals = Array(ncol).fill(0);
+      let all = 0;
+      tbody.querySelectorAll("tr[data-plan-row-id]").forEach((tr) => {
+        let sum = 0;
+        tr.querySelectorAll("input[data-plan-k]").forEach((input) => {
+          const value = Number(input.value) || 0;
+          sum += value; totals[Number(input.dataset.matrixC)] += value;
+          const td = input.closest("td");
+          td.classList.toggle("materials-matrix-qty-td--filled", value > 0);
+          td.classList.toggle("materials-matrix-qty-td--join-filled", value > 0 && td.classList.contains("materials-matrix-col--join"));
+        });
+        tr.querySelector(".materials-matrix-row-sum").textContent = String(sum);
+        all += sum;
+      });
+      tbody.querySelectorAll(".materials-total-row td").forEach((td, index) => {
+        td.textContent = String(index < ncol ? totals[index] : all);
+      });
+    }
 
     const matrixInputs = Array.from(tbody.querySelectorAll("tr:not(.materials-total-row) input[data-plan-b][data-plan-k]:not(:disabled)"));
     const matrixCells = matrixInputs.map((inp) => ({
@@ -1512,6 +1607,10 @@
     let matrixAnchorIdx = null;
     let matrixEndIdx = null;
     let matrixSkipFocusReset = false;
+    let matrixDragging = false;
+    let matrixTextEditing = false;
+    let matrixTyping = false;
+    document.addEventListener("mouseup", () => { matrixDragging = false; }, { signal: matrixEventController.signal });
 
     function matrixSelectionRect() {
       if (matrixAnchorIdx == null || matrixEndIdx == null) return null;
@@ -1528,6 +1627,12 @@
 
     function matrixPaintSelection() {
       const rect = matrixSelectionRect();
+      const deleteButton = document.getElementById("materials-plan-delete-selected");
+      if (deleteButton) { deleteButton.disabled = !rect; deleteButton.textContent = rect ? `선택 ${rect.r1 - rect.r0 + 1}행 삭제` : "선택 행 삭제"; }
+      tbody.querySelectorAll("[data-plan-row-select]").forEach((button) => {
+        const r = Number(button.getAttribute("data-plan-row-select"));
+        button.setAttribute("aria-pressed", String(!!rect && r >= rect.r0 && r <= rect.r1 && rect.c0 === 0 && rect.c1 === ncol - 1));
+      });
       matrixCells.forEach(({ inp, r, c }) => {
         const td = inp.closest("td");
         if (!td) return;
@@ -1537,9 +1642,30 @@
       });
     }
 
+    tbody.querySelectorAll("[data-plan-row-select]").forEach((button) => {
+      button.onclick = (e) => {
+        const row = Number(button.getAttribute("data-plan-row-select"));
+        const anchorRow = e.shiftKey && matrixAnchorIdx != null ? matrixCells[matrixAnchorIdx].r : row;
+        matrixAnchorIdx = matrixCells.findIndex((c) => c.r === Math.min(anchorRow, row) && c.c === 0);
+        matrixEndIdx = matrixCells.findIndex((c) => c.r === Math.max(anchorRow, row) && c.c === ncol - 1);
+        matrixSkipFocusReset = true;
+        matrixCells[matrixAnchorIdx]?.inp.focus(); matrixSkipFocusReset = false;
+        matrixPaintSelection();
+      };
+    });
+    const deleteRowsButton = document.getElementById("materials-plan-delete-selected");
+    if (deleteRowsButton) deleteRowsButton.onclick = () => {
+      const rect = matrixSelectionRect(); if (!rect) return;
+      deletePlanRows(rows.slice(rect.r0, rect.r1 + 1));
+    };
+
     matrixCells.forEach((cell, idx) => {
       const { inp } = cell;
       inp.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        matrixDragging = true;
+        matrixTextEditing = false; matrixTyping = false;
         if (e.shiftKey && matrixAnchorIdx != null) {
           matrixEndIdx = idx;
           matrixSkipFocusReset = true;
@@ -1547,9 +1673,22 @@
           matrixAnchorIdx = idx;
           matrixEndIdx = idx;
         }
+        matrixSkipFocusReset = true;
+        inp.focus();
+        matrixSkipFocusReset = false;
+        inp.select();
         matrixPaintSelection();
       });
+      inp.closest("td")?.addEventListener("mouseenter", (e) => {
+        if (!matrixDragging || !(e.buttons & 1)) return;
+        matrixEndIdx = idx;
+        matrixPaintSelection();
+      });
+      inp.addEventListener("dblclick", () => { matrixTextEditing = true; });
+      inp.addEventListener("input", () => { matrixTyping = true; });
       inp.addEventListener("focus", () => {
+        matrixTextEditing = false; matrixTyping = false;
+        inp.select();
         if (matrixSkipFocusReset) {
           matrixSkipFocusReset = false;
           return;
@@ -1559,7 +1698,34 @@
         matrixPaintSelection();
       });
       inp.addEventListener("keydown", (e) => {
-        if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+        if (e.isComposing) return;
+        if (e.key === "F2") { e.preventDefault(); matrixTextEditing = true; return; }
+        if (matrixTextEditing && ["ArrowLeft", "ArrowRight", "Delete", "Backspace"].includes(e.key)) return;
+        if (matrixTyping && e.key === "Backspace") return;
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+          e.preventDefault();
+          matrixAnchorIdx = 0;
+          matrixEndIdx = matrixCells.length - 1;
+          matrixPaintSelection();
+          return;
+        }
+        if (e.key === "Delete" || e.key === "Backspace") {
+          const rect = matrixSelectionRect();
+          if (!rect) return;
+          e.preventDefault();
+          matrixCells.forEach(({ inp: selected, r, c }) => {
+            if (r < rect.r0 || r > rect.r1 || c < rect.c0 || c > rect.c1) return;
+            const b = selected.getAttribute("data-plan-b");
+            const k = selected.getAttribute("data-plan-k");
+            if (bundle.planByBuilding[b]) delete bundle.planByBuilding[b][k];
+            selected.value = "";
+          });
+          matrixSelectionToRestore = rect;
+          scheduleSave();
+          fullRender();
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
           const rect = matrixSelectionRect();
           if (!rect) return;
           const lines = [];
@@ -1652,12 +1818,7 @@
           if (!grid.length) return;
           const r0 = t.getAttribute("data-matrix-r");
           const c0 = t.getAttribute("data-matrix-c");
-          let g = matrixPasteTrimTrailingEmptyCols(grid.map((row) => (Array.isArray(row) ? row.slice() : row)));
-          const colsOrder = matrixColumnKeys();
-          const sc = colsOrder.indexOf(t.getAttribute("data-plan-k") || "");
-          if (sc >= 0) g = matrixPasteStripLeadingLabelColumn(g, sc);
-          const flat = flattenPasteGridDense(g);
-          const changed = flat.length > 0 ? applyDensePasteToMatrix(t, flat) : applyExcelPasteToMatrix(t, g);
+          const changed = applyExcelPasteToMatrix(t, grid);
           if (changed) scheduleSave();
           fullRender();
           if (r0 != null && c0 != null) {
@@ -1668,8 +1829,24 @@
             });
           }
         },
-        true,
+        { capture: true, signal: matrixEventController.signal },
       );
+    }
+    if (matrixSelectionToRestore) {
+      const rect = matrixSelectionToRestore;
+      matrixSelectionToRestore = null;
+      const first = matrixCells.findIndex(({ r, c }) => r === rect.r0 && c === rect.c0);
+      const last = matrixCells.findIndex(({ r, c }) => r === rect.r1 && c === rect.c1);
+      if (first >= 0 && last >= 0) {
+        matrixAnchorIdx = first;
+        matrixEndIdx = last;
+        matrixSkipFocusReset = true;
+        const focus = matrixCells.find(({ r, c }) => r === rect.focusR && c === rect.focusC) || matrixCells[first];
+        focus.inp.focus();
+        focus.inp.select();
+        matrixSkipFocusReset = false;
+        matrixPaintSelection();
+      }
     }
   }
 
@@ -1677,87 +1854,107 @@
     const wrap = document.getElementById("materials-join-manager-wrap");
     if (!wrap) return;
     ensureJoinLengthSpecs(bundle);
-    const specs = Array.isArray(bundle.joinLengthSpecs) ? bundle.joinLengthSpecs : [];
-    const rows =
-      specs.length > 0
-        ? specs
-            .map((s) => {
-              const tm = s.totalM;
-              const s1 = s.seg1M;
-              const s2 = s.seg2M;
-              return `<tr>
-          <th scope="row">${tm}m <span class="materials-join-key-hint">(${escapeHtml(String(s1))}+${escapeHtml(String(s2))})</span></th>
-          <td><input type="number" min="1" max="15" step="1" class="save-work-input materials-join-panel-seg" data-join-panel-total="${tm}" data-join-part="1" value="${s1}" title="첫 구간(m)" /></td>
-          <td><input type="number" min="1" max="15" step="1" class="save-work-input materials-join-panel-seg" data-join-panel-total="${tm}" data-join-part="2" value="${s2}" title="둘째 구간(m)" /></td>
-          <td class="materials-join-panel-del-cell"><button type="button" class="ghost materials-join-panel-del" data-join-panel-remove="${tm}" aria-label="이 이음 규격 삭제" title="삭제">×</button></td>
-        </tr>`;
-            })
-            .join("")
-        : `<tr><td colspan="4" class="materials-join-panel-empty">등록된 단본 이음이 없습니다. 아래에서 열을 추가하세요.</td></tr>`;
-    wrap.innerHTML = `
-      <div class="materials-join-manager" role="region" aria-label="단본 이음 규격 편집">
-        <p class="materials-join-manager-desc">16m 이상은 두 구간(m)으로 나누어 길이별 요약·입고 집계에 반영됩니다. 동별 계획 표에는 <strong>총연장 열</strong>만 두고, 구간 조합은 여기서만 수정합니다.</p>
-        <div class="materials-join-panel-table-shell">
-          <table class="construction-records-table materials-join-panel-table">
-            <thead><tr><th scope="col">총연장</th><th scope="col">구간1 (m)</th><th scope="col">구간2 (m)</th><th scope="col" class="materials-join-panel-th-del">삭제</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        <div class="materials-join-panel-add">
-          <span class="materials-join-add-label">열 추가</span>
-          <input type="number" id="materials-join-add-total" class="save-work-input materials-join-add-inp" min="16" max="30" step="1" placeholder="총 m" title="이음 총연장(m)" />
-          <input type="number" id="materials-join-add-s1" class="save-work-input materials-join-add-inp" min="1" max="15" step="1" placeholder="구간1" title="첫 구간(m) — 비우면 자동" />
-          <button type="button" class="ghost" id="materials-join-add-btn">추가</button>
-        </div>
-      </div>
-    `;
+    const segmentInput = (part, value) => `<input type="number" min="5" max="15" step="1" class="save-work-input materials-join-panel-seg" data-join-part="${part}" value="${value ?? ""}" aria-label="구간${part} 길이" />`;
+    wrap.innerHTML = `<div class="materials-join-manager">
+      <p class="materials-join-manager-desc">총연장 = 각 구간의 합 · 단본 5~15m · 2구간/3구간 선택 · 구간 수정 후 적용하면 계획·입고·시멘트 계산에 반영됩니다.</p>
+      <div class="materials-join-panel-table-shell"><table class="construction-records-table materials-join-panel-table">
+      <thead><tr><th>총연장</th><th>이음</th><th>구간1</th><th>구간2</th><th>구간3</th><th>수정</th><th>삭제</th></tr></thead>
+      <tbody>${bundle.joinLengthSpecs.map((s) => `<tr data-join-total="${s.totalM}">
+        <th>${s.totalM}m</th><td><select data-join-count aria-label="${s.totalM}m 이음 구간 수"><option value="2" ${!s.seg3M ? "selected" : ""}>2구간</option><option value="3" ${s.seg3M ? "selected" : ""}>3구간</option></select></td>
+        <td>${segmentInput(1, s.seg1M)}</td><td>${segmentInput(2, s.seg2M)}</td><td>${s.seg3M ? segmentInput(3, s.seg3M) : segmentInput(3, "").replace('<input ', '<input disabled ')}</td>
+        <td><button type="button" data-join-apply>적용</button></td><td><button type="button" data-join-panel-remove="${s.totalM}" aria-label="${s.totalM}m 삭제">×</button></td></tr>`).join("") || '<tr><td colspan="7">등록된 이음 규격이 없습니다.</td></tr>'}</tbody></table></div>
+      <div class="materials-join-panel-add">
+        <label>총연장(m)<input type="number" id="materials-join-add-total" class="save-work-input materials-join-add-inp" min="16" max="45" step="1" /></label>
+        <label>이음<select id="materials-join-add-count"><option value="2">2구간</option><option value="3">3구간</option></select></label>
+        <label>구간1(m)<input type="number" id="materials-join-add-s1" class="save-work-input materials-join-add-inp" min="5" max="15" /></label>
+        <label>구간2(m)<input type="number" id="materials-join-add-s2" class="save-work-input materials-join-add-inp" min="5" max="15" /></label>
+        <label>구간3(m)<input type="number" id="materials-join-add-s3" class="save-work-input materials-join-add-inp" min="5" max="15" disabled /></label>
+        <button type="button" id="materials-join-add-btn">규격 추가</button>
+        <label>한 번에 추가할 최대 길이(m)<input type="number" id="materials-join-fill-max" class="save-work-input materials-join-add-inp" min="16" max="45" step="1" value="${Number(bundle.joinBulkMaxM) || 34}" /></label>
+        <button type="button" id="materials-join-fill-to">입력한 길이까지 한 번에 추가</button>
+      </div><p id="materials-join-error" class="materials-join-error" role="status" aria-live="polite"></p></div>`;
   }
 
   function wireJoinLengthManager() {
     const wrap = document.getElementById("materials-join-manager-wrap");
-    if (wrap) {
-      wrap.querySelectorAll(".materials-join-panel-seg").forEach((inp) => {
-        inp.addEventListener("change", () => {
-          const tm = Number(inp.getAttribute("data-join-panel-total"));
-          const part = inp.getAttribute("data-join-part") || "1";
-          applyJoinSegEdit(tm, part, inp.value);
-          scheduleSave();
-          fullRender();
-        });
-      });
-      wrap.querySelectorAll(".materials-join-panel-del").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const tm = Number(btn.getAttribute("data-join-panel-remove"));
-          if (!Number.isFinite(tm) || tm < 16) return;
-          ensureJoinLengthSpecs(bundle);
-          const jk = joinPlanKey(tm);
-          bundle.joinLengthSpecs = bundle.joinLengthSpecs.filter((x) => x.totalM !== tm);
-          stripJoinPlanKey(jk);
-          scheduleSave();
-          fullRender();
-        });
-      });
-    }
-    document.getElementById("materials-join-add-btn")?.addEventListener("click", () => {
-      const ti = document.getElementById("materials-join-add-total");
-      const s1i = document.getElementById("materials-join-add-s1");
-      if (!ti || !s1i) return;
-      const totalM = Math.round(Number(ti.value));
-      let seg1M = Math.round(Number(s1i.value));
-      if (!Number.isFinite(totalM) || totalM < 16 || totalM > 30) return;
-      if (!Number.isFinite(seg1M) || seg1M < 1 || seg1M > LENS_MAX_SINGLE_M) {
-        seg1M = Math.min(LENS_MAX_SINGLE_M, Math.max(1, totalM - 10));
+    if (!wrap) return;
+    const message = (text) => { document.getElementById("materials-join-error").textContent = text; };
+    const commit = () => { scheduleSave(); fullRender(); };
+    wrap.querySelectorAll("[data-join-total]").forEach((tr) => {
+      const totalM = Number(tr.dataset.joinTotal);
+      const count = tr.querySelector("[data-join-count]");
+      const inputs = [...tr.querySelectorAll("[data-join-part]")];
+      count.onchange = () => {
+        const spec = suggestedJoinSpec(totalM, Number(count.value));
+        inputs[2].disabled = count.value === "2";
+        if (!spec) { message("30m를 초과하는 총연장은 3구간 이음이 필요합니다."); return; }
+        const segments = joinSegments(spec);
+        inputs.forEach((input, i) => { input.value = segments[i] ?? ""; });
+        message("구간을 확인한 뒤 적용을 누르세요.");
+      };
+      tr.querySelector("[data-join-apply]").onclick = () => {
+        const segments = inputs.slice(0, Number(count.value)).map((input) => Number(input.value));
+        const error = validateJoinInputs(totalM, Number(count.value), segments);
+        if (error) { message(`${totalM}m: ${error}`); return; }
+        const spec = normalizeJoinSpec({ totalM, seg1M: segments[0], seg2M: segments[1], seg3M: segments[2] });
+        const index = bundle.joinLengthSpecs.findIndex((s) => s.totalM === totalM);
+        bundle.joinLengthSpecs[index] = spec; commit();
+      };
+      tr.querySelector("[data-join-panel-remove]").onclick = () => {
+        bundle.joinLengthSpecs = bundle.joinLengthSpecs.filter((s) => s.totalM !== totalM);
+        stripJoinPlanKey(joinPlanKey(totalM)); commit();
+      };
+    });
+    const ti = document.getElementById("materials-join-add-total");
+    const count = document.getElementById("materials-join-add-count");
+    const inputs = [1, 2, 3].map((i) => document.getElementById(`materials-join-add-s${i}`));
+    const suggest = () => {
+      inputs[2].disabled = count.value === "2";
+      const spec = suggestedJoinSpec(Number(ti.value), Number(count.value));
+      if (!spec) { if (Number(ti.value) > 30 && count.value === "2") message("30m 초과는 3구간 이음을 선택하세요."); return; }
+      const segments = joinSegments(spec);
+      inputs.forEach((input, i) => { input.value = segments[i] ?? ""; }); message("");
+    };
+    ti.onchange = suggest; count.onchange = suggest;
+    document.getElementById("materials-join-add-btn").onclick = () => {
+      const totalM = Number(ti.value);
+      const segments = inputs.slice(0, Number(count.value)).map((input) => Number(input.value));
+      const error = validateJoinInputs(totalM, Number(count.value), segments);
+      if (error) { message(error); return; }
+      if (bundle.joinLengthSpecs.some((s) => s.totalM === totalM)) { message(`${totalM}m는 이미 있습니다. 위 표에서 구간을 수정하세요.`); return; }
+      bundle.joinLengthSpecs.push(normalizeJoinSpec({ totalM, seg1M: segments[0], seg2M: segments[1], seg3M: segments[2] }));
+      bundle.joinLengthSpecs.sort((a, b) => a.totalM - b.totalM); commit();
+    };
+    document.getElementById("materials-join-fill-to").onclick = () => {
+      const maximum = Number(document.getElementById("materials-join-fill-max").value);
+      if (!Number.isInteger(maximum) || maximum < 16 || maximum > 45) {
+        message("한 번에 추가할 최대 길이는 16~45m 정수로 입력하세요."); return;
       }
-      const spec = normalizeJoinSpec({ totalM, seg1M, seg2M: totalM - seg1M });
-      if (!spec) return;
-      ensureJoinLengthSpecs(bundle);
-      if (bundle.joinLengthSpecs.some((x) => x.totalM === spec.totalM)) return;
-      bundle.joinLengthSpecs.push(spec);
-      bundle.joinLengthSpecs.sort((a, b) => a.totalM - b.totalM);
-      ti.value = "";
-      s1i.value = "";
-      scheduleSave();
-      fullRender();
+      bundle.joinBulkMaxM = maximum;
+      for (let totalM = 16; totalM <= maximum; totalM++) {
+        if (!bundle.joinLengthSpecs.some((s) => s.totalM === totalM)) bundle.joinLengthSpecs.push(suggestedJoinSpec(totalM));
+      }
+      bundle.joinLengthSpecs.sort((a, b) => a.totalM - b.totalM); commit();
+    };
+  }
+
+  function refreshPlanCalculationViews() {
+    renderSummary();
+    renderTruckHint();
+    const est = cementEstimatesPair();
+    const required = bundle.cementPresets?.mode === "detail" ? est.detailTf : est.tonPerMPhi;
+    const values = {
+      "materials-cement-plan-meter": est.totalMeter.toFixed(2),
+      "materials-cement-req": required.toFixed(3),
+      "materials-cement-plan-req": required.toFixed(3),
+      "materials-cement-plan-unordered": Math.max(0, required - cementIntakeTfTotal()).toFixed(3),
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const el = document.getElementById(id); if (el) el.textContent = value;
+    });
+    [["ton", est.tonPerMPhi], ["detail", est.detailTf]].forEach(([kind, value]) => {
+      const el = document.querySelector(`#materials-cement-pick-${kind} .materials-cement-pick-val`);
+      if (el) el.innerHTML = `${value.toFixed(3)} <span class="materials-cement-pick-unit">tf</span>`;
     });
   }
 
@@ -2204,10 +2401,19 @@
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void persistNow(), 900);
+    const savingBundle = bundle;
+    const savingProject = projectContext();
+    saveTimer = setTimeout(() => void persistNow(savingBundle, savingProject), 900);
   }
 
-  async function persistNow() {
+  let materialsSaveChain = Promise.resolve();
+  function persistNow(savingBundle = bundle, savingProject = projectContext()) {
+    const payload = JSON.stringify(savingBundle);
+    materialsSaveChain = materialsSaveChain.then(() => persistMaterialsSnapshot(savingBundle, savingProject, payload));
+    return materialsSaveChain;
+  }
+
+  async function persistMaterialsSnapshot(savingBundle, savingProject, payload) {
     const hint = document.getElementById("materials-save-hint");
     const base = apiBase();
     if (!base) {
@@ -2215,16 +2421,18 @@
       return;
     }
     try {
-      const pc = encodeURIComponent(projectContext());
+      const pc = encodeURIComponent(savingProject);
       const res = await fetch(`${base}/api/materials/state?project_context=${pc}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bundle),
+        body: payload,
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      bundle = data;
-      lastMaterialsPc = projectContext();
+      if (bundle === savingBundle && projectContext() === savingProject) {
+        bundle.meta = data.meta;
+        lastMaterialsPc = savingProject;
+      }
       if (hint) hint.textContent = "저장됨";
     } catch (err) {
       console.error(err);

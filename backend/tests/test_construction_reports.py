@@ -550,6 +550,101 @@ def test_map_records_to_circles_does_not_globally_unique_match_across_different_
     assert mapping["circleMappings"][0]["status"] == "pending"
 
 
+def test_named_facility_does_not_take_other_building_or_parking_piles():
+    """공동시설 파일번호가 107동·108동·주차장과 같아도 그 기록을 공동시설에 붙이지 않는다."""
+    records = [
+        {
+            "location": "108동",
+            "pile_number": "16",
+            "construction_date": "2025-09-19",
+            "row_number": 1,
+            "construction_month": "2025-09",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "T4",
+            "pile_remaining": 0.5,
+            "penetration_depth": 6.0,
+            "boring_depth": 6.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+        {
+            "location": "주차장",
+            "pile_number": "195",
+            "construction_date": "2025-09-19",
+            "row_number": 2,
+            "construction_month": "2025-09",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "T4",
+            "pile_remaining": 0.5,
+            "penetration_depth": 6.0,
+            "boring_depth": 6.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [
+        {"id": "D108", "building_name": "108동", "matched_text": {"text": "108-16"}},
+        {"id": "FAC", "building_name": "공동시설", "matched_text": {"text": "16"}},
+        {"id": "PARK", "building_name": "B1", "matched_text": {"text": "195"}},
+        {"id": "FAC2", "building_name": "공동시설", "matched_text": {"text": "195"}},
+    ]
+    buildings = [
+        {"name": "108동", "kind": "building", "vertices": []},
+        {"name": "공동시설", "kind": "building", "vertices": []},
+        {"name": "B1", "kind": "parking", "vertices": []},
+    ]
+    mapping = construction_reports.map_records_to_circles(
+        records,
+        circles,
+        parking_unified_location="B1",
+        outline_buildings=buildings,
+    )
+    by_id = {item["circleId"]: item for item in mapping["circleMappings"]}
+    assert by_id["D108"]["status"] == "installed"
+    assert by_id["D108"]["matchType"] == "exact"
+    assert by_id["PARK"]["status"] == "installed"
+    assert by_id["FAC"]["matchType"] == "pending"
+    assert by_id["FAC2"]["matchType"] == "pending"
+
+
+def test_near_miss_location_name_is_not_matched_and_is_diagnosed():
+    """'국민공동시설'은 '공동시설'에 포함되지만 같은 부위가 아니다. 다른 파일로 붙이지 않는다."""
+    records = [
+        {
+            "location": "국민공동시설",
+            "pile_number": "12",
+            "construction_date": "2025-09-19",
+            "row_number": 1,
+            "construction_month": "2025-09",
+            "equipment": "1호기",
+            "pile_type": "PHC",
+            "construction_method": "T4",
+            "pile_remaining": 0.5,
+            "penetration_depth": 6.0,
+            "boring_depth": 6.0,
+            "excavation_depth": 0.0,
+            "installed": True,
+        },
+    ]
+    circles = [{"id": "C1", "building_name": "공동시설", "matched_text": {"text": "12"}}]
+    mapping = construction_reports.map_records_to_circles(records, circles)
+    assert mapping["circleMappings"][0]["matchType"] == "pending"
+    assert mapping["circleMappings"][0]["status"] == "pending"
+    diagnostics = construction_reports._build_mapping_diagnostics(
+        circles,
+        records,
+        mapping,
+        records_for_pdam_duplicates=records,
+    )
+    mismatches = diagnostics["locationNameMismatches"]
+    assert mismatches
+    assert mismatches[0]["pdamLocation"] == "국민공동시설"
+    assert mismatches[0]["drawingLocation"] == "공동시설"
+    assert diagnostics["summary"]["locationNameMismatchCount"] == 1
+
+
 def test_map_records_to_circles_globally_unique_pile_alias_when_non_dong_location_mismatches():
     """N동이 아닌 부위는 PDAM 문자열과 도면 building_name이 달라도 파일번호가 유일하면 연결."""
     records = [
@@ -1736,3 +1831,42 @@ def test_build_method_matrix_excludes_construction_method_header_echo():
     assert matrix["rows"] == ["DRA"]
     cell = next(c for c in matrix["cells"] if c["row"] == "DRA" and c["column"] == "PHC")
     assert cell["count"] == 1
+
+
+def test_extract_report_id_from_new_pdam_export_all_excel():
+    html = """
+    <div onclick="javascript:exportAllExcel(2028);">엑셀 전체출력</div>
+    <script>
+    function exportAllExcel(conId){
+        location.href = '/report/download/all/excel?constructionIdx=' + conId;
+    }
+    </script>
+    """
+    assert construction_reports._extract_report_id_from_html(html) == 2028
+
+
+def test_extract_report_id_from_construction_idx_query():
+    assert (
+        construction_reports._extract_report_id_from_html(
+            "<html></html>",
+            "https://we8104.com/device/list?constructionIdx=2028",
+        )
+        == 2028
+    )
+
+
+def test_extract_download_candidates_from_export_all_excel_js():
+    html = """
+    <div onclick="javascript:exportAllExcel(2028);">엑셀 전체출력</div>
+    <script>
+    function exportAllExcel(conId){
+        location.href = '/report/download/all/excel?constructionIdx=' + conId;
+    }
+    </script>
+    """
+    candidates = construction_reports._extract_download_candidates(
+        html,
+        "https://we8104.com/",
+        None,
+    )
+    assert "https://we8104.com/report/download/all/excel?constructionIdx=2028" in candidates
