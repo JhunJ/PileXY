@@ -144,6 +144,7 @@
         <div class="construction-filter-actions">
           <button type="button" id="construction-apply-btn" class="header-construction-btn">현황 적용</button>
           <button type="button" id="construction-reset-btn" class="ghost">필터 초기화</button>
+          <button type="button" id="construction-status-print-btn" class="ghost" disabled title="시공 데이터셋 적용 후 A4·A3 현황 출력이 가능합니다.">A4·A3 출력</button>
         </div>
         <section class="construction-summary-grid" id="construction-summary-grid">
           <article class="construction-summary-card"><span>자동 매칭</span><strong id="construction-summary-auto-matched">-</strong></article>
@@ -156,7 +157,9 @@
           <article class="construction-summary-card"><span>기준 초과</span><strong id="construction-summary-threshold">-</strong></article>
         </section>
         <div class="construction-section-title construction-section-title--compact">
-          <span>좌표 색상 범례</span>
+          <div class="construction-section-title-row">
+            <span>좌표 색상 범례</span>
+          </div>
           <small>메인 좌표 캔버스와 같은 색으로 반영됩니다.</small>
         </div>
         <div id="construction-legend" class="construction-legend"></div>
@@ -693,6 +696,7 @@
   const constructionOverlayMode = q("#construction-overlay-mode");
   const constructionApplyBtn = q("#construction-apply-btn");
   const constructionResetBtn = q("#construction-reset-btn");
+  const constructionStatusPrintBtn = q("#construction-status-print-btn");
   const constructionDateRangeNote = q("#construction-date-range-note");
   const constructionLegend = q("#construction-legend");
   const constructionSummaryRecords = q("#construction-summary-records");
@@ -839,6 +843,7 @@
     settlementDefaults: { blindingThickness: 0.06, headTrimTopLevel: 0.16, remainingBase: 0.5 },
     billingOperations: { startDate: "", endDate: "", rigCount: 3, entries: {} },
     billingOperationsStorageKey: "",
+    billingOperationsProjectContext: "",
     dateGrouping: "month",
     playbackSpeed: 1,
     playbackSteps: [],
@@ -3341,6 +3346,9 @@
     if (constructionDatasetApply) constructionDatasetApply.disabled = !hasSelection;
     if (constructionDatasetDelete) constructionDatasetDelete.disabled = !hasSelection;
     if (constructionDatasetClearOverlay) constructionDatasetClearOverlay.disabled = !hasViewerOverlay;
+    if (typeof syncStatusPrintButtons === "function") {
+      syncStatusPrintButtons();
+    }
   }
 
   function setConstructionTab(tab) {
@@ -8625,6 +8633,9 @@ function inferOpenRectangleVertices(vertices) {
   const BILLING_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
   let billingServerSaveTimer = null;
   let billingServerLoadToken = 0;
+  let billingPendingServerSave = null;
+  let billingServerSaveChain = Promise.resolve();
+  const billingServerSaveByContext = new Map();
 
   function billingPad2(value) {
     return String(value).padStart(2, "0");
@@ -8703,7 +8714,10 @@ function inferOpenRectangleVertices(vertices) {
 
   function ensureBillingOperationsLoaded() {
     const key = billingStorageKey();
-    if (constructionState.billingOperationsStorageKey === key && constructionState.billingOperations) {
+    const project = billingProjectContext();
+    if (constructionState.billingOperationsStorageKey === key
+      && constructionState.billingOperationsProjectContext === project
+      && constructionState.billingOperations) {
       return;
     }
     let parsed = null;
@@ -8714,7 +8728,8 @@ function inferOpenRectangleVertices(vertices) {
       parsed = null;
     }
     constructionState.billingOperationsStorageKey = key;
-    constructionState.billingOperations = normalizeBillingOperations(parsed || constructionState.billingOperations);
+    constructionState.billingOperationsProjectContext = project;
+    constructionState.billingOperations = normalizeBillingOperations(parsed);
   }
 
   function saveBillingOperations() {
@@ -8736,53 +8751,85 @@ function inferOpenRectangleVertices(vertices) {
   }
 
   function scheduleBillingServerSave() {
+    const snapshot = {
+      project: billingProjectContext(),
+      storageKey: billingStorageKey(),
+      payload: JSON.stringify(constructionState.billingOperations),
+    };
+    if (billingPendingServerSave
+      && (billingPendingServerSave.project !== snapshot.project
+        || billingPendingServerSave.storageKey !== snapshot.storageKey)) {
+      void flushBillingServerSave();
+    }
     if (billingServerSaveTimer) clearTimeout(billingServerSaveTimer);
-    billingServerSaveTimer = setTimeout(() => {
-      billingServerSaveTimer = null;
-      void pushBillingOperationsToServer();
-    }, 650);
+    billingPendingServerSave = snapshot;
+    billingServerSaveByContext.set(JSON.stringify([snapshot.project, snapshot.storageKey]), snapshot);
+    billingServerSaveTimer = setTimeout(() => void flushBillingServerSave(), 650);
   }
 
-  async function pushBillingOperationsToServer() {
-    ensureBillingOperationsLoaded();
+  function flushBillingServerSave() {
+    if (billingServerSaveTimer) clearTimeout(billingServerSaveTimer);
+    billingServerSaveTimer = null;
+    const snapshot = billingPendingServerSave;
+    billingPendingServerSave = null;
+    if (snapshot) {
+      snapshot.completion = billingServerSaveChain = billingServerSaveChain.then(() => pushBillingOperationsToServer(snapshot));
+    }
+    return billingServerSaveChain;
+  }
+
+  async function pushBillingOperationsToServer(snapshot) {
+    const isCurrentSnapshot = () => billingStorageKey() === snapshot.storageKey
+      && billingProjectContext() === snapshot.project
+      && JSON.stringify(constructionState.billingOperations) === snapshot.payload;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(billingProjectContext())}`, {
+      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(snapshot.project)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(constructionState.billingOperations),
+        body: snapshot.payload,
       });
       if (!response.ok) throw new Error(await response.text());
-      const saved = await response.json();
-      constructionState.billingOperations = normalizeBillingOperations(saved);
-      try {
-        localStorage.setItem(constructionState.billingOperationsStorageKey, JSON.stringify(constructionState.billingOperations));
-      } catch (_) {
-        /* ignore */
-      }
-      if (constructionBillingFeedback) {
+      await response.json();
+      if (isCurrentSnapshot() && constructionBillingFeedback) {
         constructionBillingFeedback.textContent = "운용 현황이 서버에 저장되었습니다.";
       }
+      return true;
     } catch (error) {
       console.warn(error);
-      if (constructionBillingFeedback) {
+      if (isCurrentSnapshot() && constructionBillingFeedback) {
         constructionBillingFeedback.textContent = "서버 저장에 실패해 이 브라우저에 임시 저장했습니다.";
       }
+      return false;
     }
   }
 
   async function loadBillingOperationsFromServer({ render = true } = {}) {
     ensureBillingOperationsLoaded();
     const token = ++billingServerLoadToken;
+    const project = billingProjectContext();
+    const storageKey = billingStorageKey();
+    const payloadAtStart = JSON.stringify(constructionState.billingOperations);
+    const isCurrentLoad = () => token === billingServerLoadToken
+      && billingProjectContext() === project
+      && billingStorageKey() === storageKey
+      && JSON.stringify(constructionState.billingOperations) === payloadAtStart;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(billingProjectContext())}`);
+      const localSave = billingServerSaveByContext.get(JSON.stringify([project, storageKey]));
+      await flushBillingServerSave();
+      if (!isCurrentLoad()) return;
+      if (localSave && localSave.payload === payloadAtStart && !(await localSave.completion)) {
+        if (render) renderBillingOperationsTable();
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/api/billing/state?project_context=${encodeURIComponent(project)}`);
       if (!response.ok) throw new Error(await response.text());
       const serverData = await response.json();
-      if (token !== billingServerLoadToken) return;
+      if (!isCurrentLoad()) return;
       const serverSaved = Boolean(serverData?.meta?.saved);
       if (serverSaved) {
         constructionState.billingOperations = normalizeBillingOperations(serverData);
         try {
-          localStorage.setItem(constructionState.billingOperationsStorageKey, JSON.stringify(constructionState.billingOperations));
+          localStorage.setItem(storageKey, JSON.stringify(constructionState.billingOperations));
         } catch (_) {
           /* ignore */
         }
@@ -8795,6 +8842,7 @@ function inferOpenRectangleVertices(vertices) {
       }
     } catch (error) {
       console.warn(error);
+      if (!isCurrentLoad()) return;
       if (render) renderBillingOperationsTable();
       if (constructionBillingFeedback) {
         constructionBillingFeedback.textContent = "서버 데이터를 불러오지 못해 이 브라우저 저장본을 사용합니다.";
@@ -9230,6 +9278,9 @@ function inferOpenRectangleVertices(vertices) {
       }
     }
     renderProjectContext();
+    if (typeof syncStatusPrintButtons === "function") {
+      syncStatusPrintButtons();
+    }
   }
 
   function renderDashboard(dashboard) {
@@ -12395,6 +12446,16 @@ function inferOpenRectangleVertices(vertices) {
 
   window.addEventListener("pilexy:work-context-changed", (ev) => {
     updateConstructionButtonsState();
+    if (constructionState.billingOperationsStorageKey !== billingStorageKey()
+      || constructionState.billingOperationsProjectContext !== billingProjectContext()) {
+      void flushBillingServerSave();
+      billingServerLoadToken += 1;
+      ensureBillingOperationsLoaded();
+      if (constructionState.billingPanelOpen) {
+        renderBillingOperationsTable();
+        void loadBillingOperationsFromServer({ render: true });
+      }
+    }
     if (ev.detail && ev.detail.resetParcelReview) {
       resetParcelReviewForWorkContextChange();
     }
@@ -12544,4 +12605,744 @@ function inferOpenRectangleVertices(vertices) {
       usedInstalledWithoutLength,
     };
   };
+
+  const statusPrint = {
+    paper: "a3",
+    orientation: "landscape",
+    scope: "all",
+    location: "",
+    showOutlines: true,
+    colorMode: "status",
+    legendItems: [],
+    zoom: 100,
+    baseScale: 1,
+    needsFit: true,
+    view: { scale: 1, offsetX: 0, offsetY: 0 },
+    drag: null,
+    els: null,
+  };
+
+  function statusPrintAvailable() {
+    return Boolean(constructionState.overlayMap?.size) && Array.isArray(state.circles) && state.circles.length > 0;
+  }
+
+  function syncStatusPrintButtons() {
+    const ok = statusPrintAvailable();
+    const title = ok
+      ? "현재 시공완료·미시공 구간을 A4·A3 도면으로 구성해 출력합니다."
+      : "시공 데이터셋을 적용한 뒤 사용할 수 있습니다.";
+    if (constructionStatusPrintBtn) {
+      constructionStatusPrintBtn.disabled = !ok;
+      constructionStatusPrintBtn.title = title;
+    }
+  }
+
+  function statusPrintCircles() {
+    return (Array.isArray(state.circles) ? state.circles : []).filter((circle) => (
+      Number.isFinite(Number(circle?.center_x)) && Number.isFinite(Number(circle?.center_y))
+    ));
+  }
+
+  function statusPrintInstalled(circle) {
+    const overlay = getConstructionOverlay(circle);
+    return Boolean(overlay && overlay.status === "installed");
+  }
+
+  function statusPrintZoneName(circle) {
+    const name = String(circle?.building_name || "").trim();
+    return name || "미지정";
+  }
+
+  function statusPrintZones() {
+    const grouped = new Map();
+    statusPrintCircles().forEach((circle) => {
+      const name = statusPrintZoneName(circle);
+      const row = grouped.get(name) || { name, installed: 0, pending: 0 };
+      if (statusPrintInstalled(circle)) row.installed += 1;
+      else row.pending += 1;
+      grouped.set(name, row);
+    });
+    return Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
+  }
+
+  function statusPrintMapCircles() {
+    return statusPrintCircles().filter((circle) => {
+      if (statusPrint.location && statusPrintZoneName(circle) !== statusPrint.location) return false;
+      const installed = statusPrintInstalled(circle);
+      if (statusPrint.scope === "installed") return installed;
+      if (statusPrint.scope === "pending") return !installed;
+      return true;
+    });
+  }
+
+  function statusPrintSheetPx() {
+    const landscape = statusPrint.orientation !== "portrait";
+    const mm = statusPrint.paper === "a3"
+      ? (landscape ? [404, 281] : [281, 404])
+      : (landscape ? [281, 194] : [194, 281]);
+    return {
+      w: Math.round((mm[0] * 96) / 25.4),
+      h: Math.round((mm[1] * 96) / 25.4),
+    };
+  }
+
+  function statusPrintPct(part, total) {
+    if (!total) return "-";
+    const value = Math.round((part / total) * 1000) / 10;
+    return `${String(value).replace(/\.0$/, "")}%`;
+  }
+
+  function statusPrintToday() {
+    const date = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function statusPrintProjectLabel() {
+    if (typeof getActiveProjectName === "function") {
+      const name = String(getActiveProjectName() || "").trim();
+      if (name) return name;
+    }
+    return state.loadedWorkMeta?.project || "프로젝트";
+  }
+
+  function statusPrintWorkLabel() {
+    return state.loadedWorkMeta?.title
+      || state.loadedWorkMeta?.name
+      || document.getElementById("header-work-context")?.textContent?.trim()
+      || "-";
+  }
+
+  function statusPrintPeriodLabel() {
+    const from = constructionDateFrom?.value || "";
+    const to = constructionDateTo?.value || "";
+    return from && to ? `${from} ~ ${to}` : "전체 기간";
+  }
+
+  function statusPrintColorOf(circle) {
+    const overlay = getConstructionOverlay(circle);
+    if (!overlay || overlay.status !== "installed") return { key: "pending", label: "미시공" };
+    if (statusPrint.colorMode === "equipment") {
+      const label = normalizeOverlayCategory(overlay.equipment || "미지정");
+      return { key: label, label };
+    }
+    if (statusPrint.colorMode === "method") {
+      const label = normalizeOverlayCategory(overlay.constructionMethod || "미분류");
+      return { key: label, label };
+    }
+    if (statusPrint.colorMode === "date") {
+      const label = overlay.constructionDate ? String(overlay.constructionDate) : "일자미지정";
+      return { key: label, label };
+    }
+    return { key: "installed", label: "시공완료" };
+  }
+
+  function statusPrintLegendItems() {
+    if (statusPrint.colorMode === "status") {
+      return [
+        { key: "installed", label: "시공완료", color: "#15803d" },
+        { key: "pending", label: "미시공", color: "#e2e8f0" },
+      ];
+    }
+    const labels = [];
+    statusPrintCircles().forEach((circle) => {
+      if (statusPrint.location && statusPrintZoneName(circle) !== statusPrint.location) return;
+      const item = statusPrintColorOf(circle);
+      if (item.key === "pending" || labels.includes(item.label)) return;
+      labels.push(item.label);
+    });
+    const neutral = labels.filter((label) => isNeutralCategory(label)).sort((a, b) => a.localeCompare(b, "ko"));
+    const colored = labels.filter((label) => !isNeutralCategory(label));
+    if (statusPrint.colorMode === "date") colored.sort();
+    else colored.sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+    return [
+      ...colored.map((label, index) => ({ key: label, label, color: palette[index % palette.length] })),
+      ...neutral.map((label) => ({ key: label, label, color: neutralCategoryColor })),
+      { key: "pending", label: "미시공", color: "#e2e8f0" },
+    ];
+  }
+
+  function statusPrintFillFor(circle) {
+    const item = statusPrintColorOf(circle);
+    const found = statusPrint.legendItems.find((entry) => entry.key === item.key || entry.label === item.label);
+    return found?.color || (item.key === "pending" ? "#e2e8f0" : "#15803d");
+  }
+
+  function statusPrintColorModeLabel() {
+    return { status: "박음/미시공", equipment: "호기", method: "공법", date: "시공일" }[statusPrint.colorMode] || "박음/미시공";
+  }
+
+  function statusPrintBreakdown(kind) {
+    const counts = new Map();
+    statusPrintCircles().forEach((circle) => {
+      if (!statusPrintInstalled(circle)) return;
+      if (statusPrint.location && statusPrintZoneName(circle) !== statusPrint.location) return;
+      const overlay = getConstructionOverlay(circle);
+      const raw = kind === "method" ? overlay?.constructionMethod : overlay?.equipment;
+      const name = normalizeOverlayCategory(raw || (kind === "method" ? "미분류" : "미지정"));
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    const rows = Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko", { numeric: true }));
+    const total = rows.reduce((sum, row) => sum + row.count, 0);
+    return { rows, total };
+  }
+
+  function statusPrintCountRows(rows, total, limit) {
+    const shown = rows.slice(0, limit);
+    const omitted = Math.max(0, rows.length - shown.length);
+    const body = shown.map((row) => `<tr><td>${escape(row.name)}</td><td class="status-print-td-installed">${row.count}</td><td>${statusPrintPct(row.count, total)}</td></tr>`).join("")
+      || `<tr><td colspan="3">시공완료 없음</td></tr>`;
+    return { body, omitted };
+  }
+
+  function statusPrintToCanvas(x, y, width, height) {
+    const viewState = statusPrint.view;
+    return {
+      x: (x - viewState.offsetX) * viewState.scale + width / 2,
+      y: height / 2 - (y - viewState.offsetY) * viewState.scale,
+    };
+  }
+
+  function ensureStatusPrintModal() {
+    if (statusPrint.els) return statusPrint.els;
+    const modal = document.createElement("div");
+    modal.id = "status-print-modal";
+    modal.className = "status-print-modal";
+    modal.innerHTML = `
+      <div class="status-print-modal-backdrop" data-status-print-close="1"></div>
+      <div class="status-print-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="status-print-heading">
+        <div class="status-print-modal-header">
+          <div class="status-print-modal-title-wrap">
+            <strong id="status-print-heading">시공현황 출력 <span class="status-print-modal-badge">A4 · A3</span></strong>
+            <p>시공완료는 초록, 미시공은 회색으로 구간을 나눠 용지에 맞춥니다.</p>
+          </div>
+          <div class="status-print-modal-actions">
+            <button type="button" id="status-print-do-print" class="status-print-primary-btn">인쇄</button>
+            <button type="button" class="status-print-secondary-btn" data-status-print-close="1">닫기</button>
+          </div>
+        </div>
+        <div class="status-print-modal-body">
+          <aside class="status-print-sidebar">
+            <section class="status-print-control-card">
+              <h4>용지</h4>
+              <div class="status-print-seg" role="group" aria-label="용지 크기">
+                <button type="button" data-status-paper="a4">A4</button>
+                <button type="button" data-status-paper="a3" class="is-active">A3</button>
+              </div>
+              <div class="status-print-seg" role="group" aria-label="용지 방향">
+                <button type="button" data-status-orient="landscape" class="is-active">가로</button>
+                <button type="button" data-status-orient="portrait">세로</button>
+              </div>
+            </section>
+            <section class="status-print-control-card">
+              <h4>좌표 색상</h4>
+              <div class="status-print-seg" role="group" aria-label="좌표 색상">
+                <button type="button" data-status-color="status" class="is-active">박음/미시공</button>
+                <button type="button" data-status-color="equipment">호기</button>
+                <button type="button" data-status-color="method">공법</button>
+                <button type="button" data-status-color="date">시공일</button>
+              </div>
+            </section>
+            <section class="status-print-control-card">
+              <h4>지도 범위</h4>
+              <div class="status-print-seg" role="group" aria-label="표시 상태">
+                <button type="button" data-status-scope="all" class="is-active">전체</button>
+                <button type="button" data-status-scope="installed">시공완료</button>
+              </div>
+              <div class="status-print-seg" role="group" aria-label="미시공 범위">
+                <button type="button" data-status-scope="pending">미시공</button>
+                <button type="button" id="status-print-fit" class="status-print-mini-btn">화면 맞춤</button>
+              </div>
+              <label class="status-print-field">구간
+                <select id="status-print-location"></select>
+              </label>
+              <label class="status-print-field">확대
+                <span class="status-print-zoom-row">
+                  <input type="range" id="status-print-zoom" min="40" max="260" step="5" value="100" />
+                  <span id="status-print-zoom-val" class="status-print-zoom-val">100%</span>
+                </span>
+              </label>
+              <label class="status-print-check-row"><input type="checkbox" id="status-print-outlines" checked /> 동·주차장 윤곽</label>
+            </section>
+            <p class="status-print-help">지도를 끌어 옮기고 휠로 확대합니다. 인쇄 창에서 용지를 같은 크기로 맞추고, 배경 그래픽을 켜야 초록·회색이 종이에 나옵니다.</p>
+          </aside>
+          <div class="status-print-stage-wrap">
+            <div class="status-print-stage-toolbar">
+              <span id="status-print-stage-label">미리보기</span>
+              <span>드래그 이동 · 휠 확대</span>
+            </div>
+            <div class="status-print-stage" id="status-print-stage">
+              <div class="status-print-sheet-scaler" id="status-print-scaler">
+                <article class="status-print-sheet status-print-sheet--a3" id="status-print-sheet">
+                  <div class="status-print-sheet-frame">
+                    <header class="status-print-head">
+                      <div class="status-print-head-main">
+                        <div class="status-print-kicker-row"><span>파일마스터</span><span class="status-print-paper-tag" id="status-print-paper-tag">A3 가로</span></div>
+                        <h2 class="status-print-title" id="status-print-title">시공현황</h2>
+                        <p class="status-print-subtitle" id="status-print-subtitle"></p>
+                      </div>
+                      <table class="status-print-meta-table">
+                        <tbody>
+                          <tr><th>현장</th><td id="status-print-meta-project"></td></tr>
+                          <tr><th>작업</th><td id="status-print-meta-work"></td></tr>
+                          <tr><th>기간</th><td id="status-print-meta-period"></td></tr>
+                          <tr><th>출력</th><td id="status-print-meta-date"></td></tr>
+                        </tbody>
+                      </table>
+                    </header>
+                    <div class="status-print-kpi-strip">
+                      <div class="status-print-kpi-item"><span class="status-print-kpi-label"><i class="status-print-kpi-dot status-print-kpi-dot--installed"></i>시공완료</span><strong class="status-print-kpi-val status-print-kpi-val--installed" id="status-print-kpi-installed">0</strong></div>
+                      <div class="status-print-kpi-item"><span class="status-print-kpi-label"><i class="status-print-kpi-dot status-print-kpi-dot--pending"></i>미시공</span><strong class="status-print-kpi-val status-print-kpi-val--pending" id="status-print-kpi-pending">0</strong></div>
+                      <div class="status-print-kpi-item"><span class="status-print-kpi-label">전체</span><strong class="status-print-kpi-val" id="status-print-kpi-total">0</strong></div>
+                      <div class="status-print-progress-wrap">
+                        <div class="status-print-progress-bar"><span class="status-print-progress-fill" id="status-print-progress-fill"></span></div>
+                        <strong class="status-print-progress-pct" id="status-print-kpi-pct">0%</strong>
+                      </div>
+                    </div>
+                    <div class="status-print-legend" id="status-print-legend"></div>
+                    <div class="status-print-content">
+                      <div class="status-print-map-pane" id="status-print-map-pane"><canvas id="status-print-map-canvas"></canvas></div>
+                      <div class="status-print-summary-row">
+                        <section class="status-print-summary">
+                          <div class="status-print-side-head"><span>구간 현황</span><small id="status-print-zone-count"></small></div>
+                          <div class="status-print-zone-table-wrap">
+                            <table class="status-print-zone-table" id="status-print-zone-table">
+                              <thead><tr><th>구간</th><th>완료</th><th>미시공</th><th>계</th><th>진행</th></tr></thead>
+                              <tbody id="status-print-zone-body"></tbody>
+                              <tfoot id="status-print-zone-foot"></tfoot>
+                            </table>
+                          </div>
+                        </section>
+                        <section class="status-print-summary">
+                          <div class="status-print-side-head"><span>공법별</span><small id="status-print-method-count"></small></div>
+                          <div class="status-print-zone-table-wrap">
+                            <table class="status-print-zone-table">
+                              <thead><tr><th>공법</th><th>본수</th><th>비중</th></tr></thead>
+                              <tbody id="status-print-method-body"></tbody>
+                            </table>
+                          </div>
+                        </section>
+                        <section class="status-print-summary">
+                          <div class="status-print-side-head"><span>호기별</span><small id="status-print-equipment-count"></small></div>
+                          <div class="status-print-zone-table-wrap">
+                            <table class="status-print-zone-table">
+                              <thead><tr><th>호기</th><th>본수</th><th>비중</th></tr></thead>
+                              <tbody id="status-print-equipment-body"></tbody>
+                            </table>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
+                    <footer class="status-print-foot"><span>초록 시공완료 · 회색 미시공</span><span id="status-print-foot-note"></span></footer>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const els = {
+      modal,
+      sheet: modal.querySelector("#status-print-sheet"),
+      scaler: modal.querySelector("#status-print-scaler"),
+      stage: modal.querySelector("#status-print-stage"),
+      mapPane: modal.querySelector("#status-print-map-pane"),
+      canvas: modal.querySelector("#status-print-map-canvas"),
+      location: modal.querySelector("#status-print-location"),
+      zoom: modal.querySelector("#status-print-zoom"),
+      zoomVal: modal.querySelector("#status-print-zoom-val"),
+    };
+    statusPrint.els = els;
+    modal.addEventListener("click", (event) => {
+      const paper = event.target.closest("[data-status-paper]");
+      const orient = event.target.closest("[data-status-orient]");
+      const scope = event.target.closest("[data-status-scope]");
+      const color = event.target.closest("[data-status-color]");
+      if (paper) {
+        statusPrint.paper = paper.dataset.statusPaper;
+        statusPrint.needsFit = true;
+        renderStatusPrint();
+        return;
+      }
+      if (orient) {
+        statusPrint.orientation = orient.dataset.statusOrient;
+        statusPrint.needsFit = true;
+        renderStatusPrint();
+        return;
+      }
+      if (scope) {
+        statusPrint.scope = scope.dataset.statusScope;
+        statusPrint.needsFit = true;
+        renderStatusPrint();
+        return;
+      }
+      if (color) {
+        statusPrint.colorMode = color.dataset.statusColor || "status";
+        renderStatusPrint();
+        return;
+      }
+      if (event.target.closest("[data-status-print-close]")) closeStatusPrint();
+    });
+    modal.querySelector("#status-print-do-print").addEventListener("click", printStatusSheet);
+    modal.querySelector("#status-print-fit").addEventListener("click", () => {
+      statusPrint.zoom = 100;
+      els.zoom.value = "100";
+      statusPrint.needsFit = true;
+      renderStatusPrint();
+    });
+    els.location.addEventListener("change", () => {
+      statusPrint.location = els.location.value || "";
+      statusPrint.needsFit = true;
+      renderStatusPrint();
+    });
+    els.zoom.addEventListener("input", () => {
+      statusPrint.zoom = Number(els.zoom.value) || 100;
+      statusPrint.view.scale = statusPrint.baseScale * statusPrint.zoom / 100;
+      els.zoomVal.textContent = `${statusPrint.zoom}%`;
+      drawStatusPrintMap();
+    });
+    modal.querySelector("#status-print-outlines").addEventListener("change", (event) => {
+      statusPrint.showOutlines = event.target.checked;
+      drawStatusPrintMap();
+    });
+    els.mapPane.addEventListener("pointerdown", (event) => {
+      statusPrint.drag = {
+        x: event.clientX,
+        y: event.clientY,
+        ox: statusPrint.view.offsetX,
+        oy: statusPrint.view.offsetY,
+      };
+      els.mapPane.classList.add("is-panning");
+      els.mapPane.setPointerCapture(event.pointerId);
+    });
+    els.mapPane.addEventListener("pointermove", (event) => {
+      if (!statusPrint.drag) return;
+      const previewScale = statusPrint.previewScale || 1;
+      const dx = (event.clientX - statusPrint.drag.x) / previewScale;
+      const dy = (event.clientY - statusPrint.drag.y) / previewScale;
+      statusPrint.view.offsetX = statusPrint.drag.ox - dx / statusPrint.view.scale;
+      statusPrint.view.offsetY = statusPrint.drag.oy + dy / statusPrint.view.scale;
+      drawStatusPrintMap();
+    });
+    const endDrag = () => {
+      statusPrint.drag = null;
+      els.mapPane.classList.remove("is-panning");
+    };
+    els.mapPane.addEventListener("pointerup", endDrag);
+    els.mapPane.addEventListener("pointercancel", endDrag);
+    els.mapPane.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const next = statusPrint.zoom * (event.deltaY < 0 ? 1.08 : 0.92);
+      statusPrint.zoom = Math.max(40, Math.min(260, Math.round(next)));
+      els.zoom.value = String(statusPrint.zoom);
+      els.zoomVal.textContent = `${statusPrint.zoom}%`;
+      statusPrint.view.scale = statusPrint.baseScale * statusPrint.zoom / 100;
+      drawStatusPrintMap();
+    }, { passive: false });
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => {
+        if (!els.modal.classList.contains("is-open")) return;
+        layoutStatusPrintPreview();
+        drawStatusPrintMap();
+      });
+      observer.observe(els.stage);
+    }
+    return els;
+  }
+
+  function layoutStatusPrintPreview() {
+    const els = statusPrint.els;
+    if (!els) return;
+    const size = statusPrintSheetPx();
+    els.scaler.style.width = `${size.w}px`;
+    els.scaler.style.height = `${size.h}px`;
+    const availW = Math.max(120, els.stage.clientWidth - 36);
+    const availH = Math.max(120, els.stage.clientHeight - 36);
+    const scale = Math.max(0.12, Math.min(availW / size.w, availH / size.h, 1));
+    els.scaler.style.transform = `scale(${scale})`;
+    statusPrint.previewScale = scale;
+  }
+
+  function renderStatusPrint() {
+    const els = ensureStatusPrintModal();
+    const zones = statusPrintZones();
+    const installed = zones.reduce((sum, zone) => sum + zone.installed, 0);
+    const pending = zones.reduce((sum, zone) => sum + zone.pending, 0);
+    const total = installed + pending;
+    const orientLabel = statusPrint.orientation === "portrait" ? "세로" : "가로";
+    const paperLabel = `${statusPrint.paper.toUpperCase()} ${orientLabel}`;
+    els.sheet.classList.toggle("status-print-sheet--a3", statusPrint.paper === "a3");
+    els.sheet.classList.toggle("status-print-sheet--a4", statusPrint.paper === "a4");
+    els.sheet.classList.toggle("status-print-sheet--portrait", statusPrint.orientation === "portrait");
+    els.modal.querySelectorAll("[data-status-paper]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.statusPaper === statusPrint.paper);
+    });
+    els.modal.querySelectorAll("[data-status-orient]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.statusOrient === statusPrint.orientation);
+    });
+    els.modal.querySelectorAll("[data-status-scope]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.statusScope === statusPrint.scope);
+    });
+    els.modal.querySelectorAll("[data-status-color]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.statusColor === statusPrint.colorMode);
+    });
+    statusPrint.legendItems = statusPrintLegendItems();
+    const previousLocation = statusPrint.location;
+    els.location.innerHTML = [`<option value="">전체 구간</option>`]
+      .concat(zones.map((zone) => `<option value="${escape(zone.name)}">${escape(zone.name)}</option>`))
+      .join("");
+    if ([...els.location.options].some((option) => option.value === previousLocation)) {
+      els.location.value = previousLocation;
+    } else {
+      statusPrint.location = "";
+      els.location.value = "";
+    }
+    const subtitle = [statusPrintPeriodLabel()];
+    if (constructionState.selectedEquipments?.length) subtitle.push(`장비 ${constructionState.selectedEquipments.join(", ")}`);
+    if (constructionState.selectedMethods?.length) subtitle.push(`공법 ${constructionState.selectedMethods.join(", ")}`);
+    if (statusPrint.location) subtitle.push(`확대 ${statusPrint.location}`);
+    else if (statusPrint.scope === "installed") subtitle.push("지도: 시공완료 구간");
+    else if (statusPrint.scope === "pending") subtitle.push("지도: 미시공 구간");
+    subtitle.push(`색상 ${statusPrintColorModeLabel()}`);
+    els.modal.querySelector("#status-print-paper-tag").textContent = paperLabel;
+    els.modal.querySelector("#status-print-title").textContent = `${statusPrintProjectLabel()} 시공현황`;
+    els.modal.querySelector("#status-print-subtitle").textContent = subtitle.join(" · ");
+    els.modal.querySelector("#status-print-meta-project").textContent = statusPrintProjectLabel();
+    els.modal.querySelector("#status-print-meta-work").textContent = statusPrintWorkLabel();
+    els.modal.querySelector("#status-print-meta-period").textContent = statusPrintPeriodLabel();
+    els.modal.querySelector("#status-print-meta-date").textContent = statusPrintToday();
+    els.modal.querySelector("#status-print-kpi-installed").textContent = String(installed);
+    els.modal.querySelector("#status-print-kpi-pending").textContent = String(pending);
+    els.modal.querySelector("#status-print-kpi-total").textContent = String(total);
+    els.modal.querySelector("#status-print-kpi-pct").textContent = statusPrintPct(installed, total);
+    els.modal.querySelector("#status-print-progress-fill").style.width = total ? `${(installed / total) * 100}%` : "0%";
+    els.zoomVal.textContent = `${statusPrint.zoom}%`;
+    els.modal.querySelector("#status-print-stage-label").textContent = `${paperLabel} 미리보기`;
+    const legendShown = statusPrint.legendItems.slice(0, 16);
+    const legendExtra = statusPrint.legendItems.length - legendShown.length;
+    els.modal.querySelector("#status-print-legend").innerHTML = legendShown.map((item) => (
+      `<span class="status-print-legend-item"><i class="status-print-legend-swatch" style="background:${item.color}"></i>${escape(item.label)}</span>`
+    )).join("") + (legendExtra > 0 ? `<span class="status-print-legend-item">외 ${legendExtra}</span>` : "");
+    const maxRows = 12;
+    let shown = zones;
+    let omitted = 0;
+    if (zones.length > maxRows) {
+      shown = zones.slice(0, maxRows - 1);
+      omitted = zones.length - shown.length;
+      if (statusPrint.location && !shown.some((zone) => zone.name === statusPrint.location)) {
+        const selected = zones.find((zone) => zone.name === statusPrint.location);
+        if (selected) shown[shown.length - 1] = selected;
+      }
+    }
+    const table = els.modal.querySelector("#status-print-zone-table");
+    table.classList.toggle("status-print-zone-table--compact", shown.length > 12);
+    els.modal.querySelector("#status-print-zone-body").innerHTML = shown.map((zone) => {
+      const zoneTotal = zone.installed + zone.pending;
+      const rowClass = [
+        zoneTotal > 0 && zone.pending === 0 ? "is-completed-zone" : "",
+        zone.name === statusPrint.location ? "is-target-zone" : "",
+      ].filter(Boolean).join(" ");
+      return `<tr class="${rowClass}"><td>${escape(zone.name)}</td><td class="status-print-td-installed">${zone.installed}</td><td class="status-print-td-pending">${zone.pending}</td><td>${zoneTotal}</td><td><span class="status-print-mini-rate"><i class="status-print-mini-bar"><i style="width:${zoneTotal ? (zone.installed / zoneTotal) * 100 : 0}%"></i></i>${statusPrintPct(zone.installed, zoneTotal)}</span></td></tr>`;
+    }).join("") || `<tr><td colspan="5">표시할 구간이 없습니다.</td></tr>`;
+    els.modal.querySelector("#status-print-zone-foot").innerHTML = `<tr><td>합계</td><td class="status-print-td-installed">${installed}</td><td class="status-print-td-pending">${pending}</td><td>${total}</td><td>${statusPrintPct(installed, total)}</td></tr>`;
+    els.modal.querySelector("#status-print-zone-count").textContent = omitted ? `외 ${omitted}개 생략` : `${zones.length}개 구간`;
+    const rowLimit = 8;
+    const methods = statusPrintBreakdown("method");
+    const equipments = statusPrintBreakdown("equipment");
+    const methodRows = statusPrintCountRows(methods.rows, methods.total, rowLimit);
+    const equipmentRows = statusPrintCountRows(equipments.rows, equipments.total, rowLimit);
+    els.modal.querySelector("#status-print-method-body").innerHTML = methodRows.body;
+    els.modal.querySelector("#status-print-equipment-body").innerHTML = equipmentRows.body;
+    els.modal.querySelector("#status-print-method-count").textContent = methodRows.omitted ? `외 ${methodRows.omitted}` : `${methods.rows.length}종`;
+    els.modal.querySelector("#status-print-equipment-count").textContent = equipmentRows.omitted ? `외 ${equipmentRows.omitted}` : `${equipments.rows.length}대`;
+    els.modal.querySelector("#status-print-foot-note").textContent = `${statusPrintToday()} · ${statusPrintColorModeLabel()}`;
+    requestAnimationFrame(() => {
+      layoutStatusPrintPreview();
+      requestAnimationFrame(() => drawStatusPrintMap());
+    });
+  }
+
+  function drawStatusPrintMap() {
+    const els = statusPrint.els;
+    if (!els?.canvas) return;
+    const width = els.mapPane.clientWidth;
+    const height = els.mapPane.clientHeight;
+    if (width < 20 || height < 20) return;
+    const ratio = 2;
+    els.canvas.width = Math.round(width * ratio);
+    els.canvas.height = Math.round(height * ratio);
+    els.canvas.style.width = `${width}px`;
+    els.canvas.style.height = `${height}px`;
+    const ctx = els.canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    const circles = statusPrintMapCircles();
+    if (statusPrint.needsFit || statusPrint.mapW !== width || statusPrint.mapH !== height) {
+      fitStatusPrintView(circles, width, height);
+      statusPrint.needsFit = false;
+      statusPrint.mapW = width;
+      statusPrint.mapH = height;
+    }
+    if (statusPrint.showOutlines) {
+      (Array.isArray(state.buildings) ? state.buildings : []).forEach((building) => {
+        const vertices = building?.vertices;
+        if (!Array.isArray(vertices) || vertices.length < 3) return;
+        ctx.beginPath();
+        vertices.forEach((vertex, index) => {
+          const point = statusPrintToCanvas(Number(vertex.x), Number(vertex.y), width, height);
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.closePath();
+        const selected = statusPrint.location && String(building.name || "") === statusPrint.location;
+        ctx.fillStyle = selected ? "rgba(22, 163, 74, 0.08)" : "rgba(148, 163, 184, 0.08)";
+        ctx.strokeStyle = selected ? "#15803d" : "rgba(71, 85, 105, 0.62)";
+        ctx.lineWidth = selected ? 2.2 : 1.15;
+        ctx.fill();
+        ctx.stroke();
+        let sumX = 0;
+        let sumY = 0;
+        vertices.forEach((vertex) => {
+          sumX += Number(vertex.x);
+          sumY += Number(vertex.y);
+        });
+        const center = statusPrintToCanvas(sumX / vertices.length, sumY / vertices.length, width, height);
+        if (center.x < 8 || center.y < 8 || center.x > width - 8 || center.y > height - 8) return;
+        ctx.font = "700 12px 'Malgun Gothic', sans-serif";
+        ctx.fillStyle = selected ? "#166534" : "#334155";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(building.name || ""), center.x, center.y);
+      });
+    }
+    const pendingCircles = [];
+    const installedCircles = [];
+    const paintCircle = (circle, installed) => {
+      const point = statusPrintToCanvas(Number(circle.center_x), Number(circle.center_y), width, height);
+      const radius = Math.max(0.85, (Number(circle.radius) || 0) * statusPrint.view.scale);
+      if (point.x < -radius || point.y < -radius || point.x > width + radius || point.y > height + radius) return;
+      const color = statusPrintFillFor(circle);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = installed ? "#14532d" : "#94a3b8";
+      ctx.lineWidth = installed ? 0.9 : 0.45;
+      ctx.stroke();
+    };
+    circles.forEach((circle) => {
+      (statusPrintInstalled(circle) ? installedCircles : pendingCircles).push(circle);
+    });
+    pendingCircles.forEach((circle) => paintCircle(circle, false));
+    installedCircles.forEach((circle) => paintCircle(circle, true));
+  }
+
+  function fitStatusPrintView(circles, width, height) {
+    const source = circles.length ? circles : statusPrintCircles();
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    source.forEach((circle) => {
+      const radius = Number(circle.radius) || 0;
+      const x = Number(circle.center_x);
+      const y = Number(circle.center_y);
+      minX = Math.min(minX, x - radius);
+      maxX = Math.max(maxX, x + radius);
+      minY = Math.min(minY, y - radius);
+      maxY = Math.max(maxY, y + radius);
+    });
+    if (!Number.isFinite(minX)) return;
+    const pad = 24;
+    const scale = Math.min((width - pad * 2) / Math.max(maxX - minX, 1), (height - pad * 2) / Math.max(maxY - minY, 1));
+    statusPrint.baseScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    statusPrint.view.scale = statusPrint.baseScale * statusPrint.zoom / 100;
+    statusPrint.view.offsetX = (minX + maxX) / 2;
+    statusPrint.view.offsetY = (minY + maxY) / 2;
+  }
+
+  function openStatusPrint() {
+    if (!statusPrintAvailable()) {
+      setSyncStatus("시공 데이터셋을 적용한 뒤 출력할 수 있습니다.", true);
+      return;
+    }
+    statusPrint.needsFit = true;
+    const mode = constructionState.overlayMode;
+    statusPrint.colorMode = ["status", "date", "equipment", "method"].includes(mode) ? mode : "status";
+    ensureStatusPrintModal();
+    statusPrint.els.modal.classList.add("is-open");
+    renderStatusPrint();
+  }
+
+  function closeStatusPrint() {
+    statusPrint.els?.modal.classList.remove("is-open");
+    statusPrint.drag = null;
+  }
+
+  function printStatusSheet() {
+    drawStatusPrintMap();
+    const els = statusPrint.els;
+    if (!els?.canvas) return;
+    const clone = els.sheet.cloneNode(true);
+    const image = document.createElement("img");
+    image.alt = "시공현황 도면";
+    image.src = els.canvas.toDataURL("image/png");
+    image.style.cssText = "display:block;width:100%;height:100%;object-fit:fill;";
+    clone.querySelector("canvas")?.replaceWith(image);
+    const paper = statusPrint.paper.toUpperCase();
+    const orient = statusPrint.orientation === "portrait" ? "portrait" : "landscape";
+    const popup = window.open("", "pilexyStatusPrint");
+    if (!popup) {
+      printStatusSheetInline(clone, paper, orient);
+      return;
+    }
+    popup.document.open();
+    popup.document.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>시공현황 ${paper}</title><link rel="stylesheet" href="${location.origin}/frontend/styles.css?v=20261116statusprint3" /><style>@page{size:${paper} ${orient};margin:7mm}html,body{margin:0;height:100%;background:#fff}.status-print-sheet{width:100%;height:100%;box-shadow:none}*{ -webkit-print-color-adjust:exact;print-color-adjust:exact;}</style></head><body>${clone.outerHTML}</body></html>`);
+    popup.document.close();
+    setTimeout(() => {
+      popup.focus();
+      popup.print();
+    }, 700);
+  }
+
+  function printStatusSheetInline(clone, paper, orient) {
+    let mount = document.getElementById("status-print-mount");
+    if (!mount) {
+      mount = document.createElement("div");
+      mount.id = "status-print-mount";
+      document.body.appendChild(mount);
+    }
+    mount.replaceChildren(clone);
+    const style = document.createElement("style");
+    style.id = "status-print-page-style";
+    style.textContent = `@page { size: ${paper} ${orient}; margin: 7mm; }`;
+    document.getElementById("status-print-page-style")?.remove();
+    document.head.appendChild(style);
+    document.body.classList.add("status-print-printing");
+    const cleanup = () => {
+      document.body.classList.remove("status-print-printing");
+      style.remove();
+      mount.replaceChildren();
+    };
+    window.addEventListener("afterprint", cleanup, { once: true });
+    setTimeout(() => window.print(), 200);
+  }
+
+  [constructionStatusPrintBtn].forEach((button) => {
+    button?.addEventListener("click", openStatusPrint);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !statusPrint.els?.modal.classList.contains("is-open")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeStatusPrint();
+  }, true);
+  syncStatusPrintButtons();
 })();
