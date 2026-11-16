@@ -104,17 +104,21 @@
 
   let bundle = null;
   let lastMaterialsPc = null;
+  let materialsLoadToken = 0;
   let filterMode = "all";
   let filterMonth = "";
   let filterFrom = "";
   let filterTo = "";
   let mounted = false;
   let saveTimer = null;
+  let pendingMaterialsSave = null;
+  const materialsSaveByProject = new Map();
   let projectNameResyncHooked = false;
   let workContextMaterialsHooked = false;
 
   function markMaterialsServerCacheStale() {
     lastMaterialsPc = null;
+    materialsLoadToken += 1;
   }
 
   function ensureWorkContextMaterialsHook() {
@@ -392,11 +396,37 @@
       .sort((a, b) => a.name.localeCompare(b.name, "ko"));
   }
 
+  function damageReturnQty(row) {
+    const raw = row?.qty;
+    // Older records represent one pile per row and have no quantity field.
+    if (raw == null || (typeof raw === "string" && raw.trim() === "")) return 1;
+    if (typeof raw !== "number" && typeof raw !== "string") return 0;
+    const qty = Number(raw);
+    return Number.isSafeInteger(qty) && qty >= 0 ? qty : 0;
+  }
+
+  function damageInFilterRange(rawDate) {
+    if (filterMode === "all") return true;
+    const hasDateFilter = (filterMode === "month" && Boolean(filterMonth))
+      || (filterMode === "range" && Boolean(filterFrom || filterTo));
+    if (!hasDateFilter) return true;
+    const date = parseDateLoose(rawDate);
+    if (!date) return false;
+    const calendarDate = new Date(`${date}T00:00:00Z`);
+    if (!Number.isFinite(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== date) return false;
+    return inFilterRange(date);
+  }
+
+  function pendingOrderQty(plan, received, damage) {
+    return Math.max(0, plan + damage - received);
+  }
+
   function sumDamageQty(len) {
     let n = 0;
     (bundle.damageReturns || []).forEach((d) => {
       if (Number(d.lengthM) !== len) return;
-      n += 1;
+      if (!damageInFilterRange(d.date)) return;
+      n += damageReturnQty(d);
     });
     return n;
   }
@@ -674,7 +704,7 @@
   </div>
   <div class="materials-toolbar-actions">
     <button type="button" class="header-construction-btn" id="materials-btn-save">서버에 저장</button>
-    <span id="materials-save-hint" class="materials-save-hint" aria-live="polite"></span>
+    <span id="materials-save-hint" class="materials-save-hint" aria-live="polite">${materialsSaveByProject.get(projectContext())?.saved === false ? "서버 저장 실패 — 수정 내용을 유지했습니다. 저장을 다시 눌러 주세요." : ""}</span>
   </div>
 </div>
 
@@ -796,10 +826,10 @@
 
     <section class="materials-block">
       <h3 class="materials-h3" title="길이별 집계">길이별 요약</h3>
-      <p class="construction-placeholder-hint materials-block-intro-hint">반입=기간 내 입고 합 · 사용=PDAM 시공 완료(단본·합계 m) · 미발주=계획−반입 · 단본 이음=규격의 각 구간(m)으로 총연장 본수를 길이 열에 나눔${pdamOrphanLine}</p>
+      <p class="construction-placeholder-hint materials-block-intro-hint">반입=기간 내 입고 합 · 사용=PDAM 시공 완료(단본·합계 m) · 파손·반출=입력 날짜 기준 기간 내 수량 · 재고=반입−사용−파손·반출 · 미발주=계획+파손·반출−반입(최소 0본) · 단본 이음=규격의 각 구간(m)으로 총연장 본수를 길이 열에 나눔${pdamOrphanLine}</p>
       <div class="materials-table-shell">
         <table class="construction-records-table materials-summary-table">
-          <thead><tr><th>길이</th><th>계획</th><th>반입</th><th title="PDAM 시공 완료 본수(파일구분 단본 또는 합계 m)">사용</th><th title="파손·반출 합">파손</th><th>재고</th><th title="계획−반입">미발주</th></tr></thead>
+          <thead><tr><th>길이</th><th>계획</th><th>반입</th><th title="PDAM 시공 완료 본수(파일구분 단본 또는 합계 m)">사용</th><th title="입력 날짜 기준 기간 내 파손·반출 수량 합">파손·반출</th><th>재고</th><th title="계획 + 파손·반출 − 반입, 최소 0본">미발주</th></tr></thead>
           <tbody id="materials-tbody-summary"></tbody>
         </table>
       </div>
@@ -817,9 +847,10 @@
 
     <section class="materials-block">
       <h3 class="materials-h3">파손·반출</h3>
-      <div class="materials-table-shell">
+      <p class="construction-placeholder-hint materials-block-intro-hint">길이별 수량(본)을 입력하면 재고에서 차감하고 미발주에 반영합니다. 집계는 입력 날짜와 상단 기간을 따릅니다. 날짜 없는 기록은 ‘전체’에서만 집계하며, 입력표에는 전체 기록을 표시합니다.</p>
+      <div class="materials-table-shell materials-table-shell--damage">
         <table class="construction-records-table materials-damage-table">
-          <thead class="materials-compact-thead"><tr><th class="materials-damage-th-idx" title="순번">#</th><th class="materials-damage-th-date">일자</th><th>업체</th><th title="길이(m)">m</th><th>비고</th><th class="materials-damage-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
+          <thead class="materials-compact-thead"><tr><th class="materials-damage-th-idx" title="순번">#</th><th class="materials-damage-th-date">일자</th><th>업체</th><th class="materials-damage-th-length" title="길이(m)">길이(m)</th><th class="materials-damage-th-qty">수량(본)</th><th>비고</th><th class="materials-damage-th-del" scope="col" title="행 삭제"><span aria-hidden="true">×</span></th></tr></thead>
           <tbody id="materials-tbody-damage"></tbody>
         </table>
       </div>
@@ -1969,7 +2000,7 @@
       const used = usedFromPdamLengthSplitForSummary(L);
       const dmg = sumDamageQty(L);
       const stock = recv - used - dmg;
-      const unord = Math.max(0, plan - recv);
+      const unord = pendingOrderQty(plan, recv, dmg);
       rows.push(
         `<tr><td>${L}m</td><td>${plan}</td><td>${recv}</td><td class="materials-used-pdam">${used}</td><td>${dmg}</td><td>${stock}</td><td>${unord}</td></tr>`,
       );
@@ -2031,7 +2062,8 @@
         <td>${i + 1}</td>
         <td class="materials-damage-td-date"><input type="date" class="save-work-input materials-date-inp materials-damage-date-inp" data-dmg="${i}" data-f="date" value="${escapeHtml(toDateInputValue(d.date))}" /></td>
         <td class="materials-damage-td-supplier"><select class="save-work-select" data-dmg="${i}" data-f="supplierId">${supOpts}</select></td>
-        <td><input type="number" class="save-work-input" data-dmg="${i}" data-f="lengthM" value="${escapeHtml(lenDisp)}" step="1" min="0" placeholder="" /></td>
+        <td class="materials-damage-td-length"><input type="number" class="save-work-input" data-dmg="${i}" data-f="lengthM" value="${escapeHtml(lenDisp)}" step="1" min="0" placeholder="" aria-label="${i + 1}행 길이(m)" /></td>
+        <td class="materials-damage-td-qty"><input type="number" class="save-work-input" data-dmg="${i}" data-f="qty" value="${damageReturnQty(d)}" step="1" min="0" required aria-label="${i + 1}행 수량(본)" /></td>
         <td><input class="save-work-input" data-dmg="${i}" data-f="note" value="${escapeHtml(d.note)}" /></td>
         <td class="materials-damage-td-del"><button type="button" class="ghost materials-damage-del-btn" data-del-dmg="${i}" aria-label="이 행 삭제" title="삭제">×</button></td>
       </tr>`;
@@ -2052,7 +2084,16 @@
         const row = bundle.damageReturns[i];
         if (!row) return;
         const f = inp.dataset.f;
-        if (inp.type === "number" && f === "lengthM" && String(inp.value).trim() === "") {
+        if (f === "qty") {
+          inp.setCustomValidity("");
+          const qty = Number(inp.value);
+          if (String(inp.value).trim() === "" || !Number.isSafeInteger(qty) || qty < 0) {
+            inp.setCustomValidity("수량은 0 이상의 정수(본)로 입력하세요.");
+            inp.reportValidity();
+            return;
+          }
+          row.qty = qty;
+        } else if (inp.type === "number" && f === "lengthM" && String(inp.value).trim() === "") {
           row.lengthM = "";
         } else if (inp.type === "number") {
           row[f] = Number(inp.value) || 0;
@@ -2144,7 +2185,8 @@
       const k = String(L);
       const q = sumReceiptQtySplitForSummary(L);
       const plan = planTotalLenSplitForSummary(L);
-      const unord = Math.max(0, plan - q);
+      const dmg = sumDamageQty(L);
+      const unord = pendingOrderQty(plan, q, dmg);
       if (!q && !unord) return;
       const per = truckRuleFor(L);
       const rows = [];
@@ -2165,7 +2207,7 @@
       }
       if (unord > 0) {
         rows.push(
-          `<tr class="materials-truck-hint-row--unord"><th scope="row">미발주</th><td>계획 <strong>${plan}</strong>본 − 반입 <strong>${q}</strong>본 = <strong>${unord}</strong>본 → 추가 발주·입고 필요</td></tr>`,
+          `<tr class="materials-truck-hint-row--unord"><th scope="row">미발주</th><td>계획 <strong>${plan}</strong>본 + 파손·반출 <strong>${dmg}</strong>본 − 반입 <strong>${q}</strong>본 = <strong>${unord}</strong>본 → 추가 발주·입고 필요</td></tr>`,
         );
       }
       sections.push(
@@ -2369,9 +2411,10 @@
     document.getElementById("materials-add-damage")?.addEventListener("click", () => {
       bundle.damageReturns.push({
         id: rid(),
-        date: "",
+        date: isoToday(),
         supplierId: "",
         lengthM: "",
+        qty: 1,
         note: "",
       });
       scheduleSave();
@@ -2400,17 +2443,45 @@
   }
 
   function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
+    if (!bundle) return;
     const savingBundle = bundle;
     const savingProject = projectContext();
-    saveTimer = setTimeout(() => void persistNow(savingBundle, savingProject), 900);
+    if (pendingMaterialsSave && pendingMaterialsSave.savingProject !== savingProject) {
+      void flushMaterialsSave();
+    }
+    if (saveTimer) clearTimeout(saveTimer);
+    pendingMaterialsSave = { savingBundle, savingProject };
+    saveTimer = setTimeout(() => void flushMaterialsSave(), 900);
+  }
+
+  function flushMaterialsSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    const pending = pendingMaterialsSave;
+    pendingMaterialsSave = null;
+    return pending ? persistNow(pending.savingBundle, pending.savingProject) : materialsSaveChain;
   }
 
   let materialsSaveChain = Promise.resolve();
   function persistNow(savingBundle = bundle, savingProject = projectContext()) {
+    if (!savingBundle) return materialsSaveChain;
+    if (pendingMaterialsSave) {
+      if (pendingMaterialsSave.savingBundle !== savingBundle || pendingMaterialsSave.savingProject !== savingProject) {
+        void flushMaterialsSave();
+      } else {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = null;
+        pendingMaterialsSave = null;
+      }
+    }
     const payload = JSON.stringify(savingBundle);
-    materialsSaveChain = materialsSaveChain.then(() => persistMaterialsSnapshot(savingBundle, savingProject, payload));
-    return materialsSaveChain;
+    const snapshot = { savingBundle, payload };
+    materialsSaveByProject.set(savingProject, snapshot);
+    snapshot.completion = materialsSaveChain = materialsSaveChain.then(async () => {
+      snapshot.saved = await persistMaterialsSnapshot(savingBundle, savingProject, payload);
+      return snapshot.saved;
+    });
+    return snapshot.completion;
   }
 
   async function persistMaterialsSnapshot(savingBundle, savingProject, payload) {
@@ -2418,7 +2489,7 @@
     const base = apiBase();
     if (!base) {
       if (hint) hint.textContent = "API 주소 없음 — 저장 생략";
-      return;
+      return false;
     }
     try {
       const pc = encodeURIComponent(savingProject);
@@ -2433,16 +2504,27 @@
         bundle.meta = data.meta;
         lastMaterialsPc = savingProject;
       }
-      if (hint) hint.textContent = "저장됨";
+      if (hint && bundle === savingBundle && projectContext() === savingProject) hint.textContent = "저장됨";
+      return true;
     } catch (err) {
       console.error(err);
-      if (hint) hint.textContent = "저장 실패";
+      if (hint && bundle === savingBundle && projectContext() === savingProject) hint.textContent = "저장 실패";
+      return false;
     }
   }
 
   async function loadBundle() {
+    const loadingProject = projectContext();
+    const token = ++materialsLoadToken;
+    const isCurrent = () => token === materialsLoadToken && projectContext() === loadingProject;
     const base = apiBase();
     const hint = document.getElementById("materials-save-hint");
+    const mount = document.getElementById("materials-app-mount");
+    // Previous-project inputs must not remain editable while the next load waits.
+    if (lastMaterialsPc !== loadingProject) {
+      bundle = null;
+      if (mount) mount.innerHTML = '<div class="materials-shell"><p>자재 화면을 불러오는 중…</p></div>';
+    }
     if (!base) {
       bundle = window.__pilexyMaterialsFallbackBundle || null;
       if (bundle) ensureJoinLengthSpecs(bundle);
@@ -2461,13 +2543,27 @@
           meta: {},
         };
       }
-      return;
+      lastMaterialsPc = loadingProject;
+      return true;
     }
     try {
-      const pc = encodeURIComponent(projectContext());
+      const saving = flushMaterialsSave();
+      const localSave = materialsSaveByProject.get(loadingProject);
+      await saving;
+      if (!isCurrent()) return false;
+      if (localSave && !(await localSave.completion)) {
+        if (!isCurrent()) return false;
+        bundle = localSave.savingBundle;
+        lastMaterialsPc = loadingProject;
+        if (hint) hint.textContent = "서버 저장 실패 — 수정 내용을 유지했습니다. 저장을 다시 눌러 주세요.";
+        return true;
+      }
+      const pc = encodeURIComponent(loadingProject);
       const res = await fetch(`${base}/api/materials/state?project_context=${pc}`);
       if (!res.ok) throw new Error(await res.text());
-      bundle = await res.json();
+      const loadedBundle = await res.json();
+      if (!isCurrent()) return false;
+      bundle = loadedBundle;
       ensureJoinLengthSpecs(bundle);
       if (bundle.cementPresets && bundle.cementPresets.mode !== "detail" && bundle.cementPresets.mode !== "tonPerMPhi") {
         bundle.cementPresets.mode = "tonPerMPhi";
@@ -2491,21 +2587,16 @@
         if (!c.id) c.id = rid();
       });
       if (hint) hint.textContent = bundle.meta && bundle.meta.saved ? "서버에서 불러옴" : "새 프로젝트 번들";
+      lastMaterialsPc = loadingProject;
+      return true;
     } catch (err) {
+      if (!isCurrent()) return false;
       console.error(err);
       if (hint) hint.textContent = "불러오기 실패";
-      bundle = {
-        suppliers: [],
-        truckLoadRules: [],
-        cementPresets: {},
-        planByBuilding: {},
-        receipts: [],
-        cementLedger: [],
-        damageReturns: [],
-        manualUsedByLength: {},
-        joinLengthSpecs: defaultJoinLengthSpecsFromLegacy(),
-        meta: {},
-      };
+      bundle = null;
+      lastMaterialsPc = null;
+      if (mount) mount.innerHTML = '<div class="materials-shell"><p class="materials-open-error" role="alert">자재 데이터를 불러오지 못했습니다. 자재관리를 닫고 다시 열어 주세요.</p></div>';
+      return false;
     }
   }
 
@@ -2516,9 +2607,9 @@
     ensureWorkContextMaterialsHook();
     const pc = projectContext();
     if (lastMaterialsPc !== pc || bundle == null) {
-      await loadBundle();
+      if (!(await loadBundle())) return;
     }
-    lastMaterialsPc = pc;
+    if (projectContext() !== pc || !bundle) return;
     // 1차: 번들만으로 UI를 먼저 그림. PDAM 대시보드(원 매칭·길이별 사용)는 네트워크+서버 집계가 길어 백그라운드에서 채운 뒤 2차 fullRender.
     try {
       fullRender();
@@ -2553,10 +2644,9 @@
     if (!mount) return;
     const pc = projectContext();
     if (lastMaterialsPc !== pc || bundle == null) {
-      await loadBundle();
+      if (!(await loadBundle())) return;
     }
-    lastMaterialsPc = pc;
-    if (!bundle) return;
+    if (projectContext() !== pc || !bundle) return;
     fullRender();
   };
 })();

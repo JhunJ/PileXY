@@ -1,0 +1,505 @@
+{
+  "as_of": "2026-09-15",
+  "site_count": 6,
+  "finding_count": 45,
+  "sites": [
+    {
+      "code": "CJ",
+      "site": "청주센텀푸르지오자이",
+      "date": "2026-04-07~05-13",
+      "count": 5,
+      "basis": "프로그램 중복좌표 2그룹, PDAM 위치 2행, 파일일람 표기 1영역",
+      "evidence": "E01~E03 / Baromi 회신 2건"
+    },
+    {
+      "code": "CC",
+      "site": "청주푸르지오씨엘리체",
+      "date": "2026-08-25",
+      "count": 17,
+      "basis": "좌표 불일치 7행, 화면·번호 누락 5건, 좌표 중복 5건",
+      "evidence": "E04~E05"
+    },
+    {
+      "code": "IC",
+      "site": "인천계양 A10BL",
+      "date": "2026-08-26",
+      "count": 13,
+      "basis": "좌표 불일치 10행, 1004동 112번 중복 2건, 1009동 1번 표시 누락 1건",
+      "evidence": "E06~E07"
+    },
+    {
+      "code": "CU",
+      "site": "천안 업성푸르지오 레이크시티 1단지",
+      "date": "2026-08-31",
+      "count": 1,
+      "basis": "지하주차장 1250번 부근 파일표시 누락 1건",
+      "evidence": "E08"
+    },
+    {
+      "code": "GA",
+      "site": "검암 푸르지오 프라베뉴",
+      "date": "2026-09-07~09-08",
+      "count": 4,
+      "basis": "엑셀 476번 도면 누락 1건, 번호 누락 2건, 476·477 번호 중첩 1건",
+      "evidence": "E09~E10 / Baromi 대화 내보내기"
+    },
+    {
+      "code": "SC",
+      "site": "써밋클라비온(신길10구역)",
+      "date": "2026-09-09",
+      "count": 5,
+      "basis": "도면 원(Circle) 중복 표기 5건",
+      "evidence": "E11"
+    }
+  ],
+  "findings": [
+    {
+      "id": "CJ-01",
+      "site": "청주센텀푸르지오자이",
+      "category": "중복좌표",
+      "location": "지하주차장 / 좌표 Y 449313.80, X 242764.44",
+      "detail": "Circle C4137·C4138, 매칭번호 163, Count 2",
+      "evidence": "E01",
+      "confidence": "확정"
+    },
+    {
+      "id": "CJ-02",
+      "site": "청주센텀푸르지오자이",
+      "category": "중복좌표",
+      "location": "지하주차장 / 좌표 Y 449462.60, X 242666.65",
+      "detail": "Circle C4236·C4237, 매칭번호 120, Count 2",
+      "evidence": "E01",
+      "confidence": "확정"
+    },
+    {
+      "id": "CJ-03",
+      "site": "청주센텀푸르지오자이",
+      "category": "PDAM 위치표기",
+      "location": "8-70",
+      "detail": "주차장으로 표기되었으나 108동 위치로 검토 표시",
+      "evidence": "E02",
+      "confidence": "확정"
+    },
+    {
+      "id": "CJ-04",
+      "site": "청주센텀푸르지오자이",
+      "category": "PDAM 위치표기",
+      "location": "8-43",
+      "detail": "주차장으로 표기된 위치 오류 행",
+      "evidence": "E02",
+      "confidence": "확정"
+    },
+    {
+      "id": "CJ-05",
+      "site": "청주센텀푸르지오자이",
+      "category": "파일일람 표기",
+      "location": "P2/P2F, 200~203번",
+      "detail": "P2와 P2F 표기가 겹쳐 번호 판독이 혼동되는 영역",
+      "evidence": "E03",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-01",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "107동 206번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 1.250 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-02",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "107동 207번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 1.250 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-03",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "110동 31번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 2.685 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-04",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "110동 32번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 1.250 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-05",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "110동 33번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 3.769 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-06",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "공동시설 165번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 3.550 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-07",
+      "site": "청주푸르지오씨엘리체",
+      "category": "좌표 불일치",
+      "location": "공동시설 166번",
+      "detail": "엑셀 좌표와 도면 좌표 거리 차이 3.550 m",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-08",
+      "site": "청주푸르지오씨엘리체",
+      "category": "표시 누락",
+      "location": "109동 60번",
+      "detail": "시공사 원본에는 있으나 현재 화면에서 누락",
+      "evidence": "E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-09",
+      "site": "청주푸르지오씨엘리체",
+      "category": "표시 누락",
+      "location": "지하주차장 110번",
+      "detail": "시공사 원본에는 있으나 현재 화면에서 누락",
+      "evidence": "E04/E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-10",
+      "site": "청주푸르지오씨엘리체",
+      "category": "표시 누락",
+      "location": "지하주차장 111번",
+      "detail": "시공사 원본에는 있으나 현재 화면에서 누락",
+      "evidence": "E04/E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-11",
+      "site": "청주푸르지오씨엘리체",
+      "category": "표시 누락",
+      "location": "지하주차장 145번",
+      "detail": "시공사 원본에는 있으나 현재 화면에서 누락",
+      "evidence": "E04/E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-12",
+      "site": "청주푸르지오씨엘리체",
+      "category": "표시 누락",
+      "location": "지하주차장 224번",
+      "detail": "시공사 원본에는 있으나 현재 화면에서 누락",
+      "evidence": "E04/E05",
+      "confidence": "확정"
+    },
+    {
+      "id": "CC-13",
+      "site": "청주푸르지오씨엘리체",
+      "category": "중복좌표",
+      "location": "도면 지시 위치 1",
+      "detail": "좌표 중복오류로 표시된 5개 위치 중 1개",
+      "evidence": "E04",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "CC-14",
+      "site": "청주푸르지오씨엘리체",
+      "category": "중복좌표",
+      "location": "도면 지시 위치 2",
+      "detail": "좌표 중복오류로 표시된 5개 위치 중 1개",
+      "evidence": "E04",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "CC-15",
+      "site": "청주푸르지오씨엘리체",
+      "category": "중복좌표",
+      "location": "도면 지시 위치 3",
+      "detail": "좌표 중복오류로 표시된 5개 위치 중 1개",
+      "evidence": "E04",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "CC-16",
+      "site": "청주푸르지오씨엘리체",
+      "category": "중복좌표",
+      "location": "도면 지시 위치 4",
+      "detail": "좌표 중복오류로 표시된 5개 위치 중 1개",
+      "evidence": "E04",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "CC-17",
+      "site": "청주푸르지오씨엘리체",
+      "category": "중복좌표",
+      "location": "도면 지시 위치 5",
+      "detail": "좌표 중복오류로 표시된 5개 위치 중 1개",
+      "evidence": "E04",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "IC-01",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1002동 50번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.029 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-02",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1002동 80번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.025 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-03",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1003동 35번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.020 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-04",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1004동 72번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.056 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-05",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1005동 14번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.024 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-06",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1005동 35번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.033 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-07",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1005동 70번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.026 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-08",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "1006동 209번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.021 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-09",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "B11 205번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.033 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-10",
+      "site": "인천계양 A10BL",
+      "category": "좌표 불일치",
+      "location": "B11 614번",
+      "detail": "엑셀 좌표와 시공사 원본 좌표 차이 0.015 m",
+      "evidence": "E07",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-11",
+      "site": "인천계양 A10BL",
+      "category": "번호 중복",
+      "location": "1004동 112번 / 중복 객체 1",
+      "detail": "동일 번호가 2건 존재",
+      "evidence": "E06",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-12",
+      "site": "인천계양 A10BL",
+      "category": "번호 중복",
+      "location": "1004동 112번 / 중복 객체 2",
+      "detail": "동일 번호가 2건 존재",
+      "evidence": "E06",
+      "confidence": "확정"
+    },
+    {
+      "id": "IC-13",
+      "site": "인천계양 A10BL",
+      "category": "파일표시 누락",
+      "location": "1009동 1번",
+      "detail": "도면에 파일표시 없음",
+      "evidence": "E06",
+      "confidence": "확정"
+    },
+    {
+      "id": "CU-01",
+      "site": "천안 업성푸르지오 레이크시티 1단지",
+      "category": "파일표시 누락",
+      "location": "지하주차장 1250번 부근",
+      "detail": "좌표표 인근 도면에서 파일표시 없음",
+      "evidence": "E08",
+      "confidence": "확정"
+    },
+    {
+      "id": "GA-01",
+      "site": "검암 푸르지오 프라베뉴",
+      "category": "도면 누락",
+      "location": "지하주차장 476번",
+      "detail": "엑셀에는 있으나 도면에 누락",
+      "evidence": "E10/Baromi",
+      "confidence": "확정"
+    },
+    {
+      "id": "GA-02",
+      "site": "검암 푸르지오 프라베뉴",
+      "category": "번호 누락",
+      "location": "도면 지시 위치 1",
+      "detail": "도면 파일 객체의 번호 누락",
+      "evidence": "E09/Baromi",
+      "confidence": "확정"
+    },
+    {
+      "id": "GA-03",
+      "site": "검암 푸르지오 프라베뉴",
+      "category": "번호 누락",
+      "location": "도면 지시 위치 2",
+      "detail": "도면 파일 객체의 번호 누락",
+      "evidence": "E09/Baromi",
+      "confidence": "확정"
+    },
+    {
+      "id": "GA-04",
+      "site": "검암 푸르지오 프라베뉴",
+      "category": "번호 중첩",
+      "location": "476번·477번",
+      "detail": "두 번호 표기가 겹침",
+      "evidence": "E09/Baromi",
+      "confidence": "확정"
+    },
+    {
+      "id": "SC-01",
+      "site": "써밋클라비온(신길10구역)",
+      "category": "원(Circle) 중복",
+      "location": "도면 지시 위치 1",
+      "detail": "중복 원으로 표시된 5개 위치 중 1개",
+      "evidence": "E11",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "SC-02",
+      "site": "써밋클라비온(신길10구역)",
+      "category": "원(Circle) 중복",
+      "location": "도면 지시 위치 2",
+      "detail": "중복 원으로 표시된 5개 위치 중 1개",
+      "evidence": "E11",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "SC-03",
+      "site": "써밋클라비온(신길10구역)",
+      "category": "원(Circle) 중복",
+      "location": "도면 지시 위치 3",
+      "detail": "중복 원으로 표시된 5개 위치 중 1개",
+      "evidence": "E11",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "SC-04",
+      "site": "써밋클라비온(신길10구역)",
+      "category": "원(Circle) 중복",
+      "location": "도면 지시 위치 4",
+      "detail": "중복 원으로 표시된 5개 위치 중 1개",
+      "evidence": "E11",
+      "confidence": "위치표시 확정"
+    },
+    {
+      "id": "SC-05",
+      "site": "써밋클라비온(신길10구역)",
+      "category": "원(Circle) 중복",
+      "location": "도면 지시 위치 5",
+      "detail": "중복 원으로 표시된 5개 위치 중 1개",
+      "evidence": "E11",
+      "confidence": "위치표시 확정"
+    }
+  ],
+  "feedback": [
+    {
+      "site": "청주센텀푸르지오자이",
+      "date": "2026-05-08",
+      "speaker": "유현수",
+      "quote": "현장에서 시공현황 체크하는 것이 용이함. 기존 PDAM을 쓰다 보니 아직 익숙하지 않음. 전반적으로 사용하는 데는 문제없음.",
+      "meaning": "현황 확인 효율은 긍정적이며 초기 숙련 지원 필요"
+    },
+    {
+      "site": "청주센텀푸르지오자이",
+      "date": "2026-05-13",
+      "speaker": "한영규",
+      "quote": "일별 기록표기는 시공 누락 파일 파악과 추후 동선 계획에 도움이 되며, 감리도 일일 작업현황별 다른 색 표기를 원함.",
+      "meaning": "일자별 시뮬레이션과 색상 구분의 현장 활용 근거"
+    },
+    {
+      "site": "검암 푸르지오 프라베뉴",
+      "date": "2026-09-07",
+      "speaker": "오경수",
+      "quote": "파일 넘버링만이라도 검토가 가능한지 요청. 좌표값, 넘버링 도면, 구조일람표를 송부.",
+      "meaning": "현장이 직접 자료를 제공하고 넘버링 검토를 요청"
+    },
+    {
+      "site": "검암 푸르지오 프라베뉴",
+      "date": "2026-09-08",
+      "speaker": "정헌재",
+      "quote": "엑셀 476번 파일 도면 누락, 도면 번호누락 2건, 476·477 번호 중첩 1건을 회신.",
+      "meaning": "요청 다음 날 4개 오류를 번호화해 회신"
+    }
+  ],
+  "evidence_files": [
+    "E01_청주센텀_중복좌표.png",
+    "E02_청주센텀_PDAM위치.png",
+    "E03_청주센텀_파일일람.png",
+    "E04_청주씨엘리체_CAD요약.jpg",
+    "E05_청주씨엘리체_비교표.jpg",
+    "E06_인천계양_CAD요약.jpg",
+    "E07_인천계양_비교표.jpg",
+    "E08_천안업성_표시누락.jpg",
+    "E09_검암_CAD요약.jpg",
+    "E10_검암_비교표.jpg",
+    "E11_써밋클라비온_중복.jpg"
+  ]
+}

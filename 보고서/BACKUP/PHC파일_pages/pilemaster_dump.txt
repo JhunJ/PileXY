@@ -1,0 +1,491 @@
+{
+  "exportedAt": "2026-08-12T04:19:07.039Z",
+  "projectId": "Kt-GkvczXHFSP1q9jSS6J",
+  "summaryDocId": "exY6g1k0f8Vi3dtxdZLlp",
+  "note": "사용자 편집 SSOT. update-pilemaster-multipage.mjs --restore 로만 DB에 다시 넣는다. 기본 실행은 이 파일을 덮어쓰지 않음.",
+  "pages": [
+    {
+      "id": "exY6g1k0f8Vi3dtxdZLlp",
+      "title": "파일마스터(PileXY) 구축·현장 적용(안)",
+      "templateId": "summary",
+      "order": 0,
+      "preserveId": true,
+      "blocks": [
+        {
+          "type": "meta",
+          "order": -999,
+          "content": {
+            "summaryView": {
+              "teamName": "건축BIM팀 정헌재 선임",
+              "dateText": "2026.08.12",
+              "showSummaryBadge": true,
+              "summaryBadgeText": "요약",
+              "summaryBadgeLeft": 5,
+              "pageNumberMarginTop": 8,
+              "bodyFontWeight": 200,
+              "titleLetterSpacing": 0,
+              "teamLetterSpacing": 0,
+              "dateLetterSpacing": 1,
+              "bodyLetterSpacing": 0.15,
+              "bodyLineHeight": 1.22,
+              "headingLetterSpacing": 1,
+              "flowLetterSpacing": 0,
+              "flowMarginLeft": 20,
+              "flowMarginRight": 20,
+              "flowItemGap": 12,
+              "flowHeaderHeight": 22,
+              "flowBodyHeight": 24,
+              "tableMarginLeft": 2,
+              "tableMarginRight": 2,
+              "tableHeaderHeight": 20,
+              "tableRowHeight": 20,
+              "sectionHeaderBandHeight": 24,
+              "sectionHeaderBottomLineHeight": 1,
+              "sectionHeaderRomanPadX": 0,
+              "titleBandTopMargin": 2,
+              "titleTopLineHeight": 3,
+              "titleBandHeight": 30,
+              "titleMetaBandHeight": 12,
+              "titleTopGap": 1,
+              "titleBottomGap": 1,
+              "frameBorderWidth": 0.6,
+              "framePadTop": 4,
+              "framePadRight": 10,
+              "framePadBottom": 2,
+              "framePadLeft": 10,
+              "outerPadTop": 4,
+              "outerPadRight": 14,
+              "outerPadBottom": 2,
+              "outerPadLeft": 14
+            }
+          }
+        },
+        {
+          "type": "heading",
+          "order": 0,
+          "content": {
+            "text": "배경 및 목적"
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 1,
+          "content": {
+            "text": "1) 말뚝 3~4천 본 위치 확인에 __1주일 이상__ 소요, 오류 시 오시공 → %%마이크로파일·철근 보강%%\n2) 설계·시공실적·드론 측량이 나뉘어 차이를 한눈에 보기 어려움\n3) %%말뚝 중심점 자동 산출%%로 5~10분 내 정합성 확인, 지반개량(GEO.D)도 동일 적용"
+          }
+        },
+        {
+          "type": "heading",
+          "order": 2,
+          "content": {
+            "text": "추진계획"
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 3,
+          "content": {
+            "text": "1) 주관: %%건축BIM팀%% 자체 개발  /  %%청주씨엘리체 적용중%%  (PoC 청주센텀푸르지오자이·풍무역푸르지오더마크 완료)\n2) 단계: ① 자체 PoC  ② 현장 적용  ③ 본부 확대\n3) 항목: 좌표 정합성, PDAM 항타, 메이샤 드론, 지적·이격, 공구별 시공 시뮬레이션, 기성·자재"
+          }
+        },
+        {
+          "type": "table",
+          "order": 4,
+          "content": {
+            "colWidths": [
+              34,
+              33,
+              33
+            ],
+            "rows": [
+              [
+                {
+                  "text": "- 3~4천 본 중심점 자동 산출 (1주일 이상 → %%5~10분%%)",
+                  "image": {
+                    "src": "/pilexy-tiles/01-coord.jpg",
+                    "title": "① 좌표 정합성",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                },
+                {
+                  "text": "- PDAM 항타 길이·관입 · PHC 시공길이 대조",
+                  "image": {
+                    "src": "/pilexy-tiles/02-pdam.jpg",
+                    "title": "② PDAM 항타관리",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                },
+                {
+                  "text": "- 드론 정사 ↔ 시공현황 겹침 · PDAM 연동",
+                  "image": {
+                    "src": "/pilexy-tiles/03-meissa.jpg",
+                    "title": "③ 메이샤 드론",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                }
+              ],
+              [
+                {
+                  "text": "- 대지경계 정합 · 흙막이–말뚝 이격 파악",
+                  "image": {
+                    "src": "/pilexy-tiles/04-cadastral.jpg",
+                    "title": "④ 지적·이격 검토",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                },
+                {
+                  "text": "- 업체·공구별 시공 순서 · PDAM 사전 시뮬",
+                  "image": {
+                    "src": "/pilexy-tiles/05-simul.jpg",
+                    "title": "⑤ 시공 시뮬레이션",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                },
+                {
+                  "text": "- 업체별 입고·시공 · 높이별 기성 자동",
+                  "image": {
+                    "src": "/pilexy-tiles/06-billing.jpg",
+                    "title": "⑥ 기성·자재관리",
+                    "showTitleBand": true,
+                    "panX": 0,
+                    "panY": 0,
+                    "scale": 1,
+                    "viewH": 136
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "type": "heading",
+          "order": 5,
+          "content": {
+            "text": "향후계획"
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 6,
+          "content": {
+            "text": "1) 현장 → 현장기술지원 → 건축BIM팀 접수 후 %%WEB 링크%% 열람 체계 정착\n2) 항타·드론·지적·기성 연동 범위를 전 현장으로 확대\n3) 청주씨엘리체 적용 결과를 바탕으로 본부 표준 업무 절차 반영"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ecWwPvMz_mGg5Tj5xYUHr",
+      "title": "배경·업무시나리오 (상세)",
+      "templateId": "detail",
+      "order": 1,
+      "preserveId": false,
+      "blocks": [
+        {
+          "type": "meta",
+          "order": -999,
+          "content": {
+            "summaryView": {
+              "teamName": "건축BIM팀 정헌재 선임",
+              "dateText": "2026.08.12",
+              "showSummaryBadge": false,
+              "summaryBadgeText": "요약",
+              "summaryBadgeLeft": 5,
+              "pageNumberMarginTop": 8,
+              "bodyFontWeight": 400,
+              "titleLetterSpacing": 0,
+              "teamLetterSpacing": 0,
+              "dateLetterSpacing": 1,
+              "bodyLetterSpacing": 0.15,
+              "bodyLineHeight": 1.7,
+              "headingLetterSpacing": 1,
+              "flowLetterSpacing": 0,
+              "flowMarginLeft": 8,
+              "flowMarginRight": 8,
+              "flowItemGap": 8,
+              "flowHeaderHeight": 20,
+              "flowBodyHeight": 18,
+              "tableMarginLeft": 6,
+              "tableMarginRight": 6,
+              "tableHeaderHeight": 22,
+              "tableRowHeight": 20,
+              "sectionHeaderBandHeight": 26,
+              "sectionHeaderBottomLineHeight": 1,
+              "sectionHeaderRomanPadX": 0,
+              "titleBandTopMargin": 2,
+              "titleTopLineHeight": 3,
+              "titleBandHeight": 30,
+              "titleMetaBandHeight": 12,
+              "titleTopGap": 1,
+              "titleBottomGap": 1,
+              "frameBorderWidth": 0.6,
+              "framePadTop": 4,
+              "framePadRight": 10,
+              "framePadBottom": 2,
+              "framePadLeft": 10,
+              "outerPadTop": 6,
+              "outerPadRight": 14,
+              "outerPadBottom": 4,
+              "outerPadLeft": 14
+            }
+          }
+        },
+        {
+          "type": "section-header",
+          "order": 0,
+          "content": {
+            "roman": "I",
+            "subtitle": "배경 및 목적"
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 1,
+          "content": {
+            "text": "1) 배경\n    ▪ 말뚝 3~4천 본 위치 대조에 __1주일 이상__\n    ▪ 좌표 오류 시 오시공 → %%마이크로파일·철근 보강%%\n    ▪ 설계·시공실적·드론이 나뉘어 차이 확인 곤란\n2) 목적\n%%    ▪ %%%%말뚝 중심점 자동 산출%%, 5~10분 내 정합성 확인\n    ▪ 지반개량(GEO.D) 도 동일 규칙으로 확인\n    ▪ 청주씨엘리체 적용중, PoC 2개 현장 완료"
+          }
+        },
+        {
+          "type": "section-header",
+          "order": 2,
+          "content": {
+            "roman": "II",
+            "subtitle": "업무 시나리오"
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 3,
+          "content": {
+            "text": "    ▪ 요청 경로  현장 → 현장기술지원 → %%건축BIM팀%%\n    ▪ BIM팀 작업 후 %%WEB 주소%%로 현장·본사 열람"
+          }
+        },
+        {
+          "type": "table",
+          "order": 4,
+          "content": {
+            "rows": [
+              [
+                "구분",
+                "내용",
+                "비고"
+              ],
+              [
+                "요청",
+                "현장이 시공용 도면을 현장기술지원에 전달",
+                "창구 일원화"
+              ],
+              [
+                "접수",
+                "건축BIM팀이 도면·동·층 정보 확인",
+                "당일~1일"
+              ],
+              [
+                "작업",
+                "말뚝 중심점 산출 → 정합 확인 → WEB 등록",
+                "보통 2~3일"
+              ],
+              [
+                "전달",
+                "파일마스터 WEB 링크로 현장·본사 열람",
+                "설치 없이 브라우저"
+              ]
+            ]
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 5,
+          "content": {
+            "text": "    ▪ 처리 흐름"
+          }
+        },
+        {
+          "type": "flowchart",
+          "order": 6,
+          "content": {
+            "nodes": [
+              {
+                "id": "1",
+                "type": "default",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "data": {
+                  "label": "현장 요청",
+                  "sublabel": "현장기술지원 · 시공도면"
+                },
+                "style": {
+                  "textAlign": "center"
+                }
+              },
+              {
+                "id": "2",
+                "type": "default",
+                "position": {
+                  "x": 200,
+                  "y": 0
+                },
+                "data": {
+                  "label": "BIM팀 접수",
+                  "sublabel": "건축BIM팀 · 동·층 확인"
+                },
+                "style": {
+                  "textAlign": "center"
+                }
+              },
+              {
+                "id": "3",
+                "type": "default",
+                "position": {
+                  "x": 400,
+                  "y": 0
+                },
+                "data": {
+                  "label": "도면 정리·등록",
+                  "sublabel": "중심점 산출 · WEB 등록"
+                },
+                "style": {
+                  "textAlign": "center"
+                }
+              },
+              {
+                "id": "4",
+                "type": "default",
+                "position": {
+                  "x": 600,
+                  "y": 0
+                },
+                "data": {
+                  "label": "WEB 열람",
+                  "sublabel": "현장·본사 브라우저"
+                },
+                "style": {
+                  "textAlign": "center"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "e-1-2",
+                "source": "1",
+                "target": "2"
+              },
+              {
+                "id": "e-2-3",
+                "source": "2",
+                "target": "3"
+              },
+              {
+                "id": "e-3-4",
+                "source": "3",
+                "target": "4"
+              }
+            ]
+          }
+        },
+        {
+          "type": "paragraph",
+          "order": 7,
+          "content": {
+            "text": "1) 적용: %%청주씨엘리체%% 적용중 · PoC 청주센텀푸르지오자이·풍무역푸르지오더마크 완료\n2) 효과: 위치확인 1주일 이상 → %%5~10분%% · 오시공 조기 발견 · 설치 없이 %%WEB 열람%%\n3) 창구: 현장 → 현장기술지원 → %%건축BIM팀%% 접수 후 수일 내 링크 전달\n4) 산출: 말뚝 중심점·정합 결과·WEB 주소 (현장·본사 동일 화면)\n5) 주의: 시공도면·동·층 정보 누락 시 접수 지연 — 요청 시 필수 첨부\n6) 범위: 좌표 정합·항타·드론·지적 이격·시공 시뮬레이션·기성 자재 (요약 1p 항목과 동일)\n7) 확산: 현장 적용 결과를 본부 표준 절차에 반영 후 타 현장 확대\n8) 문의: 건축BIM팀 (파일마스터 접수·WEB 링크 발급)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "5Tb8wzWA1KHrY4T0FHUdK",
+      "title": "주요 기능 ①~② (상세)",
+      "templateId": "detail",
+      "order": 2,
+      "preserveId": false,
+      "blocks": [
+        {
+          "type": "meta",
+          "order": -999,
+          "content": {
+            "summaryView": {
+              "teamName": "건축BIM팀 정헌재 선임",
+              "dateText": "2026.08.12",
+              "showSummaryBadge": false,
+              "summaryBadgeText": "요약",
+              "summaryBadgeLeft": 5,
+              "pageNumberMarginTop": 8,
+              "bodyFontWeight": 400,
+              "titleLetterSpacing": 0,
+              "teamLetterSpacing": 0,
+              "dateLetterSpacing": 1,
+              "bodyLetterSpacing": 0.15,
+              "bodyLineHeight": 1.7,
+              "headingLetterSpacing": 1,
+              "flowLetterSpacing": 0,
+              "flowMarginLeft": 8,
+              "flowMarginRight": 8,
+              "flowItemGap": 8,
+              "flowHeaderHeight": 20,
+              "flowBodyHeight": 18,
+              "tableMarginLeft": 6,
+              "tableMarginRight": 6,
+              "tableHeaderHeight": 22,
+              "tableRowHeight": 20,
+              "sectionHeaderBandHeight": 26,
+              "sectionHeaderBottomLineHeight": 1,
+              "sectionHeaderRomanPadX": 0,
+              "titleBandTopMargin": 2,
+              "titleTopLineHeight": 3,
+              "titleBandHeight": 30,
+              "titleMetaBandHeight": 12,
+              "titleTopGap": 1,
+              "titleBottomGap": 1,
+              "frameBorderWidth": 0.6,
+              "framePadTop": 4,
+              "framePadRight": 10,
+              "framePadBottom": 2,
+              "framePadLeft": 10,
+              "outerPadTop": 6,
+              "outerPadRight": 14,
+              "outerPadBottom": 4,
+              "outerPadLeft": 14
+            }
+          }
+        },
+        {
+          "type": "section-header",
+          "order": 0,
+          "content": {
+            "roman": "III",
+            "subtitle": "개발항목 · 좌표 · 항타"
+          }
+        },
+        {
+          "type": "table",
+          "order": 1,
+          "content": {
+            "colWidths": [
+              48,
+              52
+            ],
+            "rows": [
+              [
+                {
+                  "text": "1) 좌표 정합성\n① 현황 및 문제점\n▪ 3~4천 본 위치 대조 __1주일 이상__\n▪ 좌표 오류 시 오시공 → %%마이크로파일·철근 보강%%\n▪ 지반개량(GEO.D) 동일 확인 곤란\n\n② 해결방안\n▪ 도면에서 %%말뚝 중심점 자동 산출%%\n▪ 시공·측량과 한 화면에서

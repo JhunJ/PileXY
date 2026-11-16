@@ -96,12 +96,16 @@ finally {
 
 $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -TokenFile "{1}" -CloudflaredPath "{2}"' -f $watchdog, $destination, $CloudflaredPath
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
+# IgnoreNew keeps the running connector unique while this trigger recovers an
+# unexpectedly terminated watchdog, including a clean exit.
+$recoveryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($logonTrigger, $recoveryTrigger) `
     -Principal $principal -Settings $settings -Force | Out-Null
 if (-not $NoStart) { Start-ScheduledTask -TaskName $taskName }
 [pscustomobject]@{ TaskName = $taskName; TunnelId = $tunnelId; Started = -not $NoStart; Metrics = 'http://127.0.0.1:20251' }

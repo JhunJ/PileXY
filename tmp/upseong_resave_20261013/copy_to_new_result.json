@@ -1,0 +1,279 @@
+﻿{
+    "source":  "D:\\정헌재 선임_2025\\건축_BIM\\현장지원\\천안업성_261013_파일마스터\\26.08.10 업성푸르지오 레이크시티 1단지 좌표성과표_Rev.1.xlsx",
+    "output":  "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\outputs\\upseong_resave_20261013_21f9\\26.08.10 업성푸르지오 레이크시티 1단지 좌표성과표_Rev.1_재저장.xlsx",
+    "copied":  true,
+    "saved":  true,
+    "sourceHashBefore":  "614B7F29B4108D9609E10AE1673DD6EA1788EC951E97B8DC31407AF1A3B9504D",
+    "sourceSheets":  [
+                         {
+                             "name":  "101동",
+                             "address":  "$A$1:$D$467",
+                             "rows":  467,
+                             "columns":  4,
+                             "valuesHash":  "FAC30ABB1C2162F8C728F4B4509126AE8717B1EFCEC6B427A40ACC9AE74DA9DE",
+                             "formulasHash":  "DFBEA4C43EA9E90A94CDFC4E25D2B852A9BB198D0A5C4F23A79B60B5D39FEB9A",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "102동",
+                             "address":  "$A$1:$D$433",
+                             "rows":  433,
+                             "columns":  4,
+                             "valuesHash":  "C72ADE34FCE4EED6B434927DEF650FF3E758DD3B0184CBB646BF292CBE595008",
+                             "formulasHash":  "BEE858BC96643D87D1BF19F153D994C732EF08CA1B82A0DE5DE4421C2F898C21",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "103동",
+                             "address":  "$A$1:$D$274",
+                             "rows":  274,
+                             "columns":  4,
+                             "valuesHash":  "4D87AFB414346374786540A7783CFDD6B33FE9B8CDEFEC96862C8BEA477DE07D",
+                             "formulasHash":  "0B5BFE526FE9FCA02EB446A71DE1F9EF0ECF539BA597E865C2F82CC26BCB2FD1",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "104동",
+                             "address":  "$A$1:$D$398",
+                             "rows":  398,
+                             "columns":  4,
+                             "valuesHash":  "8F545DD38CE7CEAE691B0D140F047A7557433FA8CEAA6F76BA4CFD14E0B36012",
+                             "formulasHash":  "2C1CA9AEB99169D0AD533BC60B6F1A45E49BEA60D075D7BB8E945A49D1157FCE",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "105동",
+                             "address":  "$A$1:$D$376",
+                             "rows":  376,
+                             "columns":  4,
+                             "valuesHash":  "486E531B09160A8399E8FA3E2947457EA1D04268C253B7E1573ED784AD53DF68",
+                             "formulasHash":  "151DB6175F496719C94D6EF4B1925C0DCC49B605F4DD5BB23CE1E7CC14FAF786",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "106동",
+                             "address":  "$A$1:$D$365",
+                             "rows":  365,
+                             "columns":  4,
+                             "valuesHash":  "E00E6CE2D3737DEF34BD9724B61008C4D31AE5F9CF065869D9F3DF69993D4193",
+                             "formulasHash":  "A05C1CFA9075BE1655AAEA8D87FA25493A95269D3A2414639C5206BEA4D78957",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "107동",
+                             "address":  "$A$1:$D$374",
+                             "rows":  374,
+                             "columns":  4,
+                             "valuesHash":  "73423A855D0D8AA51D85B84273ABA3D544207E068E339E05A1D0DF087C4812EB",
+                             "formulasHash":  "C0CE8F36394320FA20DD949587AB6C1F86A192283BEA5933134FE19DEA6842E8",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "108동",
+                             "address":  "$A$1:$D$400",
+                             "rows":  400,
+                             "columns":  4,
+                             "valuesHash":  "2966FAB15F6C1FF93902AC84D56BC6C7869301D22FF865F28F2FDAC21D3787D0",
+                             "formulasHash":  "BCCF72D8A39B6E9E6E1C6327ADB32F756461CCA0B641A30FFC3668EE90F40E89",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "109동",
+                             "address":  "$A$1:$D$430",
+                             "rows":  430,
+                             "columns":  4,
+                             "valuesHash":  "29C11C54581BC88C8EA918FBFF36FA8932848340A7AE0260903D51CE0FB5408B",
+                             "formulasHash":  "0CDDE5468AB5D5B23E2A887C8E8222D76745B7F3910A2001732ECF8E5EA9F4F7",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "110동",
+                             "address":  "$A$1:$D$192",
+                             "rows":  192,
+                             "columns":  4,
+                             "valuesHash":  "ECD7F4F45E184C054313C04C1E8F71FA0E75B61CF11ED4678BEB0D00020808FA",
+                             "formulasHash":  "D0EF12B91378668572D628C26B8D2DA5465CCCAF409EDD9C493EEF62AF1BAEFE",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "111동",
+                             "address":  "$A$1:$D$182",
+                             "rows":  182,
+                             "columns":  4,
+                             "valuesHash":  "EC07509CBF78B03C9D42330596464A4C6997DDC72B834747A0B4D2BA914D7920",
+                             "formulasHash":  "D6239BE883D5F02F2F0E662FF1DA46C738A0AC766D1588B4F4E16CBD3227877B",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         },
+                         {
+                             "name":  "주차장",
+                             "address":  "$A$1:$D$1667",
+                             "rows":  1667,
+                             "columns":  4,
+                             "valuesHash":  "24AACB97B402140E1904CD6CEFF5C199F32E8BE694DD363B6E66E51D284A82BD",
+                             "formulasHash":  "9384E3A79A8B621EB008FD752970A0822A5CE60B16D8888CD2175A5378751569",
+                             "printArea":  null,
+                             "orientation":  1,
+                             "paperSize":  9
+                         }
+                     ],
+    "copyPermissionEnabled":  false,
+    "copySheets":  [
+                       {
+                           "name":  "101동",
+                           "address":  "$A$1:$D$467",
+                           "rows":  467,
+                           "columns":  4,
+                           "valuesHash":  "FAC30ABB1C2162F8C728F4B4509126AE8717B1EFCEC6B427A40ACC9AE74DA9DE",
+                           "formulasHash":  "DFBEA4C43EA9E90A94CDFC4E25D2B852A9BB198D0A5C4F23A79B60B5D39FEB9A",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "102동",
+                           "address":  "$A$1:$D$433",
+                           "rows":  433,
+                           "columns":  4,
+                           "valuesHash":  "C72ADE34FCE4EED6B434927DEF650FF3E758DD3B0184CBB646BF292CBE595008",
+                           "formulasHash":  "BEE858BC96643D87D1BF19F153D994C732EF08CA1B82A0DE5DE4421C2F898C21",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "103동",
+                           "address":  "$A$1:$D$274",
+                           "rows":  274,
+                           "columns":  4,
+                           "valuesHash":  "4D87AFB414346374786540A7783CFDD6B33FE9B8CDEFEC96862C8BEA477DE07D",
+                           "formulasHash":  "0B5BFE526FE9FCA02EB446A71DE1F9EF0ECF539BA597E865C2F82CC26BCB2FD1",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "104동",
+                           "address":  "$A$1:$D$398",
+                           "rows":  398,
+                           "columns":  4,
+                           "valuesHash":  "8F545DD38CE7CEAE691B0D140F047A7557433FA8CEAA6F76BA4CFD14E0B36012",
+                           "formulasHash":  "2C1CA9AEB99169D0AD533BC60B6F1A45E49BEA60D075D7BB8E945A49D1157FCE",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "105동",
+                           "address":  "$A$1:$D$376",
+                           "rows":  376,
+                           "columns":  4,
+                           "valuesHash":  "486E531B09160A8399E8FA3E2947457EA1D04268C253B7E1573ED784AD53DF68",
+                           "formulasHash":  "151DB6175F496719C94D6EF4B1925C0DCC49B605F4DD5BB23CE1E7CC14FAF786",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "106동",
+                           "address":  "$A$1:$D$365",
+                           "rows":  365,
+                           "columns":  4,
+                           "valuesHash":  "E00E6CE2D3737DEF34BD9724B61008C4D31AE5F9CF065869D9F3DF69993D4193",
+                           "formulasHash":  "A05C1CFA9075BE1655AAEA8D87FA25493A95269D3A2414639C5206BEA4D78957",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "107동",
+                           "address":  "$A$1:$D$374",
+                           "rows":  374,
+                           "columns":  4,
+                           "valuesHash":  "73423A855D0D8AA51D85B84273ABA3D544207E068E339E05A1D0DF087C4812EB",
+                           "formulasHash":  "C0CE8F36394320FA20DD949587AB6C1F86A192283BEA5933134FE19DEA6842E8",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "108동",
+                           "address":  "$A$1:$D$400",
+                           "rows":  400,
+                           "columns":  4,
+                           "valuesHash":  "2966FAB15F6C1FF93902AC84D56BC6C7869301D22FF865F28F2FDAC21D3787D0",
+                           "formulasHash":  "BCCF72D8A39B6E9E6E1C6327ADB32F756461CCA0B641A30FFC3668EE90F40E89",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "109동",
+                           "address":  "$A$1:$D$430",
+                           "rows":  430,
+                           "columns":  4,
+                           "valuesHash":  "29C11C54581BC88C8EA918FBFF36FA8932848340A7AE0260903D51CE0FB5408B",
+                           "formulasHash":  "0CDDE5468AB5D5B23E2A887C8E8222D76745B7F3910A2001732ECF8E5EA9F4F7",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "110동",
+                           "address":  "$A$1:$D$192",
+                           "rows":  192,
+                           "columns":  4,
+                           "valuesHash":  "ECD7F4F45E184C054313C04C1E8F71FA0E75B61CF11ED4678BEB0D00020808FA",
+                           "formulasHash":  "D0EF12B91378668572D628C26B8D2DA5465CCCAF409EDD9C493EEF62AF1BAEFE",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "111동",
+                           "address":  "$A$1:$D$182",
+                           "rows":  182,
+                           "columns":  4,
+                           "valuesHash":  "EC07509CBF78B03C9D42330596464A4C6997DDC72B834747A0B4D2BA914D7920",
+                           "formulasHash":  "D6239BE883D5F02F2F0E662FF1DA46C738A0AC766D1588B4F4E16CBD3227877B",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       },
+                       {
+                           "name":  "주차장",
+                           "address":  "$A$1:$D$1667",
+                           "rows":  1667,
+                           "columns":  4,
+                           "valuesHash":  "24AACB97B402140E1904CD6CEFF5C199F32E8BE694DD363B6E66E51D284A82BD",
+                           "formulasHash":  "9384E3A79A8B621EB008FD752970A0822A5CE60B16D8888CD2175A5378751569",
+                           "printArea":  null,
+                           "orientation":  1,
+                           "paperSize":  9
+                       }
+                   ],
+    "contentMatches":  true,
+    "sourceHashAfter":  "614B7F29B4108D9609E10AE1673DD6EA1788EC951E97B8DC31407AF1A3B9504D",
+    "originalUnchanged":  true
+}

@@ -1,0 +1,82 @@
+[
+  {
+    "scene": "hook",
+    "start": 0,
+    "duration": 5.5
+  },
+  {
+    "scene": "structure",
+    "start": 5.5,
+    "duration": 5.5
+  },
+  {
+    "scene": "mismatch",
+    "start": 11.0,
+    "duration": 7
+  },
+  {
+    "scene": "fragment",
+    "start": 18.0,
+    "duration": 6
+  },
+  {
+    "scene": "flow",
+    "start": 24.0,
+    "duration": 6.5
+  },
+  {
+    "scene": "brand",
+    "start": 30.5,
+    "duration": 3
+  },
+  {
+    "scene": "load",
+    "start": 33.5,
+    "duration": 8
+  },
+  {
+    "scene": "issues",
+    "start": 41.5,
+    "duration": 8
+  },
+  {
+    "scene": "excel_flow",
+    "start": 49.5,
+    "duration": 7
+  },
+  {
+    "scene": "vendor_excel",
+    "start": 56.5,
+    "duration": 9
+  },
+  {
+    "scene": "compare",
+    "start": 65.5,
+    "duration": 7
+  },
+  {
+    "scene": "status",
+    "start": 72.5,
+    "duration": 5
+  },
+  {
+    "scene": "simulation",
+    "start": 77.5,
+    "duration": 13
+  },
+  {
+    "scene": "field",
+    "start": 90.5,
+    "duration": 5
+  },
+  {
+    "scene": "settlement",
+    "start": 95.5,
+    "duration": 8
+  },
+  {
+    "scene": "ending",
+    "start": 103.5,
+    "duration": 4.5
+  }
+]

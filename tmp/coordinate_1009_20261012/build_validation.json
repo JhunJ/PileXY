@@ -1,0 +1,70 @@
+{
+  "outputPath": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\outputs\\coordinate_1009_20261012_c11d\\동별수정좌표값1009_파일마스터업로드용.xlsx",
+  "results": [
+    {
+      "sheet": "101동 ",
+      "count": 242,
+      "range": "A1:C243",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_101동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"101동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544816.5949,192097.5049],[2,544817.3077,192098.7394],[3,544818.0204,192099.974],[4,544818.8645,192101.4358]]}"
+    },
+    {
+      "sheet": "102동",
+      "count": 260,
+      "range": "A1:C261",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_102동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"102동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544757.3449,192095.5313],[2,544757.9636,192096.6029],[3,544758.5886,192097.6854],[4,544759.2136,192098.768]]}"
+    },
+    {
+      "sheet": "103동",
+      "count": 237,
+      "range": "A1:C238",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_103동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"103동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544684.4386,192071.1251],[2,544685.0636,192072.2076],[3,544683.3561,192071.7501],[4,544683.9811,192072.8326]]}"
+    },
+    {
+      "sheet": "105동",
+      "count": 64,
+      "range": "A1:C65",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_105동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"105동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544606.1606,192028.191],[2,544605.4648,192029.2295],[3,544605.1221,192027.4953],[4,544604.4264,192028.5338]]}"
+    },
+    {
+      "sheet": "106동",
+      "count": 212,
+      "range": "A1:C213",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_106동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"106동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544677.1261,192120.0688],[2,544676.0436,192120.6938],[3,544678.0665,192121.3262],[4,544676.984,192121.9512]]}"
+    },
+    {
+      "sheet": "107동",
+      "count": 235,
+      "range": "A1:C236",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_107동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"107동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544722.3549,192145.9865],[2,544721.2724,192146.6115],[3,544722.9799,192147.069],[4,544724.51,192147.2191]]}"
+    },
+    {
+      "sheet": "108동",
+      "count": 227,
+      "range": "A1:C228",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_108동.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"108동\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544795.2767,192162.6938],[2,544794.7591,192163.8313],[3,544794.0331,192162.8141],[4,544793.4221,192160.7177]]}"
+    },
+    {
+      "sheet": "주차장",
+      "count": 14,
+      "range": "A1:C15",
+      "valuesVerified": true,
+      "preview": "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\tmp\\coordinate_1009_20261012\\preview_주차장.png",
+      "inspect": "{\"kind\":\"table\",\"sheet\":\"주차장\",\"address\":\"A1:C5\",\"rows\":5,\"cols\":3,\"values\":[[\"번호\",\"X\",\"Y\"],[1,544772.9973,192191.6706],[2,544772.0598,192190.0468],[3,544771.1223,192188.423],[4,544769.0248,192184.7901]]}"
+    }
+  ],
+  "errors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}"
+}

@@ -114,6 +114,7 @@ def test_build_dashboard_reports_auto_matches_and_mapping_diagnostics(monkeypatc
         "projectDuplicateCount": 1,
         "pdamDuplicateCount": 0,
         "parkingPileFormatIssueCount": 0,
+        "locationNameMismatchCount": 0,
     }
     assert diagnostics["autoMatched"][0]["pileNumber"] == "34"
     assert diagnostics["pdamOnly"][0]["location"] == "B3"

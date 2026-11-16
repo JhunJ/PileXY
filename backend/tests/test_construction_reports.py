@@ -130,6 +130,42 @@ def test_parse_construction_workbook_extracts_rows():
     assert first["pile_remaining"] == 0.8
 
 
+def test_parse_single_header_workbook_keeps_first_construction_record():
+    rows = [
+        ["시공일자", "시공위치", "파일번호", "시공장비", "파일종류", "시공공법", "파일잔량", "천공깊이", "관입깊이"],
+        ["2026-10-20", "101동", "1", "1호기", "PHC", "DRA", 0.2, 8, 8],
+        ["2026-10-21", "101동", "2", "1호기", "PHC", "DRA", 0.1, 9, 9],
+        ["2026-10-22", "101동", "3", "2호기", "PHC", "DRA", 0.3, 7, 7],
+    ]
+    buffer = io.BytesIO()
+    pd.DataFrame(rows).to_excel(buffer, engine="openpyxl", header=False, index=False)
+
+    parsed = construction_reports.parse_construction_workbook(buffer.getvalue(), filename="single-header.xlsx")
+
+    assert parsed["summary"]["recordCount"] == 3
+    assert [record["pile_number"] for record in parsed["records"]] == ["1", "2", "3"]
+    assert parsed["records"][0]["construction_date"] == "2026-10-20"
+    assert parsed["records"][0]["pile_remaining"] == 0.2
+
+
+def test_parse_single_header_workbook_keeps_excel_date_cell_first_record():
+    from datetime import datetime
+
+    rows = [
+        ["시공일", "시공위치", "파일번호", "파일길이(m)"],
+        [datetime(2026, 10, 20), "101동", "1-1", 12],
+    ]
+    buffer = io.BytesIO()
+    pd.DataFrame(rows).to_excel(buffer, engine="openpyxl", header=False, index=False)
+
+    parsed = construction_reports.parse_construction_workbook(buffer.getvalue(), filename="excel-date.xlsx")
+
+    assert parsed["summary"]["recordCount"] == 1
+    assert parsed["records"][0]["construction_date"] == "2026-10-20"
+    assert parsed["records"][0]["pile_number"] == "1-1"
+    assert parsed["records"][0]["pile_classification_total"] == 12.0
+
+
 def test_merge_pile_classification_from_workbook_bytes_fills_null_without_db_write():
     """과거 import로 DB에 단본·합계가 비어 있던 것처럼 보일 때, 저장 엑셀 재파싱으로 메모리만 보강."""
     wb = _sample_workbook_bytes()
@@ -374,8 +410,8 @@ def test_map_records_parking_circle_not_unified_without_parking_unified_location
     assert mapping["circleMappings"][0]["status"] == "pending"
 
 
-def test_map_records_parking_fallback_when_circle_tagged_tower_overlaps_parking():
-    """타워 윤곽이 주차보다 우선되어 원 부위가 타워로만 잡혀도, PDAM 주차 행은 Bn으로 묶이면 파일번호로 매칭."""
+def test_map_records_keeps_tower_and_parking_separate_with_single_parking_outline():
+    """타워는 PDAM 부위까지 일치해야 한다. 주차 윤곽이 하나여도 같은 번호만으로 타워 말뚝과 연결하지 않는다."""
     records = [
         {
             "location": "주차장",
@@ -404,8 +440,12 @@ def test_map_records_parking_fallback_when_circle_tagged_tower_overlaps_parking(
         ],
         parking_unified_location="B2",
     )
-    assert mapping["matchedCircleCount"] == 1
-    assert mapping["circleMappings"][0]["status"] == "installed"
+    assert mapping["matchedCircleCount"] == 0
+    assert mapping["pendingCircleCount"] == 1
+    assert mapping["unmatchedRecordCount"] == 1
+    assert mapping["circleMappings"][0]["status"] == "pending"
+    assert mapping["circleMappings"][0]["matchType"] == "pending"
+    assert mapping["circleMappings"][0]["recordRowNumber"] is None
 
 
 def test_map_records_outline_geometry_aligns_stale_circle_name_with_pdam():

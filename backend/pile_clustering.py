@@ -46,6 +46,12 @@ class ClusterConfig:
     building_max_area_ratio: float = 0.25
 
 
+def _number_pattern_min_points(config: ClusterConfig) -> int:
+    # Number patterns keep their existing ten-point default; an explicitly
+    # smaller minimum must also allow small buildings through this path.
+    return max(1, min(MIN_POINTS_FOR_BUILDING, config.building_min_points))
+
+
 @dataclass
 class PilePoint:
     id: str
@@ -116,7 +122,7 @@ def cluster_piles(
     
     # 번호 패턴 기반 클러스터링 시도
     numbered_points = [p for p in points if p.number is not None]
-    if len(numbered_points) >= MIN_POINTS_FOR_BUILDING:
+    if len(numbered_points) >= _number_pattern_min_points(config):
         try:
             number_based_clusters = _cluster_by_number_pattern(
                 numbered_points,
@@ -908,6 +914,19 @@ def _grow_cluster_from_seed(
     
     cluster_points.append(seed)
     used_point_ids.add(seed.id)
+
+    # The seed nearest the group center may be 2 or 3. Preserve earlier
+    # starting numbers without moving that representative or its radius.
+    for earlier_number in sorted(number for number in START_NUMBERS if number < start_no):
+        earlier_candidates = [
+            point for point in points_by_number.get(earlier_number, [])
+            if point.id not in used_point_ids
+            and math.hypot(point.x - seed.x, point.y - seed.y) <= max_distance
+        ]
+        if earlier_candidates:
+            earlier = min(earlier_candidates, key=lambda point: math.hypot(point.x - seed.x, point.y - seed.y))
+            cluster_points.append(earlier)
+            used_point_ids.add(earlier.id)
     
     current_no = start_no
     missing_count = 0
@@ -960,14 +979,14 @@ def _is_valid_building_cluster(candidate: _ClusterCandidate, config: ClusterConf
     클러스터가 유효한 동(건물)인지 판정합니다.
     
     조건:
-    - count_points >= MIN_POINTS_FOR_BUILDING
+    - count_points >= 번호 패턴 최소 개수(기본 10, 작은 명시 설정 허용)
     - missing_ratio <= MAX_MISSING_RATIO
     - range_size <= MAX_RANGE_FOR_BUILDING
     """
     metrics = candidate.metrics
     
     # 최소 점 개수 체크
-    if metrics.count_points < MIN_POINTS_FOR_BUILDING:
+    if metrics.count_points < _number_pattern_min_points(config):
         return False
     
     # 누락률 체크

@@ -1,0 +1,29 @@
+순번,구분,FQDN,포트,프로토콜,용도,비고
+1,운영 중 지속,aissvp01.daewooenc.com,443,TCP,BRDS PRUGio 연동,
+2,운영 중 지속,baronet.daewooenc.com,443,TCP,바로넷 SSO 로그인,
+3,운영 중 지속,platform-api.meissa.ai,443,TCP,Meissa REST API,
+4,운영 중 지속,cloud.meissa.ai,443,TCP,Meissa 웹 로그인 연동,
+5,운영 중 지속,cs.carta.is,443,TCP,Carta orthophoto DSM,
+6,운영 중 지속,api.vworld.kr,443,TCP,브이월드 WFS 주소 API,
+7,운영 중 지속,we8104.com,443,TCP,시공 보고서 기본 소스,다른 URL 사용 시 해당 호스트 추가
+8,운영 중 지속,cdn.jsdelivr.net,443,TCP,프론트 CDN,사용자 PC 브라우저만 사용 시 서버 생략 가능
+9,운영 중 지속,www.googletagmanager.com,443,TCP,GA gtag 스크립트,위와 동일
+10,운영 중 지속,www.google-analytics.com,443,TCP,GA 수집,위와 동일
+11,운영 중 지속,www.gov.kr,443,TCP,정부24 안내 링크,위와 동일
+12,운영 중 지속,region1.v2.argotunnel.com,7844,TCP UDP,Cloudflare Tunnel,와일드카드 불가 정책에 맞춘 고정 호스트
+13,운영 중 지속,region2.v2.argotunnel.com,7844,TCP UDP,Cloudflare Tunnel,443만으로는 터널 불가 7844 필수
+14,운영 중 지속,cftunnel.com,7844,TCP UDP,Tunnel SNI 엄격 시,필요 시 IT 확인
+15,운영 중 지속,h2.cftunnel.com,7844,TCP,Tunnel http2,필요 시
+16,운영 중 지속,quic.cftunnel.com,7844,UDP,Tunnel QUIC,필요 시
+17,설치 업데이트 시,pypi.org,443,TCP,pip 메타데이터,
+18,설치 업데이트 시,files.pythonhosted.org,443,TCP,PyPI wheel 다운로드,
+19,설치 업데이트 시,playwright.azureedge.net,443,TCP,Playwright Chromium,차단 로그에 다른 호스트 있으면 추가
+20,설치 업데이트 시,cdn.playwright.dev,443,TCP,Playwright Chromium 대안,
+21,설치 업데이트 시,storage.googleapis.com,443,TCP,바이너리 경로별,필요 시
+22,설치 업데이트 시,github.com,443,TCP,git pip cloudflared,재설치 시마다 필요
+23,설치 업데이트 시,raw.githubusercontent.com,443,TCP,GitHub raw,
+24,설치 업데이트 시,codeload.github.com,443,TCP,GitHub 아카이브,
+25,설치 업데이트 시,objects.githubusercontent.com,443,TCP,릴리즈 자산,
+26,설치 업데이트 시,registry.npmjs.org,443,TCP,npm,Node 사용 시
+27,설치 업데이트 시,api.cloudflare.com,443,TCP,cloudflared 업데이트 확인,선택 로그 오류 시
+28,설치 업데이트 시,update.argotunnel.com,443,TCP,cloudflared 업데이트 확인,선택

@@ -1,0 +1,86 @@
+[
+  {
+    "start": 0,
+    "duration": 8,
+    "scene": "hook",
+    "headline": "말뚝의 위치와 번호, 도면과 현장이 같을까요?"
+  },
+  {
+    "start": 8,
+    "duration": 11,
+    "scene": "structure",
+    "headline": "시공 전에, 말뚝의 번호와 위치를 먼저 맞춰봅니다."
+  },
+  {
+    "start": 19,
+    "duration": 11,
+    "scene": "mismatch",
+    "headline": "좌표 하나가 다르면, 확인해야 할 일이 늘어납니다."
+  },
+  {
+    "start": 30,
+    "duration": 9,
+    "scene": "fragment",
+    "headline": "도면, 좌표표, 시공기록. 자료는 따로 흩어져 있습니다."
+  },
+  {
+    "start": 39,
+    "duration": 10,
+    "scene": "flow",
+    "headline": "그래서, 같은 말뚝을 한 화면에서 맞춰봅니다."
+  },
+  {
+    "start": 49,
+    "duration": 5,
+    "scene": "brand",
+    "headline": "파일 마스터 PHC파일 공사관리시스템"
+  },
+  {
+    "start": 54,
+    "duration": 12,
+    "scene": "load",
+    "headline": "먼저, 현장의 저장 작업을 불러옵니다. 저장 작업을 불러옵니다."
+  },
+  {
+    "start": 66,
+    "duration": 12,
+    "scene": "issues",
+    "headline": "겹친 좌표와 번호 누락. 어디가 다른지 바로 확인합니다."
+  },
+  {
+    "start": 78,
+    "duration": 10,
+    "scene": "compare",
+    "headline": "제출된 엑셀 좌표도, 같은 번호끼리 비교합니다."
+  },
+  {
+    "start": 88,
+    "duration": 10,
+    "scene": "status",
+    "headline": "현장의 기록을 연결하면, 시공현황이 색으로 보입니다."
+  },
+  {
+    "start": 98,
+    "duration": 16,
+    "scene": "simulation",
+    "headline": "날짜별로 어디까지 시공했는지 확인합니다. "
+  },
+  {
+    "start": 114,
+    "duration": 11,
+    "scene": "field",
+    "headline": "왜 일별로 봐야 할까요? 현장이 알려줬습니다."
+  },
+  {
+    "start": 125,
+    "duration": 11,
+    "scene": "settlement",
+    "headline": "좌표에서 시공실적까지. 월별 기성정리로 이어집니다."
+  },
+  {
+    "start": 136,
+    "duration": 8,
+    "scene": "ending",
+    "headline": "정확한 좌표에서 시작하는 PHC파일 공사관리"
+  }
+]

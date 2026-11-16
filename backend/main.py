@@ -422,22 +422,68 @@ def _find_saved_setting_by_name_version(project_name: str, version_id: str) -> O
     return None
 
 
+def _saved_setting_paths(
+    project_name: str,
+    version_id: str,
+    context_project: Optional[str] = None,
+    context_project_id: Optional[str] = None,
+) -> List[str]:
+    """Resolve current and indexed legacy files without changing stored data."""
+    key = _settings_file_key(project_name, version_id, context_project, context_project_id)
+    paths = [os.path.join(SAVED_SETTINGS_DIR, f"{key}.json")]
+    name = normalize_project_name(project_name)
+    version = str(version_id or "").strip()
+    context = _normalize_settings_context_project(context_project)
+    context_id = _normalize_settings_context_project_id(context_project_id)
+    legacy_paths = [
+        os.path.join(SAVED_SETTINGS_DIR, f"{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]}.json")
+        for raw in (f"{context}::{name}::{version}", f"{name}::{version}")
+    ]
+    legacy_paths = [path for path in legacy_paths if path not in paths and os.path.isfile(path)]
+    if not legacy_paths:
+        return paths
+
+    # Legacy hashes omit the project ID (or both context fields). Confirm both
+    # the index and payload belong to this exact scope before accepting them.
+    identity = (name, version, context, context_id)
+    def setting_identity(item: Dict[str, Any]) -> Tuple[str, str, str, str]:
+        return (
+            normalize_project_name(item.get("projectName") or item.get("name")),
+            str(item.get("versionId") or "").strip(),
+            _normalize_settings_context_project(item.get("contextProject")),
+            _normalize_settings_context_project_id(item.get("contextProjectId")),
+        )
+
+    if not any(setting_identity(entry) == identity for entry in _read_saved_settings_index()):
+        return paths
+    for path in legacy_paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict) and setting_identity(payload) == identity:
+                paths.append(path)
+        except (OSError, ValueError):
+            continue
+    return paths
+
+
 def _get_saved_setting(
     project_name: str,
     version_id: str,
     context_project: Optional[str] = None,
     context_project_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    key = _settings_file_key(project_name, version_id, context_project, context_project_id)
-    path = os.path.join(SAVED_SETTINGS_DIR, f"{key}.json")
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        return apply_setting_defaults(payload if isinstance(payload, dict) else {})
-    except Exception:
-        return None
+    for path in _saved_setting_paths(project_name, version_id, context_project, context_project_id):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                return apply_setting_defaults(payload)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _put_saved_setting(
@@ -473,15 +519,15 @@ def _remove_saved_setting(
     context_project: Optional[str] = None,
     context_project_id: Optional[str] = None,
 ) -> bool:
-    key = _settings_file_key(project_name, version_id, context_project, context_project_id)
-    path = os.path.join(SAVED_SETTINGS_DIR, f"{key}.json")
-    if os.path.isfile(path):
-        try:
-            os.remove(path)
-            return True
-        except Exception:
-            pass
-    return False
+    removed = False
+    for path in _saved_setting_paths(project_name, version_id, context_project, context_project_id):
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed = True
+            except OSError:
+                pass
+    return removed
 
 
 # ---------- 필지 경계점 좌표등록부 (프로젝트·작업 범위, 서버 공유) ----------

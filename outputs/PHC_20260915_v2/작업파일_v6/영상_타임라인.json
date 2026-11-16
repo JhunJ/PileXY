@@ -1,0 +1,86 @@
+[
+  {
+    "scene": "hook",
+    "start": 0,
+    "duration": 5.5,
+    "source_end": 7.7
+  },
+  {
+    "scene": "structure",
+    "start": 5.5,
+    "duration": 5.5,
+    "source_end": 7
+  },
+  {
+    "scene": "mismatch",
+    "start": 11.0,
+    "duration": 7,
+    "source_end": 9
+  },
+  {
+    "scene": "fragment",
+    "start": 18.0,
+    "duration": 6,
+    "source_end": 8
+  },
+  {
+    "scene": "flow",
+    "start": 24.0,
+    "duration": 6.5,
+    "source_end": 8.5
+  },
+  {
+    "scene": "brand",
+    "start": 30.5,
+    "duration": 3,
+    "source_end": 4.6
+  },
+  {
+    "scene": "load",
+    "start": 33.5,
+    "duration": 8,
+    "source_end": 11.7
+  },
+  {
+    "scene": "issues",
+    "start": 41.5,
+    "duration": 8,
+    "source_end": 10.5
+  },
+  {
+    "scene": "compare",
+    "start": 49.5,
+    "duration": 7,
+    "source_end": 9.7
+  },
+  {
+    "scene": "status",
+    "start": 56.5,
+    "duration": 7,
+    "source_end": 9.7
+  },
+  {
+    "scene": "simulation",
+    "start": 63.5,
+    "duration": 11,
+    "source_end": 15.8
+  },
+  {
+    "scene": "field",
+    "start": 74.5,
+    "duration": 7,
+    "source_end": 9.2
+  },
+  {
+    "scene": "settlement",
+    "start": 81.5,
+    "duration": 8,
+    "source_end": 10.7
+  },
+  {
+    "scene": "ending",
+    "start": 89.5,
+    "duration": 4.5,
+    "source_end": 6
+  }
+]

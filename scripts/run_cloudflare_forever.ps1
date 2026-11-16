@@ -26,9 +26,12 @@ if (-not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) {
     exit 1
 }
 
+. (Join-Path $PSScriptRoot 'pilexy_watchdog_native.ps1')
+
 $mutex = New-Object System.Threading.Mutex($false, 'Local\PileXY-Dedicated-Cloudflare')
 $ownsMutex = $false
 $connector = $null
+$job = $null
 try {
     try { $ownsMutex = $mutex.WaitOne(0) }
     catch [System.Threading.AbandonedMutexException] { $ownsMutex = $true }
@@ -44,9 +47,10 @@ try {
         try {
             # Token stays in the protected file and never appears in the command line.
             $arguments = 'tunnel --no-autoupdate --metrics 127.0.0.1:{0} run --token-file "{1}"' -f $MetricsPort, $TokenFile
-            $connector = Start-Process -FilePath $CloudflaredPath -ArgumentList $arguments `
-                -WorkingDirectory $root -WindowStyle Hidden -PassThru `
-                -RedirectStandardOutput $out -RedirectStandardError $err
+            # Attach the process to its owned job before allowing it to run.
+            # Windows closes the entire child tree if this watchdog is killed.
+            $job = New-Object PileXY.WatchdogJob
+            $connector = $job.StartHidden($CloudflaredPath, $arguments, $root, $out, $err)
             Write-ConnectorLog "Started cloudflared (PID $($connector.Id))."
             $connector.WaitForExit()
             Write-ConnectorLog "Connector exited ($($connector.ExitCode)); retrying in 10 seconds."
@@ -54,10 +58,15 @@ try {
         catch {
             Write-ConnectorLog ('Could not start connector; retrying in 10 seconds: {0}' -f $_.Exception.Message)
         }
+        finally {
+            if ($job) { $job.Dispose(); $job = $null }
+            if ($connector) { $connector.Dispose(); $connector = $null }
+        }
         Start-Sleep -Seconds 10
     }
 }
 finally {
+    if ($job) { $job.Dispose() }
     if ($connector -and -not $connector.HasExited) {
         Stop-Process -InputObject $connector -Force -ErrorAction SilentlyContinue
     }

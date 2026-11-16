@@ -1,0 +1,10 @@
+Landscape=1
+PaperWidth=59528
+PaperHeight=84188
+TopMargin=4251
+BottomMargin=2834
+LeftMargin=5669
+RightMargin=5669
+HeaderLen=2834
+FooterLen=1417
+GutterLen=0

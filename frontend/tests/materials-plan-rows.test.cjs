@@ -47,7 +47,7 @@ test('queued saves preserve newer row edits and keep the captured project',async
   const ctx=vm.createContext({bundle:{planRows:[{id:'a',label:'before'}]},lastMaterialsPc:null,
     projectContext:()=> 'project A',apiBase:()=>'/test',document:{getElementById:()=>null},console,
     fetch:async(url,options)=>{sent.push({url,body:JSON.parse(options.body)});return new Promise(resolve=>pending.push(resolve));}});
-  vm.runInContext('let materialsSaveChain = Promise.resolve();',ctx);
+  vm.runInContext('let materialsSaveChain = Promise.resolve(); let pendingMaterialsSave = null; let saveTimer = null; const materialsSaveByProject = new Map();',ctx);
   for(const name of ['persistNow','persistMaterialsSnapshot']) {
     const prefix=name==='persistMaterialsSnapshot'?'  async function ':'  function ';
     const a=source.indexOf(prefix+name+'(');vm.runInContext(source.slice(a,source.indexOf('\n  }',a)+4),ctx);

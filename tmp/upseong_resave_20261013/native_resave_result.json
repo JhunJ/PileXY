@@ -1,0 +1,74 @@
+﻿{
+    "source":  "D:\\정헌재 선임_2025\\건축_BIM\\현장지원\\천안업성_261013_파일마스터\\26.08.10 업성푸르지오 레이크시티 1단지 좌표성과표_Rev.1.xlsx",
+    "output":  "D:\\정헌재 선임_2025\\건축_BIM\\PileXY\\outputs\\upseong_resave_20261013_21f9\\26.08.10 업성푸르지오 레이크시티 1단지 좌표성과표_Rev.1_재저장.xlsx",
+    "opened":  true,
+    "saved":  true,
+    "sourceHashBefore":  "614B7F29B4108D9609E10AE1673DD6EA1788EC951E97B8DC31407AF1A3B9504D",
+    "controlOpened":  true,
+    "sheetCount":  12,
+    "sheets":  [
+                   {
+                       "name":  "101동",
+                       "rows":  467,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "102동",
+                       "rows":  433,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "103동",
+                       "rows":  274,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "104동",
+                       "rows":  398,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "105동",
+                       "rows":  376,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "106동",
+                       "rows":  365,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "107동",
+                       "rows":  374,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "108동",
+                       "rows":  400,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "109동",
+                       "rows":  430,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "110동",
+                       "rows":  192,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "111동",
+                       "rows":  182,
+                       "columns":  4
+                   },
+                   {
+                       "name":  "주차장",
+                       "rows":  1667,
+                       "columns":  4
+                   }
+               ],
+    "permissionEnabled":  true,
+    "sourceHashAfter":  "614B7F29B4108D9609E10AE1673DD6EA1788EC951E97B8DC31407AF1A3B9504D",
+    "originalUnchanged":  true
+}

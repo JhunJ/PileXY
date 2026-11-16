@@ -30,12 +30,16 @@ if (-not $PSCmdlet.ShouldProcess($taskName, 'Register the backend task for this 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -BindHost "{2}"' -f $watchdog, $Port, $BindHost
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
+# IgnoreNew prevents duplicates while the watchdog is running. Repetition also
+# recovers a watchdog that was terminated without a failure exit code.
+$recoveryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($logonTrigger, $recoveryTrigger) `
     -Principal $principal -Settings $settings -Force | Out-Null
 if (-not $NoStart) { Start-ScheduledTask -TaskName $taskName }
 [pscustomobject]@{ TaskName = $taskName; Port = $Port; Started = -not $NoStart }

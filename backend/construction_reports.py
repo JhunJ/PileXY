@@ -447,6 +447,23 @@ def _detect_sheet_layout(excel_file: pd.ExcelFile, sheet_name: str) -> Optional[
     best: Optional[Dict[str, Any]] = None
     for start_row in range(min(HEADER_SCAN_ROWS, len(preview.index))):
         for levels in (2, 1):
+            if levels == 2 and start_row + 1 < len(preview.index):
+                # A single header followed by a dated pile record must not consume
+                # that first record as a second header when both layouts score alike.
+                single_headers = _flatten_header_rows(preview, start_row, 1)
+                single_mapping = _resolve_field_mapping(single_headers)
+                date_header = single_mapping.get("construction_date")
+                pile_header = single_mapping.get("pile_number")
+                if date_header and pile_header:
+                    next_row = preview.iloc[start_row + 1]
+                    date_value = next_row.iloc[single_headers.index(date_header)]
+                    pile_value = next_row.iloc[single_headers.index(pile_header)]
+                    if (
+                        _parse_excel_date(date_value)
+                        and _cell_text(pile_value)
+                        and not _cell_matches_column_header_echo(pile_value, "pile_number")
+                    ):
+                        continue
             headers = _flatten_header_rows(preview, start_row, levels)
             score, mapping = _header_match_score(headers)
             if score < 200 or "pile_number" not in mapping:
